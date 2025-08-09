@@ -1,0 +1,57 @@
+# Framework Web
+Flask==2.3.3
+Flask-CORS==4.0.0
+
+# Firebase
+firebase-admin==6.2.0
+
+# Requisições HTTP
+requests==2.31.0
+urllib3==2.0.4
+
+# Processamento de dados
+python-dotenv==1.0.0
+pydantic==2.4.2
+
+# Geolocalização
+geopy==2.4.0
+googlemaps==4.10.0
+
+# Utilitários de data/hora
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Logging e monitoramento
+structlog==23.1.0
+
+# Validação e sanitização
+validators==0.22.0
+phonenumbers==8.13.19
+
+# Processamento de texto
+unidecode==1.3.6
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.21.1
+
+# Criptografia e segurança
+cryptography==41.0.4
+PyJWT==2.8.0
+
+# Utilitários
+uuid==1.30
+click==8.1.7
+
+# Desenvolvimento e testes
+pytest==7.4.2
+pytest-cov==4.1.0
+pytest-mock==3.11.1
+black==23.7.0
+flake8==6.0.0
+isort==5.12.0
+
+# WSGI Server para produção
+gunicorn==21.2.0
+gevent==23.7.0
+
+# Monitoramento
+psutil==5.9.5
