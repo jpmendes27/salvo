@@ -1,0 +1,5 @@
+# Placeholder para icon-72x72.png
+# Substitua este arquivo por um ícone real
+# Tamanho: 72x72 pixels
+# Formato: PNG
+# Conteúdo: Logo Salvô adaptado para PWA

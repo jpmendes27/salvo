@@ -1,0 +1,4 @@
+# Placeholder para favicon.ico
+# Substitua este arquivo por um favicon real
+# Tamanho recomendado: 16x16, 32x32, 48x48 pixels
+# Formato: ICO

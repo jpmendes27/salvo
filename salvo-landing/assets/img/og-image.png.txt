@@ -1,0 +1,5 @@
+# Placeholder para og-image.png
+# Substitua este arquivo por uma imagem real
+# Tamanho recomendado: 1200x630 pixels
+# Formato: PNG ou JPG
+# Conteúdo: Logo + texto "Salvô - Conecte-se localmente pelo WhatsApp"

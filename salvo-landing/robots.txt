@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+# Sitemaps
+Sitemap: https://salvo.vancouvertec.com.br/sitemap.xml
+
+# Otimizações
+Crawl-delay: 1
+
+# Bloquear arquivos desnecessários
+Disallow: /assets/js/
+Disallow: /*.json$
+Disallow: /*.log$

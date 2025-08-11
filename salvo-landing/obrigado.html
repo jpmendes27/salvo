@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Obrigado por se cadastrar no Salvô! Em breve entraremos em contato.">
+    <meta name="robots" content="noindex, nofollow">
+    
+    <title>Obrigado - Salvô</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="assets/img/favicon.ico">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="assets/css/style.css">
+    
+    <style>
+        .thank-you {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--color-white) 0%, var(--color-gray-100) 100%);
+            padding: 2rem 1rem;
+        }
+        
+        .thank-you__card {
+            background: var(--color-white);
+            border-radius: var(--border-radius-lg);
+            box-shadow: var(--shadow-lg);
+            padding: 3rem 2rem;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        .thank-you__icon {
+            font-size: 4rem;
+            margin-bottom: 1.5rem;
+            display: block;
+        }
+        
+        .thank-you__title {
+            font-size: 2rem;
+            color: var(--whatsapp-green);
+            margin-bottom: 1rem;
+        }
+        
+        .thank-you__message {
+            color: var(--color-gray-600);
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+            line-height: 1.6;
+        }
+        
+        .thank-you__actions {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        @media (min-width: 640px) {
+            .thank-you__actions {
+                flex-direction: row;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <section class="thank-you">
+        <div class="thank-you__card">
+            <span class="thank-you__icon">🎉</span>
+            <h1 class="thank-you__title">Obrigado!</h1>
+            <p class="thank-you__message">
+                Seu cadastro foi realizado com sucesso! Em breve nossa equipe entrará em contato através do WhatsApp informado.
+            </p>
+            <p class="thank-you__message">
+                <strong>Próximos passos:</strong><br>
+                • Aguarde nosso contato no WhatsApp<br>
+                • Prepare-se para conectar-se localmente<br>
+                • Comece a vender ou encontrar mais facilmente
+            </p>
+            <div class="thank-you__actions">
+                <a href="/" class="btn btn--primary">
+                    🏠 Voltar ao Início
+                </a>
+                <a href="https://wa.me/5511999999999" class="btn btn--secondary" target="_blank">
+                    💬 Falar no WhatsApp
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        // Limpar parâmetros UTM da URL
+        if (window.location.search) {
+            const url = window.location.protocol + "//" + window.location.host + window.location.pathname;
+            window.history.replaceState({}, document.title, url);
+        }
+        
+        // Scroll to top
+        window.scrollTo(0, 0);
+    </script>
+</body>
+</html>

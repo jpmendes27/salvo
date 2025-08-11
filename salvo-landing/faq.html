@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Perguntas frequentes sobre o Salvô - Encontre respostas sobre como funciona, segurança, cadastro e muito mais.">
+    <meta name="keywords" content="faq, dúvidas, perguntas, salvô, whatsapp, negócio local">
+    
+    <title>Perguntas Frequentes - Salvô</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="assets/img/favicon.ico">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="assets/css/style.css">
+    
+    <style>
+        .faq-page {
+            padding: 8rem 0 4rem;
+            min-height: 100vh;
+        }
+        
+        .faq-page__header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+        
+        .faq-page__title {
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            color: var(--color-dark);
+            margin-bottom: 1rem;
+        }
+        
+        .faq-page__description {
+            font-size: 1.25rem;
+            color: var(--color-gray-600);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .faq-categories {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 3rem;
+            margin-bottom: 4rem;
+        }
+        
+        @media (min-width: 768px) {
+            .faq-categories {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        .faq-category {
+            background: var(--color-white);
+            border-radius: var(--border-radius-lg);
+            box-shadow: var(--shadow);
+            padding: 2rem;
+        }
+        
+        .faq-category__title {
+            font-size: 1.5rem;
+            color: var(--whatsapp-green);
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .faq-category__icon {
+            font-size: 1.75rem;
+        }
+        
+        .back-to-home {
+            text-align: center;
+            margin-top: 3rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header" id="header">
+        <nav class="nav container">
+            <div class="nav__logo">
+                <a href="/">
+                    <img src="assets/img/logo-salvo.svg" alt="Salvô" class="nav__logo-img">
+                </a>
+            </div>
+            <div class="nav__menu">
+                <a href="/" class="nav__link">Início</a>
+                <a href="/#como-funciona" class="nav__link">Como Funciona</a>
+                <a href="/#beneficios" class="nav__link">Benefícios</a>
+                <a href="/contato.html" class="nav__link">Contato</a>
+            </div>
+        </nav>
+    </header>
+
+    <!-- FAQ Page -->
+    <section class="faq-page">
+        <div class="container">
+            <div class="faq-page__header">
+                <h1 class="faq-page__title">Perguntas Frequentes</h1>
+                <p class="faq-page__description">
+                    Encontre respostas para as dúvidas mais comuns sobre o Salvô. Se não encontrar o que procura, entre em contato conosco!
+                </p>
+            </div>
+            
+            <div class="faq-categories">
+                <!-- Categoria: Geral -->
+                <div class="faq-category">
+                    <h2 class="faq-category__title">
+                        <span class="faq-category__icon">🌟</span>
+                        Informações Gerais
+                    </h2>
+                    <div class="faq__list">
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>O que é o Salvô?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>O Salvô é um assistente inteligente que conecta pessoas e negócios locais através do WhatsApp. Ele ajuda clientes a encontrarem produtos e serviços próximos, e ajuda empresários a serem descobertos por novos clientes na região.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>O Salvô é realmente gratuito?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>Sim! O Salvô é 100% gratuito para sempre. Não cobramos taxas de cadastro, mensalidades ou comissões sobre vendas. Nossa missão é conectar pessoas e negócios locais sem custos.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Como o Salvô funciona?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>É simples! Clientes enviam mensagens no WhatsApp dizendo o que procuram e compartilham sua localização. O Salvô encontra os negócios mais próximos e conecta diretamente com os donos. Para empresários, basta se cadastrar e aparecer para clientes próximos.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Categoria: Para Clientes -->
+                <div class="faq-category">
+                    <h2 class="faq-category__title">
+                        <span class="faq-category__icon">👤</span>
+                        Para Clientes
+                    </h2>
+                    <div class="faq__list">
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Como encontro um produto ou serviço?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>Envie uma mensagem para o WhatsApp do Salvô dizendo o que você procura (ex: "pizza", "cabelereiro", "eletricista"). Depois, compartilhe sua localização e receba até 3 sugestões de negócios próximos.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Preciso baixar algum aplicativo?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>Não! Tudo funciona através do WhatsApp que você já tem. É só adicionar o número do Salvô e começar a conversar.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Qual o raio de busca?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>O Salvô busca negócios num raio de até 5km da sua localização, priorizando sempre os mais próximos primeiro.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Categoria: Para Empresários -->
+                <div class="faq-category">
+                    <h2 class="faq-category__title">
+                        <span class="faq-category__icon">🏢</span>
+                        Para Empresários
+                    </h2>
+                    <div class="faq__list">
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Como cadastro meu negócio?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>É muito fácil! Envie uma mensagem para o WhatsApp do Salvô e siga as instruções. Você precisará informar nome do negócio, categoria, localização e alguns dados de contato. O processo leva menos de 5 minutos.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Quantos clientes posso receber?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>Não há limites! Seu negócio aparecerá para todos os clientes próximos que procurarem pelos seus produtos ou serviços. Quanto mais completo o cadastro, maiores as chances de ser encontrado.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Posso cadastrar mais de um negócio?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>No MVP atual, cada número de WhatsApp pode cadastrar apenas um negócio. Em futuras versões, planejamos permitir múltiplos estabelecimentos.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Categoria: Segurança -->
+                <div class="faq-category">
+                    <h2 class="faq-category__title">
+                        <span class="faq-category__icon">🛡️</span>
+                        Segurança e Privacidade
+                    </h2>
+                    <div class="faq__list">
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Meus dados ficam seguros?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>Absolutamente! Seguimos todas as normas da LGPD e utilizamos criptografia para proteger suas informações. Seus dados nunca são compartilhados com terceiros sem autorização expressa.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Como funciona a localização?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>Utilizamos sua localização apenas para encontrar negócios próximos. Os dados de localização não são armazenados permanentemente e são usados exclusivamente para as buscas solicitadas por você.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="faq__item">
+                            <button class="faq__question" aria-expanded="false">
+                                <span>Posso excluir meus dados?</span>
+                                <span class="faq__icon">+</span>
+                            </button>
+                            <div class="faq__answer">
+                                <p>Sim! Você pode solicitar a exclusão dos seus dados a qualquer momento entrando em contato conosco. Respeitamos todos os direitos previstos na LGPD.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="back-to-home">
+                <p style="margin-bottom: 1rem; color: var(--color-gray-600);">
+                    Não encontrou a resposta que procurava?
+                </p>
+                <a href="/contato.html" class="btn btn--primary">
+                    📧 Entre em Contato
+                </a>
+                <a href="/" class="btn btn--secondary" style="margin-left: 1rem;">
+                    🏠 Voltar ao Início
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Scripts -->
+    <script src="assets/js/app.js"></script>
+</body>
+</html>

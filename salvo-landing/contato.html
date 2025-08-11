@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Entre em contato com a equipe do Salvô. Tire suas dúvidas, envie sugestões ou solicite suporte.">
+    <meta name="keywords" content="contato, suporte, salvô, whatsapp, atendimento">
+    
+    <title>Contato - Salvô</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="assets/img/favicon.ico">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="assets/css/style.css">
+    
+    <style>
+        .contact-page {
+            padding: 8rem 0 4rem;
+            min-height: 100vh;
+        }
+        
+        .contact-page__header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+        
+        .contact-page__title {
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            color: var(--color-dark);
+            margin-bottom: 1rem;
+        }
+        
+        .contact-content {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 4rem;
+            align-items: start;
+        }
+        
+        @media (min-width: 768px) {
+            .contact-content {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        
+        .contact-info {
+            background: var(--color-white);
+            border-radius: var(--border-radius-lg);
+            box-shadow: var(--shadow);
+            padding: 2.5rem;
+        }
+        
+        .contact-info__title {
+            font-size: 1.5rem;
+            color: var(--whatsapp-green);
+            margin-bottom: 2rem;
+        }
+        
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: var(--color-gray-100);
+            border-radius: var(--border-radius);
+        }
+        
+        .contact-item__icon {
+            font-size: 1.5rem;
+            color: var(--whatsapp-green);
+        }
+        
+        .contact-item__content h3 {
+            margin: 0 0 0.25rem 0;
+            font-size: 1rem;
+            color: var(--color-dark);
+        }
+        
+        .contact-item__content p {
+            margin: 0;
+            color: var(--color-gray-600);
+            font-size: 0.9rem;
+        }
+        
+        .contact-form {
+            background: var(--color-white);
+            border-radius: var(--border-radius-lg);
+            box-shadow: var(--shadow);
+            padding: 2.5rem;
+        }
+        
+        .contact-form__title {
+            font-size: 1.5rem;
+            color: var(--color-dark);
+            margin-bottom: 2rem;
+        }
+        
+        .form-success {
+            background: #d4edda;
+            color: #155724;
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
+            display: none;
+        }
+        
+        .form-error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header" id="header">
+        <nav class="nav container">
+            <div class="nav__logo">
+                <a href="/">
+                    <img src="assets/img/logo-salvo.svg" alt="Salvô" class="nav__logo-img">
+                </a>
+            </div>
+            <div class="nav__menu">
+                <a href="/" class="nav__link">Início</a>
+                <a href="/#como-funciona" class="nav__link">Como Funciona</a>
+                <a href="/#beneficios" class="nav__link">Benefícios</a>
+                <a href="/faq.html" class="nav__link">FAQ</a>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Contact Page -->
+    <section class="contact-page">
+        <div class="container">
+            <div class="contact-page__header">
+                <h1 class="contact-page__title">Entre em Contato</h1>
+                <p class="hero__description">
+                    Estamos aqui para ajudar! Entre em contato conosco através dos canais abaixo ou envie uma mensagem usando o formulário.
+                </p>
+            </div>
+            
+            <div class="contact-content">
+                <!-- Informações de Contato -->
+                <div class="contact-info">
+                    <h2 class="contact-info__title">Fale Conosco</h2>
+                    
+                    <div class="contact-item">
+                        <div class="contact-item__icon">📧</div>
+                        <div class="contact-item__content">
+                            <h3>E-mail</h3>
+                            <p>oficialsalvo@gmail.com</p>
+                        </div>
+                    </div>
+                    
+                    <div class="contact-item">
+                        <div class="contact-item__icon">💬</div>
+                        <div class="contact-item__content">
+                            <h3>WhatsApp</h3>
+                            <p>(11) 99999-9999</p>
+                        </div>
+                    </div>
+                    
+                    <div class="contact-item">
+                        <div class="contact-item__icon">🌐</div>
+                        <div class="contact-item__content">
+                            <h3>Website</h3>
+                            <p>salvo.vancouvertec.com.br</p>
+                        </div>
+                    </div>
+                    
+                    <div class="contact-item">
+                        <div class="contact-item__icon">⏰</div>
+                        <div class="contact-item__content">
+                            <h3>Horário de Atendimento</h3>
+                            <p>Segunda a Sexta: 9h às 18h<br>Sábados: 9h às 12h</p>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--color-gray-200);">
+                        <h3 style="margin-bottom: 1rem;">Redes Sociais</h3>
+                        <div style="display: flex; gap: 1rem;">
+                            <a href="https://wa.me/5511999999999" target="_blank" class="btn btn--primary">
+                                💬 WhatsApp
+                            </a>
+                            <a href="mailto:oficialsalvo@gmail.com" class="btn btn--secondary">
+                                📧 E-mail
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Formulário de Contato -->
+                <div class="contact-form">
+                    <h2 class="contact-form__title">Envie uma Mensagem</h2>
+                    
+                    <div class="form-success" id="form-success">
+                        ✅ Mensagem enviada com sucesso! Entraremos em contato em breve.
+                    </div>
+                    
+                    <div class="form-error" id="form-error">
+                        ❌ Erro ao enviar mensagem. Tente novamente ou entre em contato diretamente.
+                    </div>
+                    
+                    <form class="form" id="contact-form">
+                        <div class="form__group">
+                            <label for="nome" class="form__label">Nome Completo *</label>
+                            <input type="text" id="nome" name="nome" class="form__input" required>
+                            <span class="form__error" id="nome-error"></span>
+                        </div>
+                        
+                        <div class="form__group">
+                            <label for="email" class="form__label">E-mail *</label>
+                            <input type="email" id="email" name="email" class="form__input" required>
+                            <span class="form__error" id="email-error"></span>
+                        </div>
+                        
+                        <div class="form__group">
+                            <label for="whatsapp" class="form__label">WhatsApp</label>
+                            <input type="tel" id="whatsapp" name="whatsapp" class="form__input" placeholder="(11) 99999-9999">
+                            <span class="form__error" id="whatsapp-error"></span>
+                        </div>
+                        
+                        <div class="form__group">
+                            <label for="assunto" class="form__label">Assunto *</label>
+                            <select id="assunto" name="assunto" class="form__input" required>
+                                <option value="">Selecione um assunto</option>
+                                <option value="duvida">Dúvida sobre o serviço</option>
+                                <option value="suporte">Suporte técnico</option>
+                                <option value="sugestao">Sugestão</option>
+                                <option value="parceria">Parceria</option>
+                                <option value="imprensa">Imprensa</option>
+                                <option value="outro">Outro</option>
+                            </select>
+                            <span class="form__error" id="assunto-error"></span>
+                        </div>
+                        
+                        <div class="form__group">
+                            <label for="mensagem" class="form__label">Mensagem *</label>
+                            <textarea id="mensagem" name="mensagem" class="form__input" rows="5" required style="resize: vertical; min-height: 120px;"></textarea>
+                            <span class="form__error" id="mensagem-error"></span>
+                        </div>
+                        
+                        <div class="form__group">
+                            <label class="form__checkbox">
+                                <input type="checkbox" id="lgpd" name="lgpd" required>
+                                <span class="form__checkmark"></span>
+                                Aceito os <a href="/termos" target="_blank">Termos de Uso</a> e <a href="/privacidade" target="_blank">Política de Privacidade</a> *
+                            </label>
+                            <span class="form__error" id="lgpd-error"></span>
+                        </div>
+                        
+                        <button type="submit" class="btn btn--primary btn--full">
+                            <span class="btn__text">📧 Enviar Mensagem</span>
+                            <span class="btn__loading" style="display: none;">Enviando...</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Scripts -->
+    <script src="assets/js/app.js"></script>
+    <script>
+        // Adicionar funcionalidade ao formulário de contato
+        document.getElementById('contact-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const form = e.target;
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const btnText = submitBtn.querySelector('.btn__text');
+            const btnLoading = submitBtn.querySelector('.btn__loading');
+            const successDiv = document.getElementById('form-success');
+            const errorDiv = document.getElementById('form-error');
+            
+            // Esconder mensagens anteriores
+            successDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            
+            // Mostrar loading
+            submitBtn.disabled = true;
+            submitBtn.classList.add('loading');
+            
+            try {
+                // Coletar dados do formulário
+                const formData = new FormData(form);
+                const dados = Object.fromEntries(formData.entries());
+                
+                // Enviar por e-mail (simulação)
+                // Na produção, você implementaria um endpoint para envio de e-mail
+                console.log('Dados do formulário:', dados);
+                
+                // Simular envio
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Mostrar sucesso
+                successDiv.style.display = 'block';
+                form.reset();
+                
+                // Scroll para a mensagem de sucesso
+                successDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+            } catch (error) {
+                console.error('Erro no envio:', error);
+                errorDiv.style.display = 'block';
+                errorDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } finally {
+                // Remover loading
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('loading');
+            }
+        });
+    </script>
+</body>
+</html>
