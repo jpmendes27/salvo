@@ -1,3 +1,7 @@
+/* Importar estilos WhatsApp */
+@import url("whatsapp-fonts.css");
+@import url("forms-improved.css");
+
 /* ==========================================================================
    Salvô Landing Page - Estilos CSS
    ========================================================================== */
@@ -716,4 +720,234 @@ a:hover {
     .faq-categories {
         gap: 2rem;
     }
+}
+
+/* ======================================== */
+/*       CORES ATUALIZADAS SALVÔ 2025       */
+/* ======================================== */
+/* ========================================
+   SALVÔ - NOVA PALETA DE CORES 2025
+   Baseada na logo atualizada
+======================================== */
+
+:root {
+  /* Cores principais da nova identidade */
+  --salvo-green-primary: #25D366;    /* Verde WhatsApp principal */
+  --salvo-green-dark: #128C7E;       /* Verde escuro */
+  --salvo-green-light: #DCF8C6;      /* Verde claro para backgrounds */
+  --salvo-yellow-primary: #FFD700;   /* Amarelo da logo */
+  --salvo-yellow-light: #FFF8DC;     /* Amarelo claro */
+  
+  /* Cores de apoio */
+  --salvo-white: #FFFFFF;
+  --salvo-gray-light: #F5F5F5;
+  --salvo-gray-medium: #E0E0E0;
+  --salvo-gray-dark: #757575;
+  --salvo-black: #212121;
+  
+  /* Cores de status */
+  --salvo-success: #4CAF50;
+  --salvo-warning: #FF9800;
+  --salvo-error: #F44336;
+  --salvo-info: #2196F3;
+  
+  /* Gradientes */
+  --salvo-gradient-primary: linear-gradient(135deg, var(--salvo-green-primary) 0%, var(--salvo-green-dark) 100%);
+  --salvo-gradient-secondary: linear-gradient(135deg, var(--salvo-yellow-primary) 0%, var(--salvo-yellow-light) 100%);
+  
+  /* Sombras */
+  --salvo-shadow-light: 0 2px 8px rgba(37, 211, 102, 0.1);
+  --salvo-shadow-medium: 0 4px 16px rgba(37, 211, 102, 0.15);
+  --salvo-shadow-heavy: 0 8px 32px rgba(37, 211, 102, 0.2);
+}
+
+/* Aplicar cores nos elementos principais */
+.header {
+  background: var(--salvo-white);
+  box-shadow: var(--salvo-shadow-light);
+}
+
+.nav__logo {
+  color: var(--salvo-green-primary);
+  font-weight: 700;
+}
+
+.nav__link {
+  color: var(--salvo-gray-dark);
+  transition: color 0.3s ease;
+}
+
+.nav__link:hover {
+  color: var(--salvo-green-primary);
+}
+
+.hero {
+  background: linear-gradient(135deg, var(--salvo-green-light) 0%, var(--salvo-white) 100%);
+}
+
+.hero__title {
+  color: var(--salvo-black);
+}
+
+.hero__subtitle {
+  color: var(--salvo-green-primary);
+  font-weight: 600;
+}
+
+.hero__description {
+  color: var(--salvo-gray-dark);
+}
+
+.btn {
+  border-radius: 12px;
+  padding: 12px 24px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.btn--primary {
+  background: var(--salvo-gradient-primary);
+  color: var(--salvo-white);
+  box-shadow: var(--salvo-shadow-medium);
+}
+
+.btn--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--salvo-shadow-heavy);
+}
+
+.btn--secondary {
+  background: var(--salvo-white);
+  color: var(--salvo-green-primary);
+  border: 2px solid var(--salvo-green-primary);
+}
+
+.btn--secondary:hover {
+  background: var(--salvo-green-primary);
+  color: var(--salvo-white);
+}
+
+.section__title {
+  color: var(--salvo-black);
+  margin-bottom: 1rem;
+}
+
+.section__subtitle {
+  color: var(--salvo-gray-dark);
+}
+
+.card {
+  background: var(--salvo-white);
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: var(--salvo-shadow-light);
+  transition: all 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--salvo-shadow-medium);
+}
+
+.icon {
+  color: var(--salvo-green-primary);
+}
+
+.footer {
+  background: var(--salvo-green-dark);
+  color: var(--salvo-white);
+}
+
+.footer__link {
+  color: var(--salvo-green-light);
+  transition: color 0.3s ease;
+}
+
+.footer__link:hover {
+  color: var(--salvo-white);
+}
+
+/* Modal styles */
+.modal {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.modal__content {
+  background: var(--salvo-white);
+  border-radius: 16px;
+  box-shadow: var(--salvo-shadow-heavy);
+}
+
+.modal__header {
+  background: var(--salvo-gradient-primary);
+  color: var(--salvo-white);
+  border-radius: 16px 16px 0 0;
+  padding: 1.5rem;
+}
+
+.form-group input,
+.form-group select {
+  border: 2px solid var(--salvo-gray-medium);
+  border-radius: 8px;
+  padding: 12px;
+  transition: border-color 0.3s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  border-color: var(--salvo-green-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.1);
+}
+
+.form-group label {
+  color: var(--salvo-gray-dark);
+  font-weight: 500;
+}
+
+/* Toast notifications */
+.toast {
+  background: var(--salvo-white);
+  border-left: 4px solid var(--salvo-green-primary);
+  box-shadow: var(--salvo-shadow-medium);
+  border-radius: 8px;
+}
+
+.toast--success {
+  border-left-color: var(--salvo-success);
+}
+
+.toast--error {
+  border-left-color: var(--salvo-error);
+}
+
+.toast--warning {
+  border-left-color: var(--salvo-warning);
+}
+
+/* Loading states */
+.loading {
+  background: var(--salvo-gradient-primary);
+  background-size: 200% 200%;
+  animation: gradient 2s ease infinite;
+}
+
+@keyframes gradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .card {
+    padding: 1.5rem;
+  }
+  
+  .btn {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
 }

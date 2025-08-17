@@ -3,7 +3,6 @@
 // Data: 2025-08-09
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 Salvô Landing Page carregada!');
     
     // Inicializar aplicação
     App.init();
@@ -485,7 +484,6 @@ const App = {
             }
             
         } catch (error) {
-            console.error('Erro no envio:', error);
             alert('Ocorreu um erro ao enviar o formulário. Tente novamente.');
         } finally {
             // Remover loading
@@ -751,4 +749,3 @@ const styleSheet = document.createElement('style');
 styleSheet.textContent = modalStyles;
 document.head.appendChild(styleSheet);
 
-console.log('✅ JavaScript da Landing Page carregado!');
