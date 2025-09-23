@@ -1,3 +1,14 @@
+#!/bin/bash
+
+# Script 2b: HTML da Landing Page do Salvô
+# Autor: Rafael Ferreira
+# Data: 2025-08-09
+
+echo "📄 Criando HTML da Landing Page..."
+
+# Criar página principal index.html
+echo "🏠 Criando index.html..."
+cat > salvo-landing/public/index.html << 'EOF'
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -6,117 +17,47 @@
     <meta name="description" content="Conecte seu negócio local com clientes próximos através do WhatsApp. 100% gratuito e fácil de usar.">
     <meta name="keywords" content="whatsapp, negócio local, vendas, geolocalização, comércio">
     <meta name="author" content="Salvô">
-
+    
     <!-- Open Graph -->
     <meta property="og:title" content="Salvô - Encontre e venda localmente pelo WhatsApp">
     <meta property="og:description" content="Conecte seu negócio local com clientes próximos através do WhatsApp. 100% gratuito e fácil de usar.">
-    <meta property="og:image" content="https://salvo.vancouvertec.com.brassets/img/og-image.png">
+    <meta property="og:image" content="https://salvo.vancouvertec.com.br/assets/img/og-image.png">
     <meta property="og:url" content="https://salvo.vancouvertec.com.br">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="pt_BR">
-
+    
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Salvô - Encontre e venda localmente pelo WhatsApp">
     <meta name="twitter:description" content="Conecte seu negócio local com clientes próximos através do WhatsApp. 100% gratuito e fácil de usar.">
-    <meta name="twitter:image" content="https://salvo.vancouvertec.com.brassets/img/og-image.png">
-
+    <meta name="twitter:image" content="https://salvo.vancouvertec.com.br/assets/img/og-image.png">
+    
     <title>Salvô - Encontre e venda localmente pelo WhatsApp - 100% Grátis</title>
-
+    
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="assets/img/favicon.ico">
+    <link rel="icon" type="image/x-icon" href="/assets/img/favicon.ico">
     <link rel="manifest" href="/manifest.webmanifest">
-
+    
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
+    
     <!-- CSS -->
-    <link rel="stylesheet" href="assets/css/style.css">
-
-        <style>
-    .captcha-container {
-        margin: 1.5rem 0;
-        padding: 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 8px;
-        background: #f9fafb;
-        text-align: center;
-    }
-
-    .captcha-question {
-        font-weight: 600;
-        margin-bottom: 0.75rem;
-        color: #374151;
-        font-size: 1.1rem;
-    }
-
-    .captcha-controls {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-    }
-
-    .captcha-input {
-        width: 80px;
-        padding: 0.5rem;
-        border: 2px solid #d1d5db;
-        border-radius: 6px;
-        font-size: 1.1rem;
-        text-align: center;
-        font-weight: 600;
-    }
-
-    .captcha-input:focus {
-        outline: none;
-        border-color: #25D366;
-        box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.1);
-    }
-
-    .captcha-input.error {
-        border-color: #ef4444;
-        background-color: #fef2f2;
-    }
-
-    .captcha-refresh {
-        background: #25D366;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        padding: 0.5rem 1rem;
-        cursor: pointer;
-        font-size: 0.9rem;
-        font-weight: 500;
-        transition: background-color 0.2s;
-    }
-
-    .captcha-refresh:hover {
-        background: #22c55e;
-    }
-
-    .captcha-error {
-        color: #ef4444;
-        font-size: 0.875rem;
-        margin-top: 0.5rem;
-        display: none;
-    }
-    </style>
+    <link rel="stylesheet" href="/assets/css/style.css">
 </head>
 <body>
     <!-- Header -->
     <header class="header" id="header">
         <nav class="nav container">
             <div class="nav__logo">
-                <img src="assets/img/logo-salvo.svg" alt="Salvô" class="nav__logo-img">
+                <img src="/assets/img/logo-salvo.svg" alt="Salvô" class="nav__logo-img">
             </div>
             <div class="nav__menu" id="nav-menu">
                 <a href="#como-funciona" class="nav__link">Como Funciona</a>
                 <a href="#beneficios" class="nav__link">Benefícios</a>
-                <a href="faq.html" class="nav__link">FAQ</a>
-                <a href="contato.html" class="nav__link">Contato</a>
+                <a href="#faq" class="nav__link">FAQ</a>
+                <a href="#contato" class="nav__link">Contato</a>
             </div>
             <button class="nav__toggle" id="nav-toggle" aria-label="Abrir menu">
                 <span></span>
@@ -131,16 +72,20 @@
         <div class="container">
             <div class="hero__content">
                 <h1 class="hero__title">
-                    Encontre e venda localmente pelo WhatsApp
+                    Encontre e venda localmente pelo WhatsApp 
                     <span class="hero__title-highlight">— 100% grátis.</span>
                 </h1>
                 <p class="hero__description">
                     Conecte seu negócio local com clientes próximos ou encontre exatamente o que precisa na sua região. Tudo através do WhatsApp, de forma simples e gratuita.
                 </p>
                 <div class="hero__cta">
-                    <button class="btn btn--primary" id="cta-seller">
-                        <span class="btn__icon">🏪</span>
-                        Cadastrar Meu Negócio
+                    <button class="btn btn--primary" id="cta-pf" data-form="pf">
+                        <span class="btn__icon">👤</span>
+                        Sou Pessoa Física
+                    </button>
+                    <button class="btn btn--secondary" id="cta-pj" data-form="pj">
+                        <span class="btn__icon">🏢</span>
+                        Sou Pessoa Jurídica
                     </button>
                 </div>
             </div>
@@ -170,7 +115,7 @@
                     <button class="tab__btn tab__btn--active" data-tab="cliente">Para Clientes</button>
                     <button class="tab__btn" data-tab="negocio">Para Negócios</button>
                 </div>
-
+                
                 <div class="tab__content tab__content--active" id="cliente">
                     <div class="steps">
                         <div class="step">
@@ -196,7 +141,7 @@
                         </div>
                     </div>
                 </div>
-
+                
                 <div class="tab__content" id="negocio">
                     <div class="steps">
                         <div class="step">
@@ -310,81 +255,45 @@
         </div>
     </section>
 
-    <!-- Modal de Formulário -->
+    <!-- Modal de Formulários -->
     <div class="modal" id="modal-forms">
         <div class="modal__overlay"></div>
         <div class="modal__content">
-            <!-- Formulário Seller -->
-            <div class="form__container" id="form-seller">
+            <!-- Formulário PF -->
+            <div class="form__container" id="form-pf">
                 <div class="form__header">
-                    <h2>Cadastrar Meu Negócio</h2>
-                    <p>Preencha os dados e comece a receber clientes</p>
+                    <h2>Cadastro Pessoa Física</h2>
+                    <p>Encontre o que precisa na sua região</p>
                     <button class="form__close" aria-label="Fechar formulário">&times;</button>
                 </div>
-                <form class="form" id="form-seller-submit" enctype="multipart/form-data">
+                <form class="form" id="form-pessoa-fisica">
                     <div class="form__group">
-                        <label for="business-name" class="form__label">Nome do Negócio *</label>
-                        <input type="text" id="business-name" name="businessName" class="form__input" required aria-describedby="business-name-error">
-                        <span class="form__error" id="business-name-error"></span>
+                        <label for="pf-nome" class="form__label">Nome Completo *</label>
+                        <input type="text" id="pf-nome" name="nomeCompleto" class="form__input" required aria-describedby="pf-nome-error">
+                        <span class="form__error" id="pf-nome-error"></span>
                     </div>
-
+                    
                     <div class="form__group">
-                        <label for="category" class="form__label">Categoria *</label>
-                        <select id="category" name="category" class="form__input" required aria-describedby="category-error">
-                            <option value="">Selecione uma categoria</option>
-                            <option value="Pizzaria">Pizzaria</option>
-                            <option value="Sorveteria">Sorveteria</option>
-                            <option value="Mercado">Mercado</option>
-                            <option value="Salão">Salão</option>
-                            <option value="Açaiteria">Açaiteria</option>
-                            <option value="Barbearia">Barbearia</option>
-                            <option value="Salão de Beleza">Salão de Beleza</option>
-                            <option value="Academia">Academia</option>
-                            <option value="Padaria">Padaria</option>
-                            <option value="Mercearia">Mercearia</option>
-                        </select>
-                        <span class="form__error" id="category-error"></span>
+                        <label for="pf-whatsapp" class="form__label">WhatsApp *</label>
+                        <input type="tel" id="pf-whatsapp" name="whatsapp" class="form__input" placeholder="(11) 99999-9999" required aria-describedby="pf-whatsapp-error">
+                        <span class="form__error" id="pf-whatsapp-error"></span>
                     </div>
-
+                    
                     <div class="form__group">
-                        <label for="whatsapp" class="form__label">WhatsApp *</label>
-                        <input type="tel" id="whatsapp" name="whatsapp" class="form__input" placeholder="(11) 99999-9999" required aria-describedby="whatsapp-error">
-                        <span class="form__error" id="whatsapp-error"></span>
+                        <label for="pf-email" class="form__label">E-mail (opcional)</label>
+                        <input type="email" id="pf-email" name="email" class="form__input" aria-describedby="pf-email-error">
+                        <span class="form__error" id="pf-email-error"></span>
                     </div>
-
-                    <div class="form__group">
-                        <label for="email" class="form__label">E-mail *</label>
-                        <input type="email" id="email" name="email" class="form__input" required aria-describedby="email-error">
-                        <span class="form__error" id="email-error"></span>
-                    </div>
-
-                    <div class="form__group">
-                        <label for="cep" class="form__label">CEP *</label>
-                        <input type="text" id="cep" name="cep" class="form__input" placeholder="00000-000" required aria-describedby="cep-error">
-                        <span class="form__error" id="cep-error"></span>
-                    </div>
-
-                    <div class="form__group">
-                        <label for="address" class="form__label">Endereço *</label>
-                        <input type="text" id="address" name="address" class="form__input" required aria-describedby="address-error">
-                        <span class="form__error" id="address-error"></span>
-                    </div>
-
-                    <div class="form__group">
-                        <label for="complement" class="form__label">Complemento *</label>
-                        <input type="text" id="complement" name="complement" class="form__input" placeholder="Loja, Apt, Sala..." required aria-describedby="complement-error">
-                        <span class="form__error" id="complement-error"></span>
-                    </div>
-
+                    
                     <div class="form__row">
                         <div class="form__group">
-                            <label for="city" class="form__label">Cidade *</label>
-                            <input type="text" id="city" name="city" class="form__input" required aria-describedby="city-error">
-                            <span class="form__error" id="city-error"></span>
+                            <label for="pf-cidade" class="form__label">Cidade *</label>
+                            <input type="text" id="pf-cidade" name="cidade" class="form__input" required aria-describedby="pf-cidade-error">
+                            <span class="form__error" id="pf-cidade-error"></span>
                         </div>
                         <div class="form__group">
-                            <label for="uf" class="form__label">UF *</label>
-                            <select id="uf" name="uf" class="form__input" required aria-describedby="uf-error">
+                            <label for="pf-uf" class="form__label">UF *</label>
+                            <select id="pf-uf" name="uf" class="form__input" required aria-describedby="pf-uf-error">
                                 <option value="">Selecione</option>
                                 <option value="AC">AC</option><option value="AL">AL</option><option value="AP">AP</option>
                                 <option value="AM">AM</option><option value="BA">BA</option><option value="CE">CE</option>
@@ -396,44 +305,152 @@
                                 <option value="RO">RO</option><option value="RR">RR</option><option value="SC">SC</option>
                                 <option value="SP">SP</option><option value="SE">SE</option><option value="TO">TO</option>
                             </select>
-                            <span class="form__error" id="uf-error"></span>
+                            <span class="form__error" id="pf-uf-error"></span>
                         </div>
                     </div>
-
-                    <div class="form__group">
-                        <label for="logo" class="form__label">Logo/Imagem do Negócio *</label>
-                        <input type="file" id="logo" name="logo" class="form__input" accept="image/*" required aria-describedby="logo-error">
-                        <span class="form__error" id="logo-error"></span>
-                    </div>
-
-                    <!-- Campos ocultos para geolocalização -->
-                    <input type="hidden" name="latitude" id="latitude">
-                    <input type="hidden" name="longitude" id="longitude">
-
+                    
                     <div class="form__group">
                         <label class="form__checkbox">
-                            <input type="checkbox" id="seller-lgpd" name="aceiteLGPD" required>
+                            <input type="checkbox" id="pf-lgpd" name="aceiteLGPD" required>
                             <span class="form__checkmark"></span>
-                            Aceito os <a href="termos.html" target="_blank">Termos de Uso</a> e <a href="privacidade.html" target="_blank">Política de Privacidade</a> *
+                            Aceito os <a href="/termos" target="_blank">Termos de Uso</a> e <a href="/privacidade" target="_blank">Política de Privacidade</a> *
                         </label>
-                        <span class="form__error" id="seller-lgpd-error"></span>
+                        <span class="form__error" id="pf-lgpd-error"></span>
                     </div>
-
+                    
+                    <!-- Campos ocultos UTM -->
+                    <input type="hidden" name="utm_source" id="pf-utm-source">
+                    <input type="hidden" name="utm_medium" id="pf-utm-medium">
+                    <input type="hidden" name="utm_campaign" id="pf-utm-campaign">
+                    <input type="hidden" name="tipo" value="PF">
+                    
                     <button type="submit" class="btn btn--primary btn--full">
                         <span class="btn__text">Cadastrar Gratuitamente</span>
                         <span class="btn__loading" style="display: none;">Cadastrando...</span>
                     </button>
                 </form>
             </div>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
-    <!-- Seu arquivo Firebase -->
-    <script src="assets/js/local-storage.js"></script>
+            <!-- Formulário PJ -->
+            <div class="form__container" id="form-pj" style="display: none;">
+                <div class="form__header">
+                    <h2>Cadastro Pessoa Jurídica</h2>
+                    <p>Cadastre seu negócio e seja encontrado</p>
+                    <button class="form__close" aria-label="Fechar formulário">&times;</button>
+                </div>
+                <form class="form" id="form-pessoa-juridica">
+                    <div class="form__group">
+                        <label for="pj-razao" class="form__label">Razão Social *</label>
+                        <input type="text" id="pj-razao" name="razaoSocial" class="form__input" required aria-describedby="pj-razao-error">
+                        <span class="form__error" id="pj-razao-error"></span>
+                    </div>
+                    
+                    <div class="form__group">
+                        <label for="pj-fantasia" class="form__label">Nome Fantasia *</label>
+                        <input type="text" id="pj-fantasia" name="nomeFantasia" class="form__input" required aria-describedby="pj-fantasia-error">
+                        <span class="form__error" id="pj-fantasia-error"></span>
+                    </div>
+                    
+                    <div class="form__group">
+                        <label for="pj-cnpj" class="form__label">CNPJ *</label>
+                        <input type="text" id="pj-cnpj" name="cnpj" class="form__input" placeholder="00.000.000/0000-00" required aria-describedby="pj-cnpj-error">
+                        <span class="form__error" id="pj-cnpj-error"></span>
+                    </div>
+                    
+                    <div class="form__group">
+                        <label for="pj-whatsapp" class="form__label">WhatsApp *</label>
+                        <input type="tel" id="pj-whatsapp" name="whatsapp" class="form__input" placeholder="(11) 99999-9999" required aria-describedby="pj-whatsapp-error">
+                        <span class="form__error" id="pj-whatsapp-error"></span>
+                    </div>
+                    
+                    <div class="form__group">
+                        <label for="pj-email" class="form__label">E-mail *</label>
+                        <input type="email" id="pj-email" name="email" class="form__input" required aria-describedby="pj-email-error">
+                        <span class="form__error" id="pj-email-error"></span>
+                    </div>
+                    
+                    <div class="form__row">
+                        <div class="form__group">
+                            <label for="pj-cidade" class="form__label">Cidade *</label>
+                            <input type="text" id="pj-cidade" name="cidade" class="form__input" required aria-describedby="pj-cidade-error">
+                            <span class="form__error" id="pj-cidade-error"></span>
+                        </div>
+                        <div class="form__group">
+                            <label for="pj-uf" class="form__label">UF *</label>
+                            <select id="pj-uf" name="uf" class="form__input" required aria-describedby="pj-uf-error">
+                                <option value="">Selecione</option>
+                                <option value="AC">AC</option><option value="AL">AL</option><option value="AP">AP</option>
+                                <option value="AM">AM</option><option value="BA">BA</option><option value="CE">CE</option>
+                                <option value="DF">DF</option><option value="ES">ES</option><option value="GO">GO</option>
+                                <option value="MA">MA</option><option value="MT">MT</option><option value="MS">MS</option>
+                                <option value="MG">MG</option><option value="PA">PA</option><option value="PB">PB</option>
+                                <option value="PR">PR</option><option value="PE">PE</option><option value="PI">PI</option>
+                                <option value="RJ">RJ</option><option value="RN">RN</option><option value="RS">RS</option>
+                                <option value="RO">RO</option><option value="RR">RR</option><option value="SC">SC</option>
+                                <option value="SP">SP</option><option value="SE">SE</option><option value="TO">TO</option>
+                            </select>
+                            <span class="form__error" id="pj-uf-error"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="form__group">
+                        <label class="form__checkbox">
+                            <input type="checkbox" id="pj-lgpd" name="aceiteLGPD" required>
+                            <span class="form__checkmark"></span>
+                            Aceito os <a href="/termos" target="_blank">Termos de Uso</a> e <a href="/privacidade" target="_blank">Política de Privacidade</a> *
+                        </label>
+                        <span class="form__error" id="pj-lgpd-error"></span>
+                    </div>
+                    
+                    <!-- Campos ocultos UTM -->
+                    <input type="hidden" name="utm_source" id="pj-utm-source">
+                    <input type="hidden" name="utm_medium" id="pj-utm-medium">
+                    <input type="hidden" name="utm_campaign" id="pj-utm-campaign">
+                    <input type="hidden" name="tipo" value="PJ">
+                    
+                    <button type="submit" class="btn btn--primary btn--full">
+                        <span class="btn__text">Cadastrar Gratuitamente</span>
+                        <span class="btn__loading" style="display: none;">Cadastrando...</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
 
-    <!-- Scripts -->    
-  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
-  <script src="assets/js/masks-validations.js"></script>  
-  <script src="assets/js/app.js"></script>
+    <!-- Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.google.com/recaptcha/api.js?render=6LfxYZ4pAAAAAH-tYs9D1v9XrG7ZQk5QY8xP2wX7" async defer></script>
+    <script src="/assets/js/firebase.js"></script>
+    <script src="/assets/js/app.js"></script>
 </body>
 </html>
+EOF
+
+echo ""
+echo "✅ HTML principal criado com sucesso!"
+echo ""
+echo "📄 Seções incluídas:"
+echo "   ├── Header com navegação responsiva"
+echo "   ├── Hero section com CTAs"
+echo "   ├── Como funciona (tabs PF/PJ)"
+echo "   ├── Benefícios (grid de 6 itens)"
+echo "   ├── Testimonials (prova social)"
+echo "   └── Modal com formulários PF/PJ"
+echo ""
+echo "🔧 Funcionalidades:"
+echo "   ├── Formulários com validação"
+echo "   ├── Campos UTM para tracking"
+echo "   ├── Integração Firebase/reCAPTCHA"
+echo "   ├── Acessibilidade (ARIA labels)"
+echo "   └── SEO otimizado"
+echo ""
+echo "📱 Responsivo:"
+echo "   ├── Mobile-first design"
+echo "   ├── Navegação mobile com hamburger"
+echo "   └── Formulários adaptáveis"
+echo ""
+echo "🎯 Próximo passo:"
+echo "   Execute: chmod +x 2c_landing_html_parts.sh && ./2c_landing_html_parts.sh"
+echo ""
+echo "✨ HTML da landing page pronto!"

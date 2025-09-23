@@ -1,3 +1,23 @@
+#!/bin/bash
+
+# Script 1b: Atualizar Firebase.js para Sellers
+# REGRA: Manter estrutura, alterar apenas lógica para sellers
+# Autor: Sistema Salvô
+# Data: 2025-09-20
+
+echo "🔥 Atualizando Firebase.js para trabalhar com sellers..."
+echo "📋 IMPORTANTE: Mantendo configurações existentes"
+echo ""
+
+# Backup do arquivo atual
+echo "💾 Fazendo backup do firebase.js atual..."
+cp assets/js/firebase.js assets/js/firebase.js.backup.$(date +%Y%m%d_%H%M%S)
+echo "✅ Backup criado!"
+
+# Criar novo firebase.js para sellers
+echo "🔧 Criando nova versão do firebase.js..."
+
+cat > assets/js/firebase.js << 'EOF'
 /* ========================================
    SALVÔ - FIREBASE CONFIGURAÇÃO SELLERS
    Nova estrutura única para vendedores
@@ -280,3 +300,16 @@ window.SalvoFirebaseSellers = SalvoFirebaseSellers;
 window.ViaCEPService = ViaCEPService;
 window.GeolocationService = GeolocationService;
 window.BUSINESS_CATEGORIES = BUSINESS_CATEGORIES;
+EOF
+
+echo "✅ Firebase.js atualizado com sucesso!"
+echo ""
+echo "📋 Funcionalidades implementadas:"
+echo "   ✓ Classe SalvoFirebaseSellers para gerenciar sellers"
+echo "   ✓ Upload de logo para Firebase Storage"
+echo "   ✓ Integração com ViaCEP para buscar endereço"
+echo "   ✓ Serviço de geolocalização automática"
+echo "   ✓ Validação completa de dados"
+echo ""
+echo "⏳ Aguardando comando 'continuar' para próximo script..."
+echo "📋 Próximo: 1c-masks-sellers.sh (Atualizar validações e máscaras)"

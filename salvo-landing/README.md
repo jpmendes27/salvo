@@ -66,3 +66,9 @@ salvo-landing/
 - Cores WhatsApp: #25D366, #075E54, #128C7E
 - Neutros: #111, #fff, #ECE5DD
 - Fontes: Inter, Poppins
+
+# Navegue até a pasta da landing page
+cd /caminho/para/salvo-landing
+
+# Execute o servidor Python
+python3 -m http.server 8006

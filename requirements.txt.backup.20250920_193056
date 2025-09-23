@@ -55,4 +55,3 @@ gevent==23.7.0
 
 # Monitoramento
 psutil==5.9.5
-Werkzeug==2.3.7

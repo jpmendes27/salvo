@@ -1,0 +1,18 @@
+{
+  "categories": [
+    "Pizzaria",
+    "Sorveteria", 
+    "Mercado",
+    "Salão",
+    "Açaiteria",
+    "Barbearia",
+    "Salão de Beleza",
+    "Academia",
+    "Padaria",
+    "Mercearia"
+  ],
+  "metadata": {
+    "version": "1.0",
+    "lastUpdate": "2025-09-20"
+  }
+}

@@ -1,3 +1,23 @@
+#!/bin/bash
+
+# Script 1c: Atualizar Máscaras e Validações para Sellers
+# REGRA: Manter estrutura, atualizar lógica para sellers
+# Autor: Sistema Salvô
+# Data: 2025-09-20
+
+echo "🎭 Atualizando máscaras e validações para sellers..."
+echo "📋 IMPORTANTE: Mantendo estrutura visual existente"
+echo ""
+
+# Backup do arquivo atual
+echo "💾 Fazendo backup do masks-validations.js atual..."
+cp assets/js/masks-validations.js assets/js/masks-validations.js.backup.$(date +%Y%m%d_%H%M%S)
+echo "✅ Backup criado!"
+
+# Criar nova versão do masks-validations.js
+echo "🔧 Criando validações para sellers..."
+
+cat > assets/js/masks-validations.js << 'EOF'
 /* ========================================
    SALVÔ - MÁSCARAS E VALIDAÇÕES SELLERS
    Integração completa com Firebase + ViaCEP + Geolocalização
@@ -448,3 +468,17 @@ document.addEventListener('DOMContentLoaded', function() {
 window.SalvoMasksSellers = SalvoMasksSellers;
 window.SalvoModalSellers = SalvoModalSellers;
 window.SalvoModal = SalvoModalSellers; // Compatibilidade
+EOF
+
+echo "✅ Máscaras e validações atualizadas com sucesso!"
+echo ""
+echo "📋 Funcionalidades implementadas:"
+echo "   ✓ Máscara WhatsApp e CEP"
+echo "   ✓ Busca automática de endereço via ViaCEP"
+echo "   ✓ Geolocalização automática"
+echo "   ✓ Validação de arquivo (logo)"
+echo "   ✓ Validações completas de formulário"
+echo "   ✓ Integração com Firebase Sellers"
+echo ""
+echo "⏳ Aguardando comando 'continuar' para próximo script..."
+echo "📋 Próximo: 1d-firebase-rules.sh (Configurar regras Firestore)"
