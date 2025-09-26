@@ -1,13 +1,12 @@
 """
-Processador de mensagens do WhatsApp - Salvô (ATUALIZADO)
-Integrado com sistema de busca por geolocalização
+Processador de mensagens do WhatsApp - Salvô
+Identifica intenções e processa diferentes tipos de mensagem
 """
 
 import logging
 import json
 from typing import Dict, List, Optional
 from app.services.whatsapp.sender import WhatsAppSender
-from app.services.search.location_search import LocationSearchService
 from app.utils.message_parser import MessageParser
 
 logger = logging.getLogger(__name__)
@@ -17,7 +16,6 @@ class MessageProcessor:
     
     def __init__(self):
         self.sender = WhatsAppSender()
-        self.location_service = LocationSearchService()
         self.parser = MessageParser()
     
     def process_messages(self, messages: List[Dict]):
@@ -80,7 +78,7 @@ class MessageProcessor:
             self._handle_search_request(phone, text_content)
     
     def _handle_location_message(self, phone: str, message: Dict, message_id: str):
-        """Processa mensagens de localização - AGORA COM BUSCA REAL!"""
+        """Processa mensagens de localização"""
         location_data = message.get('location', {})
         latitude = location_data.get('latitude')
         longitude = location_data.get('longitude')
@@ -94,23 +92,14 @@ class MessageProcessor:
         
         logger.info(f"📍 Localização recebida: {latitude}, {longitude}")
         
-        # Buscar negócios próximos usando o serviço real
-        try:
-            results = self.location_service.search_nearby_businesses(
-                latitude, longitude, radius_km=5
-            )
-            
-            if results:
-                self._send_search_results(phone, results, latitude, longitude)
-            else:
-                self._send_no_results_message(phone)
-                
-        except Exception as e:
-            logger.error(f"❌ Erro na busca por localização: {e}")
-            self.sender.send_text_message(
-                phone,
-                "Ops, algo deu errado na busca. Tente novamente em alguns instantes! 🔄"
-            )
+        # Por enquanto, enviar mensagem que em breve teremos busca
+        self.sender.send_text_message(
+            phone,
+            f"📍 *Localização recebida!*\n\n"
+            f"Lat: {latitude}\nLng: {longitude}\n\n"
+            f"🔄 Sistema de busca será implementado no próximo script!\n\n"
+            f"Por enquanto, digite o que você procura (ex: 'pizza', 'farmácia')"
+        )
     
     def _handle_interactive_message(self, phone: str, message: Dict, message_id: str):
         """Processa mensagens interativas (botões)"""
@@ -152,58 +141,8 @@ class MessageProcessor:
             phone,
             f"🔍 Entendi que você está procurando por: *{search_term}*\n\n"
             "Para te ajudar melhor, preciso da sua localização! 📍\n\n"
-            "👆 Toque no clipe (📎) > Localização > Enviar localização atual"
-        )
-    
-    def _send_search_results(self, phone: str, results: List[Dict], lat: float, lng: float):
-        """Envia resultados da busca - IMPLEMENTAÇÃO REAL"""
-        if not results:
-            self._send_no_results_message(phone)
-            return
-        
-        # Limitar a 3 resultados conforme regra de negócio
-        top_results = results[:3]
-        
-        response_text = f"🎯 *Encontrei {len(top_results)} negócio(s) próximo(s):*\n\n"
-        
-        for i, business in enumerate(top_results, 1):
-            name = business.get('nome', 'Sem nome')
-            category = business.get('categoria', 'Geral')
-            whatsapp = business.get('whatsapp', '')
-            distance = business.get('distance_km', 0)
-            
-            response_text += f"*{i}. {name}*\n"
-            response_text += f"📂 {category.title()}\n"
-            response_text += f"📏 ~{distance:.1f}km de você\n"
-            
-            if whatsapp:
-                # Limpar número para formato WhatsApp
-                clean_number = ''.join(filter(str.isdigit, whatsapp))
-                if len(clean_number) >= 10:
-                    response_text += f"📱 wa.me/{clean_number}\n"
-            
-            response_text += "\n"
-        
-        response_text += "💡 *Dica:* Toque no link do WhatsApp para entrar em contato diretamente!"
-        
-        self.sender.send_text_message(phone, response_text)
-        
-        # Enviar botões para nova busca
-        self.sender.send_interactive_message(
-            phone,
-            "Posso te ajudar com mais alguma coisa?",
-            buttons=[
-                {"id": "new_search", "title": "🔍 Nova busca"},
-                {"id": "register_business", "title": "🏪 Cadastrar negócio"}
-            ]
-        )
-    
-    def _send_no_results_message(self, phone: str):
-        """Mensagem quando não encontra resultados"""
-        self.sender.send_text_message(
-            phone,
-            "😔 Ainda não temos ninguém por aí, mas avisa seus vizinhos para se cadastrarem no Salvô! 😉\n\n"
-            "🏪 Quer cadastrar seu negócio? Digite *'cadastrar'*"
+            "👆 Toque no clipe (📎) > Localização > Enviar localização atual\n\n"
+            "🔄 *Sistema de busca real será implementado no próximo script!*"
         )
     
     def _handle_registration_request(self, phone: str):
