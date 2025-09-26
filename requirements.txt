@@ -3,3 +3,19 @@ Flask-CORS==4.0.0
 python-dotenv==1.0.0
 gunicorn==21.2.0
 werkzeug==2.3.7
+
+# === WHATSAPP BUSINESS API ===
+requests==2.31.0
+cryptography==41.0.4
+
+# === GEOLOCALIZAÇÃO ===
+geopy==2.3.0
+haversine==2.7.0
+
+# === VALIDAÇÃO ===
+phonenumbers==8.13.21
+email-validator==2.0.0
+jsonschema==4.19.0
+
+# === LOGGING ===
+structlog==23.1.0
