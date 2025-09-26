@@ -1,5 +1,5 @@
 {
-  "lastId": 13,
+  "lastId": 12,
   "sellers": [
     {
       "id": 1,
@@ -190,30 +190,13 @@
       "created_at": "2025-09-26T09:41:06.630381",
       "status": "active",
       "source": "landing_page"
-    },
-    {
-      "id": 13,
-      "nome": "Flávia Daniela Sueli Barbosa",
-      "categoria": "Barbearia",
-      "whatsapp": "(44) 44444-4444",
-      "email": "flavia-barbosa70@transportadoratransdel.com.br",
-      "cep": "69042-970",
-      "endereco": "Rua Professor Abílio Alencar 366",
-      "complemento": "apt 980",
-      "cidade": "manaus",
-      "uf": "DF",
-      "created_at": "2025-09-26T09:42:07.765474",
-      "status": "active",
-      "source": "landing_page",
-      "latitude": -22.86732380263158,
-      "longitude": -43.54496671984033
     }
   ],
   "metadata": {
     "created": "2025-09-20T00:00:00Z",
     "version": "1.0",
     "description": "Banco de dados dos sellers do Salvô",
-    "last_update": "2025-09-26T09:42:07.765497",
-    "total_sellers": 13
+    "last_update": "2025-09-26T09:41:06.630403",
+    "total_sellers": 12
   }
 }

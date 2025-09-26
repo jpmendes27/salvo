@@ -1,450 +1,320 @@
-/* ========================================
-   SALVÔ - MÁSCARAS E VALIDAÇÕES SELLERS
-   Integração completa com Firebase + ViaCEP + Geolocalização
-======================================== */
+/**
+ * Sistema de validações e máscaras para formulários Salvô
+ * Versão: 2.1 - Sem campo de imagem e validações corrigidas
+ */
 
-// Classe para gerenciar máscaras para sellers
 class SalvoMasksSellers {
-    static init() {
-        this.setupWhatsAppMask();
-        this.setupCEPMask();
-        this.setupCEPLookup();
-        this.setupGeolocation();
-        this.setupFormValidations();
-        this.setupFileValidation();
+    constructor() {
+        this.init();
         console.log('🎭 SalvoMasksSellers inicializado');
     }
 
-    // Máscara para WhatsApp
-    static setupWhatsAppMask() {
+    init() {
+        // Aplicar máscaras nos campos
+        this.aplicarMascaras();
+        
+        // Configurar validação de CEP
+        this.configurarCEP();
+        
+        // Configurar geolocalização opcional
+        this.configurarGeolocalizacao();
+    }
+
+    aplicarMascaras() {
+        // Máscara para WhatsApp
         const whatsappInput = document.getElementById('whatsapp');
         if (whatsappInput) {
-            whatsappInput.addEventListener('input', function(e) {
+            whatsappInput.addEventListener('input', (e) => {
                 let value = e.target.value.replace(/\D/g, '');
-
-                if (value.length > 11) {
-                    value = value.slice(0, 11);
-                }
-
-                if (value.length <= 10) {
-                    value = value.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
-                } else {
-                    value = value.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-                }
-
+                value = value.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
                 e.target.value = value;
             });
         }
-    }
 
-    // Máscara para CEP
-    static setupCEPMask() {
+        // Máscara para CEP
         const cepInput = document.getElementById('cep');
         if (cepInput) {
-            cepInput.addEventListener('input', function(e) {
+            cepInput.addEventListener('input', (e) => {
                 let value = e.target.value.replace(/\D/g, '');
-
-                if (value.length > 8) {
-                    value = value.slice(0, 8);
-                }
-
                 value = value.replace(/(\d{5})(\d{3})/, '$1-$2');
                 e.target.value = value;
             });
         }
     }
 
-    // Busca automática de endereço via CEP
-    static setupCEPLookup() {
-        const cepInput = document.getElementById('cep');
-        if (cepInput) {
-            cepInput.addEventListener('blur', async function(e) {
-                const cep = e.target.value.replace(/\D/g, '');
-                
-                if (cep.length === 8) {
-                    try {
-                        // Mostrar loading
-                        SalvoMasksSellers.showCEPLoading(true);
-                        
-                        const result = await window.ViaCEPService.getAddressByCEP(cep);
-                        
-                        if (result.success) {
-                            // Preencher campos automaticamente
-                            document.getElementById('address').value = result.data.address;
-                            document.getElementById('city').value = result.data.city;
-                            document.getElementById('uf').value = result.data.uf;
-                            
-                            console.log('✅ Endereço encontrado via CEP');
-                        } else {
-                            SalvoMasksSellers.showFieldError(cepInput, result.error);
-                        }
-                    } catch (error) {
-                        SalvoMasksSellers.showFieldError(cepInput, 'Erro ao buscar CEP');
-                    } finally {
-                        SalvoMasksSellers.showCEPLoading(false);
-                    }
-                }
-            });
-        }
-    }
-
-    // Configurar geolocalização automática
-    static setupGeolocation() {
-        // Obter localização quando modal abrir
-        const modal = document.getElementById('modal-forms');
-        if (modal) {
-            const observer = new MutationObserver(async (mutations) => {
-                mutations.forEach(async (mutation) => {
-                    if (mutation.type === 'attributes' && 
-                        mutation.attributeName === 'class' &&
-                        modal.classList.contains('modal--active')) {
-                        
-                        try {
-                            console.log('📍 Obtendo localização...');
-                            const position = await window.GeolocationService.getCurrentPosition();
-                            
-                            document.getElementById('latitude').value = position.latitude;
-                            document.getElementById('longitude').value = position.longitude;
-                            
-                            console.log('✅ Localização obtida:', position);
-                        } catch (error) {
-                            console.warn('⚠️ Erro ao obter localização:', error.message);
-                        }
-                    }
-                });
-            });
-            
-            observer.observe(modal, { attributes: true });
-        }
-    }
-
-    // Validação de arquivos
-    static setupFileValidation() {
-        const logoInput = document.getElementById('logo');
-        if (logoInput) {
-            logoInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                
-                if (file) {
-                    // Validar tipo
-                    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-                    if (!allowedTypes.includes(file.type)) {
-                        SalvoMasksSellers.showFieldError(logoInput, 'Formato não permitido. Use JPG, PNG, GIF ou WebP');
-                        logoInput.value = '';
-                        return;
-                    }
-                    
-                    // Validar tamanho (5MB)
-                    if (file.size > 5 * 1024 * 1024) {
-                        SalvoMasksSellers.showFieldError(logoInput, 'Arquivo muito grande. Máximo 5MB');
-                        logoInput.value = '';
-                        return;
-                    }
-                    
-                    // Limpar erro se arquivo válido
-                    SalvoMasksSellers.clearFieldError(logoInput);
-                }
-            });
-        }
-    }
-
-    // Configurar validações de formulário
-    static setupFormValidations() {
-        document.querySelectorAll('.form__input').forEach(input => {
-            input.addEventListener('blur', function() {
-                if (this.value.trim()) {
-                    SalvoMasksSellers.validateField(this);
-                }
-            });
-
-            input.addEventListener('input', function() {
-                SalvoMasksSellers.clearFieldError(this);
-            });
-        });
-
-        // Configurar submit do formulário
-        const form = document.getElementById('form-seller-submit');
-        if (form) {
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                SalvoMasksSellers.submitForm(this);
-            });
-        }
-    }
-
-    // Validar campo individual
-    static validateField(field) {
-        const value = field.value.trim();
-        const name = field.name;
-        let error = '';
-
-        switch (name) {
-            case 'businessName':
-                if (!value) error = 'Nome do negócio é obrigatório';
-                else if (value.length < 2) error = 'Deve ter pelo menos 2 caracteres';
-                break;
-                
-            case 'category':
-                if (!value) error = 'Categoria é obrigatória';
-                break;
-                
-            case 'whatsapp':
-                if (!value) error = 'WhatsApp é obrigatório';
-                else if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(value)) error = 'Formato inválido';
-                break;
-                
-            case 'email':
-                if (!value) error = 'E-mail é obrigatório';
-                else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) error = 'E-mail inválido';
-                break;
-                
-            case 'cep':
-                if (!value) error = 'CEP é obrigatório';
-                else if (!/^\d{5}-\d{3}$/.test(value)) error = 'CEP inválido';
-                break;
-                
-            case 'address':
-                if (!value) error = 'Endereço é obrigatório';
-                break;
-                
-            case 'complement':
-                if (!value) error = 'Complemento é obrigatório';
-                break;
-                
-            case 'city':
-                if (!value) error = 'Cidade é obrigatória';
-                break;
-                
-            case 'uf':
-                if (!value) error = 'UF é obrigatório';
-                break;
-        }
-
-        if (error) {
-            this.showFieldError(field, error);
-            return false;
-        } else {
-            this.clearFieldError(field);
-            return true;
-        }
-    }
-
-    // Submeter formulário
-    static async submitForm(form) {
-        const submitBtn = form.querySelector('button[type="submit"]');
-        const btnText = submitBtn.querySelector('.btn__text');
-        const btnLoading = submitBtn.querySelector('.btn__loading');
-
-        // 1. VALIDAR FORMULÁRIO
-        if (!this.validateForm(form)) {
-            const firstError = form.querySelector('.form__input--error');
-            if (firstError) firstError.focus();
-            return;
-        }
-
-        // 2. VERIFICAR GEOLOCALIZAÇÃO
-        const latitude = document.getElementById('latitude').value;
-        const longitude = document.getElementById('longitude').value;
-        
-        if (!latitude || !longitude) {
-            alert('Localização é obrigatória. Permita o acesso à localização e tente novamente.');
-            return;
-        }
-
-        // 3. MOSTRAR LOADING
-        submitBtn.disabled = true;
-        submitBtn.classList.add('loading');
-        if (btnText) btnText.style.display = 'none';
-        if (btnLoading) btnLoading.style.display = 'inline';
-
+    async buscarEnderecoPorCEP(cep) {
         try {
-            // 4. COLETAR DADOS
-            const formData = new FormData(form);
-            const dados = Object.fromEntries(formData.entries());
-            const logoFile = document.getElementById('logo').files[0];
+            const cleanCEP = cep.replace(/\D/g, '');
+            if (cleanCEP.length !== 8) return null;
 
-            console.log('📊 Dados coletados:', dados);
+            const response = await fetch(`https://viacep.com.br/ws/${cleanCEP}/json/`);
+            const data = await response.json();
 
-            // 5. SALVAR NO FIREBASE
-            const result = await window.SalvoFirebaseSellers.saveSeller(dados, logoFile);
+            if (data.erro) return null;
 
-            if (result.success) {
-                console.log('✅ Seller cadastrado com sucesso!');
-                
-                // Fechar modal
-                if (window.SalvoModal) {
-                    window.SalvoModal.close();
-                }
-
-                // Redirecionar
-                setTimeout(() => {
-                    window.location.href = 'obrigado.html';
-                }, 500);
-
-            } else {
-                console.error('❌ Erro no cadastro:', result);
-                alert(result.message || 'Erro ao realizar cadastro. Tente novamente.');
-            }
-
+            return {
+                endereco: data.logradouro,
+                cidade: data.localidade,
+                uf: data.uf,
+                bairro: data.bairro
+            };
         } catch (error) {
-            console.error('❌ Erro inesperado:', error);
-            alert('Erro inesperado. Tente novamente.');
-        } finally {
-            // 6. REMOVER LOADING
-            submitBtn.disabled = false;
-            submitBtn.classList.remove('loading');
-            if (btnText) btnText.style.display = 'inline';
-            if (btnLoading) btnLoading.style.display = 'none';
+            console.error('❌ Erro ao buscar CEP:', error);
+            return null;
         }
     }
 
-    // Validar formulário completo
-    static validateForm(form) {
-        let isValid = true;
-        const requiredFields = form.querySelectorAll('[required]');
+    configurarCEP() {
+        const cepInput = document.getElementById('cep');
+        const enderecoInput = document.getElementById('address');
+        const cidadeInput = document.getElementById('city');
+        const ufSelect = document.getElementById('uf');
 
-        requiredFields.forEach(field => {
-            if (!this.validateField(field)) {
-                isValid = false;
+        if (cepInput && enderecoInput && cidadeInput && ufSelect) {
+            cepInput.addEventListener('blur', async () => {
+                const cep = cepInput.value;
+                if (cep.length === 9) { // formato: 00000-000
+                    const endereco = await this.buscarEnderecoPorCEP(cep);
+                    if (endereco) {
+                        console.log('✅ Endereço encontrado via CEP');
+                        enderecoInput.value = endereco.endereco;
+                        cidadeInput.value = endereco.cidade;
+                        ufSelect.value = endereco.uf;
+                    }
+                }
+            });
+        }
+    }
+
+    configurarGeolocalizacao() {
+        console.log('📍 Configurando geolocalização opcional...');
+        
+        // Tentar obter localização, mas não bloquear se falhar
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    console.log('✅ Localização obtida:', {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude
+                    });
+                    
+                    // Salvar nos campos ocultos se existirem
+                    const latInput = document.getElementById('latitude');
+                    const lngInput = document.getElementById('longitude');
+                    
+                    if (latInput) latInput.value = position.coords.latitude;
+                    if (lngInput) lngInput.value = position.coords.longitude;
+                },
+                (error) => {
+                    console.warn('⚠️ Não foi possível obter localização:', error.message);
+                    console.log('💡 Continuando sem geolocalização...');
+                }
+            );
+        } else {
+            console.warn('⚠️ Geolocalização não suportada no navegador');
+        }
+    }
+
+    validarCampos(formData) {
+        const errors = {};
+
+        // Campos obrigatórios
+        const requiredFields = {
+            businessName: 'Nome do negócio',
+            category: 'Categoria',
+            whatsapp: 'WhatsApp',
+            email: 'E-mail',
+            cep: 'CEP',
+            address: 'Endereço',
+            complement: 'Complemento',
+            city: 'Cidade',
+            uf: 'UF'
+        };
+
+        // Validar campos obrigatórios
+        for (const [field, label] of Object.entries(requiredFields)) {
+            if (!formData[field] || formData[field].trim() === '') {
+                errors[field] = `${label} é obrigatório`;
             }
+        }
+
+        // Validar e-mail
+        if (formData.email && !this.validarEmail(formData.email)) {
+            errors.email = 'E-mail inválido';
+        }
+
+        // Validar WhatsApp
+        if (formData.whatsapp && !this.validarWhatsApp(formData.whatsapp)) {
+            errors.whatsapp = 'WhatsApp inválido';
+        }
+
+        // Validar CEP
+        if (formData.cep && !this.validarCEP(formData.cep)) {
+            errors.cep = 'CEP inválido';
+        }
+
+        return errors;
+    }
+
+    validarEmail(email) {
+        const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return regex.test(email);
+    }
+
+    validarWhatsApp(whatsapp) {
+        const cleanPhone = whatsapp.replace(/\D/g, '');
+        return cleanPhone.length >= 10;
+    }
+
+    validarCEP(cep) {
+        const cleanCEP = cep.replace(/\D/g, '');
+        return cleanCEP.length === 8;
+    }
+
+    mostrarErros(errors) {
+        // Limpar erros anteriores
+        document.querySelectorAll('.form__error').forEach(error => {
+            error.textContent = '';
         });
 
-        // Validar arquivo
-        const logoInput = document.getElementById('logo');
-        if (!logoInput.files[0]) {
-            this.showFieldError(logoInput, 'Logo/imagem é obrigatória');
-            isValid = false;
-        }
-
-        // Validar LGPD
-        const lgpdCheckbox = form.querySelector('input[name="aceiteLGPD"]');
-        if (!lgpdCheckbox.checked) {
-            this.showFieldError(lgpdCheckbox, 'Você deve aceitar os termos');
-            isValid = false;
-        }
-
-        return isValid;
-    }
-
-    // Mostrar erro do campo
-    static showFieldError(field, message) {
-        const errorElement = document.getElementById(field.id + '-error');
-        if (errorElement) {
-            errorElement.textContent = message;
-            errorElement.style.display = 'block';
-        }
-        field.classList.add('form__input--error');
-    }
-
-    // Limpar erro do campo
-    static clearFieldError(field) {
-        const errorElement = document.getElementById(field.id + '-error');
-        if (errorElement) {
-            errorElement.textContent = '';
-            errorElement.style.display = 'none';
-        }
-        field.classList.remove('form__input--error');
-    }
-
-    // Mostrar loading do CEP
-    static showCEPLoading(show) {
-        const cepInput = document.getElementById('cep');
-        if (cepInput) {
-            if (show) {
-                cepInput.style.backgroundImage = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 50 50\'%3E%3Cpath d=\'M25 5A20.14 20.14 0 0 0 5 25a20.14 20.14 0 0 0 20 20 20.14 20.14 0 0 0 20-20A20.14 20.14 0 0 0 25 5Zm0 30a10 10 0 1 1 10-10 10 10 0 0 1-10 10Z\' fill=\'%23ccc\'/%3E%3C/svg%3E")';
-                cepInput.style.backgroundRepeat = 'no-repeat';
-                cepInput.style.backgroundPosition = 'right 10px center';
-                cepInput.style.backgroundSize = '16px';
-            } else {
-                cepInput.style.backgroundImage = 'none';
+        // Mostrar novos erros
+        for (const [field, message] of Object.entries(errors)) {
+            const errorElement = document.getElementById(`${field.replace('businessName', 'business-name')}-error`);
+            if (errorElement) {
+                errorElement.textContent = message;
             }
+        }
+    }
+
+    async coletarDadosFormulario() {
+        console.log('📊 Coletando dados do formulário...');
+
+        const formData = {
+            businessName: document.getElementById('business-name')?.value || '',
+            category: document.getElementById('category')?.value || '',
+            whatsapp: document.getElementById('whatsapp')?.value || '',
+            email: document.getElementById('email')?.value || '',
+            cep: document.getElementById('cep')?.value || '',
+            address: document.getElementById('address')?.value || '',
+            complement: document.getElementById('complement')?.value || '',
+            city: document.getElementById('city')?.value || '',
+            uf: document.getElementById('uf')?.value || '',
+            // Campos opcionais
+            latitude: document.getElementById('latitude')?.value || null,
+            longitude: document.getElementById('longitude')?.value || null
+        };
+
+        console.log('📊 Dados coletados:', formData);
+        return formData;
+    }
+
+    async processarSubmissao() {
+        console.log('📤 Processando submissão...');
+
+        // Coletar dados
+        const formData = await this.coletarDadosFormulario();
+
+        // Validar dados
+        const errors = this.validarCampos(formData);
+        if (Object.keys(errors).length > 0) {
+            console.warn('⚠️ Erros de validação:', errors);
+            this.mostrarErros(errors);
+            return false;
+        }
+
+        // Salvar dados
+        try {
+            const result = await window.salvarSeller(formData);
+            
+            if (result.success) {
+                console.log('✅ Cadastro realizado com sucesso!');
+                window.location.href = 'obrigado.html';
+                return true;
+            } else {
+                throw new Error(result.error || 'Erro desconhecido');
+            }
+        } catch (error) {
+            console.error('❌ Erro no cadastro:', error);
+            alert('Erro ao realizar cadastro. Verifique os dados e tente novamente.');
+            return false;
         }
     }
 }
 
-// Atualizar classe modal para sellers
+// Modal System
 class SalvoModalSellers {
-    static init() {
+    constructor() {
         this.modal = document.getElementById('modal-forms');
-        this.setupEvents();
+        this.init();
         console.log('📱 SalvoModalSellers inicializado');
     }
 
-    static setupEvents() {
-        if (!this.modal) return;
-
+    init() {
         // Botão para abrir modal
-        const ctaButton = document.getElementById('cta-seller');
-        if (ctaButton) {
-            ctaButton.addEventListener('click', () => this.open());
+        const ctaSeller = document.getElementById('cta-seller');
+        if (ctaSeller) {
+            ctaSeller.addEventListener('click', () => this.abrirModal());
         }
 
-        // Botões para fechar modal
-        document.querySelectorAll('.form__close').forEach(btn => {
-            btn.addEventListener('click', () => this.close());
-        });
+        // Botão para fechar modal
+        const closeBtn = document.querySelector('.form__close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.fecharModal());
+        }
 
-        // Fechar ao clicar fora
-        this.modal.addEventListener('click', (e) => {
-            if (e.target === this.modal || e.target.classList.contains('modal__overlay')) {
-                this.close();
-            }
-        });
-
-        // Fechar com ESC
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.modal.classList.contains('modal--active')) {
-                this.close();
-            }
-        });
+        // Fechar ao clicar no overlay
+        const overlay = document.querySelector('.modal__overlay');
+        if (overlay) {
+            overlay.addEventListener('click', () => this.fecharModal());
+        }
     }
 
-    static open() {
-        if (!this.modal) return;
-
-        this.modal.classList.add('modal--active');
-        document.body.classList.add('modal-open');
-
-        // Focar no primeiro campo
-        setTimeout(() => {
-            const firstInput = document.getElementById('business-name');
-            if (firstInput) firstInput.focus();
-        }, 300);
+    abrirModal() {
+        if (this.modal) {
+            this.modal.classList.add('modal--active');
+            document.body.style.overflow = 'hidden';
+        }
     }
 
-    static close() {
-        if (!this.modal) return;
-
-        this.modal.classList.remove('modal--active');
-        document.body.classList.remove('modal-open');
-
-        // Limpar formulário
-        const form = document.getElementById('form-seller-submit');
-        if (form) {
-            form.reset();
-            
-            // Limpar erros
-            form.querySelectorAll('.form__error').forEach(error => {
-                error.textContent = '';
-                error.style.display = 'none';
-            });
-            form.querySelectorAll('.form__input').forEach(input => {
-                input.classList.remove('form__input--error');
-            });
+    fecharModal() {
+        if (this.modal) {
+            this.modal.classList.remove('modal--active');
+            document.body.style.overflow = 'auto';
         }
     }
 }
 
-// Inicializar quando DOM estiver pronto
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(() => {
-        SalvoMasksSellers.init();
-        SalvoModalSellers.init();
-        console.log('✅ Validações sellers inicializadas');
-    }, 500);
-});
+// Inicialização
+document.addEventListener('DOMContentLoaded', () => {
+    // Inicializar sistemas
+    const maskSystem = new SalvoMasksSellers();
+    const modalSystem = new SalvoModalSellers();
 
-// Expor classes globalmente
-window.SalvoMasksSellers = SalvoMasksSellers;
-window.SalvoModalSellers = SalvoModalSellers;
-window.SalvoModal = SalvoModalSellers; // Compatibilidade
+    // Configurar submit do formulário
+    const form = document.getElementById('form-seller-submit');
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            const btnText = submitBtn.querySelector('.btn__text');
+            const btnLoading = submitBtn.querySelector('.btn__loading');
+
+            // UI Loading
+            submitBtn.disabled = true;
+            btnText.style.display = 'none';
+            btnLoading.style.display = 'inline';
+
+            try {
+                await maskSystem.processarSubmissao();
+            } finally {
+                // Restaurar UI
+                submitBtn.disabled = false;
+                btnText.style.display = 'inline';
+                btnLoading.style.display = 'none';
+            }
+        });
+    }
+
+    console.log('✅ Validações sellers inicializadas');
+});

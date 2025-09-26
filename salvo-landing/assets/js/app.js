@@ -1,9 +1,9 @@
 // Salvô Landing Page - JavaScript Principal
+// Versão: 2.1 - Formulário único de sellers
 // Autor: Rafael Ferreira
-// Data: 2025-08-09
+// Data: 2025-09-25
 
 document.addEventListener('DOMContentLoaded', function() {
-    
     // Inicializar aplicação
     App.init();
 });
@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', function() {
 const App = {
     // Configurações
     config: {
-        recaptchaSiteKey: '6LfxYZ4pAAAAAH-tYs9D1v9XrG7ZQk5QY8xP2wX7',
         whatsappNumber: '5511999999999'
     },
     
@@ -23,12 +22,7 @@ const App = {
         navMenu: null,
         modal: null,
         modalOverlay: null,
-        ctaPF: null,
-        ctaPJ: null,
-        formPF: null,
-        formPJ: null,
-        formContainerPF: null,
-        formContainerPJ: null,
+        ctaSeller: null,
         tabBtns: null,
         tabContents: null,
         faqItems: null
@@ -42,8 +36,6 @@ const App = {
         this.setupScrollEffects();
         this.setupTabs();
         this.setupFAQ();
-        this.setupFormValidation();
-        this.setupMasks();
     },
     
     // Cache dos elementos DOM
@@ -54,12 +46,7 @@ const App = {
             navMenu: document.getElementById('nav-menu'),
             modal: document.getElementById('modal-forms'),
             modalOverlay: document.querySelector('.modal__overlay'),
-            ctaPF: document.getElementById('cta-pf'),
-            ctaPJ: document.getElementById('cta-pj'),
-            formPF: document.getElementById('form-pessoa-fisica'),
-            formPJ: document.getElementById('form-pessoa-juridica'),
-            formContainerPF: document.getElementById('form-pf'),
-            formContainerPJ: document.getElementById('form-pj'),
+            ctaSeller: document.getElementById('cta-seller'),
             tabBtns: document.querySelectorAll('.tab__btn'),
             tabContents: document.querySelectorAll('.tab__content'),
             faqItems: document.querySelectorAll('.faq__item')
@@ -73,13 +60,8 @@ const App = {
             this.elements.navToggle.addEventListener('click', this.toggleMobileMenu.bind(this));
         }
         
-        // CTAs para abrir formulários
-        if (this.elements.ctaPF) {
-            this.elements.ctaPF.addEventListener('click', () => this.openModal('pf'));
-        }
-        if (this.elements.ctaPJ) {
-            this.elements.ctaPJ.addEventListener('click', () => this.openModal('pj'));
-        }
+        // CTA para abrir formulário (já gerenciado pelo masks-validations.js)
+        // Removido daqui para evitar conflito
         
         // Fechar modal
         if (this.elements.modalOverlay) {
@@ -100,14 +82,6 @@ const App = {
         document.querySelectorAll('a[href^="#"]').forEach(link => {
             link.addEventListener('click', this.smoothScroll.bind(this));
         });
-        
-        // Submit dos formulários
-        if (this.elements.formPF) {
-            this.elements.formPF.addEventListener('submit', (e) => this.handleFormSubmit(e, 'PF'));
-        }
-        if (this.elements.formPJ) {
-            this.elements.formPJ.addEventListener('submit', (e) => this.handleFormSubmit(e, 'PJ'));
-        }
     },
     
     // Toggle menu mobile
@@ -118,43 +92,25 @@ const App = {
         }
     },
     
-    // Abrir modal com formulário
-    openModal(tipo) {
-        if (!this.elements.modal) return;
-        
-        // Mostrar modal
-        this.elements.modal.classList.add('modal--active');
-        document.body.classList.add('modal-open');
-        
-        // Mostrar formulário correto
-        if (tipo === 'pf') {
-            this.elements.formContainerPF.style.display = 'block';
-            this.elements.formContainerPJ.style.display = 'none';
-        } else {
-            this.elements.formContainerPF.style.display = 'none';
-            this.elements.formContainerPJ.style.display = 'block';
-        }
-        
-        // Focar no primeiro campo
-        setTimeout(() => {
-            const firstInput = this.elements.modal.querySelector('input:not([type="hidden"])');
-            if (firstInput) firstInput.focus();
-        }, 300);
-    },
-    
     // Fechar modal
     closeModal() {
         if (!this.elements.modal) return;
         
         this.elements.modal.classList.remove('modal--active');
-        document.body.classList.remove('modal-open');
+        document.body.style.overflow = 'auto';
         
-        // Limpar formulários
-        if (this.elements.formPF) this.elements.formPF.reset();
-        if (this.elements.formPJ) this.elements.formPJ.reset();
-        
-        // Limpar erros
-        this.clearAllErrors();
+        // Limpar formulário
+        const form = document.getElementById('form-seller-submit');
+        if (form) {
+            form.reset();
+            // Limpar erros
+            document.querySelectorAll('.form__error').forEach(error => {
+                error.textContent = '';
+            });
+            document.querySelectorAll('.form__input').forEach(input => {
+                input.classList.remove('form__input--error');
+            });
+        }
     },
     
     // Smooth scroll
@@ -185,13 +141,6 @@ const App = {
             utm_medium: urlParams.get('utm_medium') || 'none',
             utm_campaign: urlParams.get('utm_campaign') || 'none'
         };
-        
-        // Preencher campos ocultos nos formulários
-        Object.keys(utmParams).forEach(param => {
-            document.querySelectorAll(`input[name="${param}"]`).forEach(input => {
-                input.value = utmParams[param];
-            });
-        });
         
         // Salvar no sessionStorage para uso posterior
         sessionStorage.setItem('utmParams', JSON.stringify(utmParams));
@@ -274,241 +223,10 @@ const App = {
                 });
             }
         });
-    },
-    
-    // Configurar máscaras de input
-    setupMasks() {
-        // Máscara para WhatsApp
-        document.querySelectorAll('input[name="whatsapp"]').forEach(input => {
-            input.addEventListener('input', (e) => {
-                let value = e.target.value.replace(/\D/g, '');
-                if (value.length <= 11) {
-                    value = value.replace(/^(\d{2})(\d)/g, '($1) $2');
-                    value = value.replace(/(\d)(\d{4})$/, '$1-$2');
-                }
-                e.target.value = value;
-            });
-        });
-        
-        // Máscara para CNPJ
-        const cnpjInput = document.getElementById('pj-cnpj');
-        if (cnpjInput) {
-            cnpjInput.addEventListener('input', (e) => {
-                let value = e.target.value.replace(/\D/g, '');
-                value = value.replace(/^(\d{2})(\d)/, '$1.$2');
-                value = value.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
-                value = value.replace(/\.(\d{3})(\d)/, '.$1/$2');
-                value = value.replace(/(\d{4})(\d)/, '$1-$2');
-                e.target.value = value;
-            });
-        }
-    },
-    
-    // Validação de formulários
-    setupFormValidation() {
-        // Validação em tempo real
-        document.querySelectorAll('.form__input').forEach(input => {
-            input.addEventListener('blur', () => this.validateField(input));
-            input.addEventListener('input', () => this.clearFieldError(input));
-        });
-    },
-    
-    // Validar campo individual
-    validateField(field) {
-        const value = field.value.trim();
-        const name = field.name;
-        let error = '';
-        
-        // Validações específicas
-        switch (name) {
-            case 'nomeCompleto':
-            case 'razaoSocial':
-            case 'nomeFantasia':
-                if (!value) error = 'Este campo é obrigatório';
-                else if (value.length < 2) error = 'Deve ter pelo menos 2 caracteres';
-                break;
-                
-            case 'whatsapp':
-                if (!value) error = 'WhatsApp é obrigatório';
-                else if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(value)) error = 'Formato inválido';
-                break;
-                
-            case 'email':
-                if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-                    error = 'E-mail inválido';
-                }
-                break;
-                
-            case 'cnpj':
-                if (!value) error = 'CNPJ é obrigatório';
-                else if (!this.validarCNPJ(value)) error = 'CNPJ inválido';
-                break;
-                
-            case 'cidade':
-                if (!value) error = 'Cidade é obrigatória';
-                break;
-                
-            case 'uf':
-                if (!value) error = 'UF é obrigatório';
-                break;
-        }
-        
-        this.showFieldError(field, error);
-        return !error;
-    },
-    
-    // Mostrar erro do campo
-    showFieldError(field, message) {
-        const errorElement = document.getElementById(field.id + '-error');
-        if (errorElement) {
-            errorElement.textContent = message;
-            errorElement.style.display = message ? 'block' : 'none';
-        }
-        
-        if (message) {
-            field.classList.add('form__input--error');
-        } else {
-            field.classList.remove('form__input--error');
-        }
-    },
-    
-    // Limpar erro do campo
-    clearFieldError(field) {
-        this.showFieldError(field, '');
-    },
-    
-    // Limpar todos os erros
-    clearAllErrors() {
-        document.querySelectorAll('.form__error').forEach(error => {
-            error.textContent = '';
-            error.style.display = 'none';
-        });
-        document.querySelectorAll('.form__input--error').forEach(input => {
-            input.classList.remove('form__input--error');
-        });
-    },
-    
-    // Validar CNPJ
-    validarCNPJ(cnpj) {
-        cnpj = cnpj.replace(/[^\d]+/g, '');
-        
-        if (cnpj.length !== 14) return false;
-        
-        // Eliminar CNPJs inválidos conhecidos
-        if (/^(\d)\1{13}$/.test(cnpj)) return false;
-        
-        // Validar dígitos verificadores
-        let tamanho = cnpj.length - 2;
-        let numeros = cnpj.substring(0, tamanho);
-        let digitos = cnpj.substring(tamanho);
-        let soma = 0;
-        let pos = tamanho - 7;
-        
-        for (let i = tamanho; i >= 1; i--) {
-            soma += numeros.charAt(tamanho - i) * pos--;
-            if (pos < 2) pos = 9;
-        }
-        
-        let resultado = soma % 11 < 2 ? 0 : 11 - soma % 11;
-        if (resultado != digitos.charAt(0)) return false;
-        
-        tamanho = tamanho + 1;
-        numeros = cnpj.substring(0, tamanho);
-        soma = 0;
-        pos = tamanho - 7;
-        
-        for (let i = tamanho; i >= 1; i--) {
-            soma += numeros.charAt(tamanho - i) * pos--;
-            if (pos < 2) pos = 9;
-        }
-        
-        resultado = soma % 11 < 2 ? 0 : 11 - soma % 11;
-        return resultado == digitos.charAt(1);
-    },
-    
-    // Processar submit do formulário
-    async handleFormSubmit(e, tipo) {
-        e.preventDefault();
-        
-        const form = e.target;
-        const submitBtn = form.querySelector('button[type="submit"]');
-        const btnText = submitBtn.querySelector('.btn__text');
-        const btnLoading = submitBtn.querySelector('.btn__loading');
-        
-        // Validar formulário
-        let isValid = true;
-        const fields = form.querySelectorAll('.form__input:not([type="hidden"])');
-        
-        fields.forEach(field => {
-            if (!this.validateField(field)) {
-                isValid = false;
-            }
-        });
-        
-        // Verificar LGPD
-        const lgpdCheckbox = form.querySelector('input[name="aceiteLGPD"]');
-        if (!lgpdCheckbox.checked) {
-            isValid = false;
-            this.showFieldError(lgpdCheckbox, 'Você deve aceitar os termos para continuar');
-        }
-        
-        if (!isValid) {
-            // Focar no primeiro campo com erro
-            const firstError = form.querySelector('.form__input--error');
-            if (firstError) firstError.focus();
-            return;
-        }
-        
-        try {
-            // Mostrar loading
-            submitBtn.disabled = true;
-            submitBtn.classList.add('loading');
-            
-            // Executar reCAPTCHA
-            const recaptchaToken = await this.executeRecaptcha();
-            
-            // Coletar dados do formulário
-            const formData = new FormData(form);
-            const dados = Object.fromEntries(formData.entries());
-            dados.recaptchaToken = recaptchaToken;
-            dados.timestamp = new Date().toISOString();
-            
-            // Salvar no Firebase
-            const resultado = await window.Firebase.salvarLead(dados);
-            
-            if (resultado.success) {
-                // Sucesso - redirecionar para página de obrigado
-                window.location.href = '/obrigado.html';
-            } else {
-                throw new Error(resultado.error || 'Erro ao salvar dados');
-            }
-            
-        } catch (error) {
-            alert('Ocorreu um erro ao enviar o formulário. Tente novamente.');
-        } finally {
-            // Remover loading
-            submitBtn.disabled = false;
-            submitBtn.classList.remove('loading');
-        }
-    },
-    
-    // Executar reCAPTCHA
-    async executeRecaptcha() {
-        return new Promise((resolve, reject) => {
-            if (typeof grecaptcha !== 'undefined') {
-                grecaptcha.ready(() => {
-                    grecaptcha.execute(this.config.recaptchaSiteKey, { action: 'submit' })
-                        .then(resolve)
-                        .catch(reject);
-                });
-            } else {
-                reject(new Error('reCAPTCHA não carregado'));
-            }
-        });
     }
 };
 
-// Adicionar estilos CSS específicos para formulários e modal
+// Estilos CSS para o modal e componentes
 const modalStyles = `
     .modal {
         position: fixed;
@@ -626,7 +344,6 @@ const modalStyles = `
     }
     
     .form__error {
-        display: none;
         color: #ef4444;
         font-size: 0.875rem;
         margin-top: 0.25rem;
@@ -655,7 +372,7 @@ const modalStyles = `
     }
     
     .nav__menu--active {
-        display: flex;
+        display: flex !important;
         position: absolute;
         top: 100%;
         left: 0;
@@ -665,10 +382,6 @@ const modalStyles = `
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
         padding: 1rem;
         gap: 1rem;
-    }
-    
-    .modal-open {
-        overflow: hidden;
     }
     
     .testimonials__grid {
@@ -748,4 +461,3 @@ const modalStyles = `
 const styleSheet = document.createElement('style');
 styleSheet.textContent = modalStyles;
 document.head.appendChild(styleSheet);
-

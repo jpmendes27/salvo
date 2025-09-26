@@ -1,0 +1,16 @@
+[Unit]
+Description=Salvo Backend API
+After=network.target
+
+[Service]
+Type=simple
+User=vancouvertec-salvo-python
+Group=vancouvertec-salvo-python
+WorkingDirectory=/home/vancouvertec-salvo-python/htdocs/salvo.vancouvertec.com.br/backend
+Environment="PATH=/home/vancouvertec-salvo-python/htdocs/salvo.vancouvertec.com.br/backend/venv/bin"
+ExecStart=/home/vancouvertec-salvo-python/htdocs/salvo.vancouvertec.com.br/backend/venv/bin/python app_prod.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

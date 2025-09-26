@@ -10,7 +10,7 @@
     <!-- Open Graph -->
     <meta property="og:title" content="Salvô - Encontre e venda localmente pelo WhatsApp">
     <meta property="og:description" content="Conecte seu negócio local com clientes próximos através do WhatsApp. 100% gratuito e fácil de usar.">
-    <meta property="og:image" content="https://salvo.vancouvertec.com.brassets/img/og-image.png">
+    <meta property="og:image" content="https://salvo.vancouvertec.com.br/assets/img/og-image.png">
     <meta property="og:url" content="https://salvo.vancouvertec.com.br">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="pt_BR">
@@ -19,7 +19,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Salvô - Encontre e venda localmente pelo WhatsApp">
     <meta name="twitter:description" content="Conecte seu negócio local com clientes próximos através do WhatsApp. 100% gratuito e fácil de usar.">
-    <meta name="twitter:image" content="https://salvo.vancouvertec.com.brassets/img/og-image.png">
+    <meta name="twitter:image" content="https://salvo.vancouvertec.com.br/assets/img/og-image.png">
 
     <title>Salvô - Encontre e venda localmente pelo WhatsApp - 100% Grátis</title>
 
@@ -34,76 +34,6 @@
 
     <!-- CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
-
-        <style>
-    .captcha-container {
-        margin: 1.5rem 0;
-        padding: 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 8px;
-        background: #f9fafb;
-        text-align: center;
-    }
-
-    .captcha-question {
-        font-weight: 600;
-        margin-bottom: 0.75rem;
-        color: #374151;
-        font-size: 1.1rem;
-    }
-
-    .captcha-controls {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-    }
-
-    .captcha-input {
-        width: 80px;
-        padding: 0.5rem;
-        border: 2px solid #d1d5db;
-        border-radius: 6px;
-        font-size: 1.1rem;
-        text-align: center;
-        font-weight: 600;
-    }
-
-    .captcha-input:focus {
-        outline: none;
-        border-color: #25D366;
-        box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.1);
-    }
-
-    .captcha-input.error {
-        border-color: #ef4444;
-        background-color: #fef2f2;
-    }
-
-    .captcha-refresh {
-        background: #25D366;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        padding: 0.5rem 1rem;
-        cursor: pointer;
-        font-size: 0.9rem;
-        font-weight: 500;
-        transition: background-color 0.2s;
-    }
-
-    .captcha-refresh:hover {
-        background: #22c55e;
-    }
-
-    .captcha-error {
-        color: #ef4444;
-        font-size: 0.875rem;
-        margin-top: 0.5rem;
-        display: none;
-    }
-    </style>
 </head>
 <body>
     <!-- Header -->
@@ -321,7 +251,7 @@
                     <p>Preencha os dados e comece a receber clientes</p>
                     <button class="form__close" aria-label="Fechar formulário">&times;</button>
                 </div>
-                <form class="form" id="form-seller-submit" enctype="multipart/form-data">
+                <form class="form" id="form-seller-submit">
                     <div class="form__group">
                         <label for="business-name" class="form__label">Nome do Negócio *</label>
                         <input type="text" id="business-name" name="businessName" class="form__input" required aria-describedby="business-name-error">
@@ -400,12 +330,6 @@
                         </div>
                     </div>
 
-                    <div class="form__group">
-                        <label for="logo" class="form__label">Logo/Imagem do Negócio *</label>
-                        <input type="file" id="logo" name="logo" class="form__input" accept="image/*" required aria-describedby="logo-error">
-                        <span class="form__error" id="logo-error"></span>
-                    </div>
-
                     <!-- Campos ocultos para geolocalização -->
                     <input type="hidden" name="latitude" id="latitude">
                     <input type="hidden" name="longitude" id="longitude">
@@ -425,15 +349,12 @@
                     </button>
                 </form>
             </div>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
-
-    <!-- Seu arquivo Firebase -->
-    <script src="assets/js/local-storage.js"></script>
+        </div>
+    </div>
 
     <!-- Scripts -->    
-  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
-  <script src="assets/js/masks-validations.js"></script>  
-  <script src="assets/js/app.js"></script>
+    <script src="assets/js/local-storage.js"></script>
+    <script src="assets/js/masks-validations.js"></script>  
+    <script src="assets/js/app.js"></script>
 </body>
 </html>
