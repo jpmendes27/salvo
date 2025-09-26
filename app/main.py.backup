@@ -84,16 +84,20 @@ def create_app():
     
     return app
 
+
 if __name__ == '__main__':
     app = create_app()
     
     print("🚀 Salvô API iniciando...")
     print("📱 WhatsApp Business API integrado!")
+    print("🔍 Sistema de busca ativo!")
     print("🌐 Servidor disponível em: http://localhost:5000")
-    print("📋 Endpoints WhatsApp:")
-    print("   GET  /api/whatsapp/webhook - Verificação")
-    print("   POST /api/whatsapp/webhook - Receber mensagens") 
-    print("   POST /api/whatsapp/test - Teste de envio")
+    print("📋 Endpoints:")
+    print("   GET  /api/status - Status da API")
+    print("   GET  /api/whatsapp/webhook - Verificação WhatsApp")
+    print("   POST /api/whatsapp/webhook - Receber mensagens")
+    print("   POST /api/whatsapp/test - Teste envio mensagem")
+    print("   POST /api/search/test - Teste busca localização")
     print("")
     
     app.run(debug=True, host='0.0.0.0', port=5000)

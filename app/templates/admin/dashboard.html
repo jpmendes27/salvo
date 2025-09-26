@@ -1,0 +1,294 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dashboard - Salvô Admin{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="fw-bold">
+            <i class="fas fa-tachometer-alt me-2"></i>Dashboard Analytics
+        </h2>
+        <p class="text-muted">Visão geral do sistema Salvô em tempo real</p>
+    </div>
+</div>
+
+<!-- Cards de Estatísticas -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <i class="fas fa-comments fa-2x mb-2"></i>
+                <h3 class="card-title">{{ stats.total_interactions or 0 }}</h3>
+                <p class="card-text">Total de Interações</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <i class="fas fa-calendar-day fa-2x mb-2"></i>
+                <h3 class="card-title">{{ stats.interactions_today or 0 }}</h3>
+                <p class="card-text">Interações Hoje</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-line fa-2x mb-2"></i>
+                <h3 class="card-title">{{ stats.interactions_week or 0 }}</h3>
+                <p class="card-text">Esta Semana</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <i class="fas fa-clock fa-2x mb-2"></i>
+                <h3 class="card-title" id="realTimeCounter">0</h3>
+                <p class="card-text">Tempo Real</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Gráficos -->
+<div class="row mb-4">
+    <div class="col-md-8 mb-3">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-bar me-2"></i>Interações por Hora (24h)
+                </h5>
+            </div>
+            <div class="card-body">
+                <canvas id="hourlyChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-search me-2"></i>Top Buscas
+                </h5>
+            </div>
+            <div class="card-body">
+                <canvas id="searchChart" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabelas de Dados -->
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-map-marker-alt me-2"></i>Cidades Mais Ativas
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Cidade</th>
+                                <th>Buscas</th>
+                                <th>%</th>
+                            </tr>
+                        </thead>
+                        <tbody id="citiesTable">
+                            {% for city, count in stats.top_cities[:5] %}
+                            <tr>
+                                <td>{{ city }}</td>
+                                <td>{{ count }}</td>
+                                <td>{{ "%.1f"|format(count / stats.total_interactions * 100 if stats.total_interactions > 0 else 0) }}%</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="3" class="text-muted text-center">Nenhum dado disponível</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-tags me-2"></i>Termos Mais Buscados
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Termo</th>
+                                <th>Quantidade</th>
+                                <th>%</th>
+                            </tr>
+                        </thead>
+                        <tbody id="searchTable">
+                            {% for term, count in stats.top_searches[:5] %}
+                            <tr>
+                                <td>{{ term|title }}</td>
+                                <td>{{ count }}</td>
+                                <td>{{ "%.1f"|format(count / stats.total_interactions * 100 if stats.total_interactions > 0 else 0) }}%</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="3" class="text-muted text-center">Nenhum dado disponível</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status do Sistema -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle me-2"></i>Status do Sistema
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <small class="text-muted">Última Atualização:</small><br>
+                        <span id="lastUpdate">{{ stats.last_update or 'Nunca' }}</span>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted">Sistema:</small><br>
+                        <span class="badge bg-success">Online</span>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted">Analytics:</small><br>
+                        <span class="badge bg-success">Ativo</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Configurações dos gráficos
+const chartColors = {
+    primary: '#25D366',
+    secondary: '#075E54',
+    background: 'rgba(37, 211, 102, 0.1)',
+    border: 'rgba(37, 211, 102, 0.8)'
+};
+
+// Gráfico de interações por hora
+const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+const hourlyChart = new Chart(hourlyCtx, {
+    type: 'line',
+    data: {
+        labels: Array.from({length: 24}, (_, i) => i + 'h'),
+        datasets: [{
+            label: 'Interações',
+            data: [],
+            backgroundColor: chartColors.background,
+            borderColor: chartColors.border,
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    stepSize: 1
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+
+// Gráfico de top buscas
+const searchCtx = document.getElementById('searchChart').getContext('2d');
+const searchChart = new Chart(searchCtx, {
+    type: 'doughnut',
+    data: {
+        labels: [],
+        datasets: [{
+            data: [],
+            backgroundColor: [
+                '#25D366',
+                '#075E54',
+                '#128C7E',
+                '#34B7F1',
+                '#ECE5DD'
+            ]
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    boxWidth: 12,
+                    fontSize: 10
+                }
+            }
+        }
+    }
+});
+
+// Função para atualizar dados em tempo real
+function updateDashboard() {
+    fetch('/admin/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            // Atualizar dados dos gráficos
+            if (data.hourly) {
+                const hourlyData = Array.from({length: 24}, (_, i) => data.hourly[i] || 0);
+                hourlyChart.data.datasets[0].data = hourlyData;
+                hourlyChart.update();
+            }
+            
+            // Atualizar contador em tempo real
+            document.getElementById('realTimeCounter').textContent = data.dashboard.total_interactions || 0;
+            
+            // Atualizar última atualização
+            if (data.timestamp) {
+                const date = new Date(data.timestamp);
+                document.getElementById('lastUpdate').textContent = date.toLocaleString('pt-BR');
+            }
+        })
+        .catch(error => console.error('Erro ao atualizar dashboard:', error));
+}
+
+// Atualizar dashboard a cada 30 segundos
+setInterval(updateDashboard, 30000);
+
+// Primeira atualização
+updateDashboard();
+</script>
+{% endblock %}

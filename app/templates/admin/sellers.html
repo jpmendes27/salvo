@@ -1,0 +1,150 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Sellers - Salvô Admin{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="fw-bold">
+            <i class="fas fa-store me-2"></i>Gerenciamento de Sellers
+        </h2>
+        <p class="text-muted">Visualize e gerencie os estabelecimentos cadastrados</p>
+    </div>
+</div>
+
+<!-- Estatísticas dos Sellers -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <i class="fas fa-store fa-2x mb-2"></i>
+                <h3 class="card-title">{{ sellers|length }}</h3>
+                <p class="card-text">Total de Sellers</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card bg-info text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-check-circle fa-2x mb-2"></i>
+                <h3 class="card-title">{{ sellers|length }}</h3>
+                <p class="card-text">Ativos</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card bg-warning text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-clock fa-2x mb-2"></i>
+                <h3 class="card-title">0</h3>
+                <p class="card-text">Pendentes</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card bg-secondary text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-times-circle fa-2x mb-2"></i>
+                <h3 class="card-title">0</h3>
+                <p class="card-text">Inativos</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabela de Sellers -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-list me-2"></i>Lista de Estabelecimentos
+                </h5>
+                <button class="btn btn-success btn-sm">
+                    <i class="fas fa-plus me-1"></i>Adicionar Seller
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Nome</th>
+                                <th>Categoria</th>
+                                <th>Localização</th>
+                                <th>Contato</th>
+                                <th>Data Cadastro</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for seller in sellers %}
+                            <tr>
+                                <td>
+                                    <strong>{{ seller.get('nome', 'N/A') }}</strong><br>
+                                    <small class="text-muted">{{ (seller.get('descricao', 'Sem descrição'))[:50] }}{% if seller.get('descricao', '')|length > 50 %}...{% endif %}</small>
+                                </td>
+                                <td>
+                                    <span class="badge bg-primary">{{ (seller.get('categoria', 'Não informado'))|title }}</span>
+                                </td>
+                                <td>
+                                    <i class="fas fa-map-marker-alt text-danger me-1"></i>
+                                    {% if seller.get('localizacao') %}
+                                        {{ seller.localizacao.get('latitude', 'N/A') }}, {{ seller.localizacao.get('longitude', 'N/A') }}
+                                        {% if seller.localizacao.get('cidade') %}
+                                            <br><small class="text-muted">{{ seller.localizacao.get('cidade', '') }}, {{ seller.localizacao.get('estado', '') }}</small>
+                                        {% endif %}
+                                    {% else %}
+                                        N/A
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if seller.get('contato') %}
+                                        <a href="{{ seller.contato }}" target="_blank" class="btn btn-sm btn-outline-success">
+                                            <i class="fab fa-whatsapp me-1"></i>WhatsApp
+                                        </a>
+                                    {% else %}
+                                        <span class="text-muted">N/A</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if seller.get('data_cadastro') %}
+                                        {{ seller.data_cadastro[:10] }}
+                                    {% else %}
+                                        <span class="text-muted">N/A</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-success">Ativo</span>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-primary" title="Editar">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-outline-info" title="Ver Detalhes">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="btn btn-outline-danger" title="Desativar">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-4">
+                                    <i class="fas fa-store fa-3x mb-3 d-block"></i>
+                                    Nenhum seller cadastrado ainda
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

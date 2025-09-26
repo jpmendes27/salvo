@@ -1,0 +1,145 @@
+/* CSS Personalizado para Painel Admin do Salvô */
+
+:root {
+    --salvo-green: #25D366;
+    --salvo-dark-green: #075E54;
+    --salvo-light-green: #128C7E;
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.navbar-brand {
+    font-weight: 600;
+    font-size: 1.5rem;
+}
+
+.card {
+    border: none;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+}
+
+.stat-card {
+    background: linear-gradient(135deg, var(--salvo-green), var(--salvo-light-green));
+    color: white;
+    border-radius: 20px;
+}
+
+.stat-card .card-title {
+    font-size: 2.8rem;
+    font-weight: 700;
+    margin: 0;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.stat-card .card-text {
+    font-size: 1rem;
+    opacity: 0.95;
+    font-weight: 500;
+}
+
+.table {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.table thead th {
+    background-color: var(--salvo-dark-green);
+    color: white;
+    border: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    letter-spacing: 0.5px;
+}
+
+.btn-success {
+    background-color: var(--salvo-green);
+    border-color: var(--salvo-green);
+    border-radius: 10px;
+    font-weight: 500;
+}
+
+.btn-success:hover {
+    background-color: var(--salvo-dark-green);
+    border-color: var(--salvo-dark-green);
+    transform: translateY(-1px);
+}
+
+.chart-container {
+    position: relative;
+    height: 300px;
+    width: 100%;
+}
+
+.navbar-dark .navbar-nav .nav-link {
+    border-radius: 8px;
+    margin: 0 2px;
+    font-weight: 500;
+}
+
+.navbar-dark .navbar-nav .nav-link:hover {
+    background-color: rgba(255,255,255,0.15);
+}
+
+.alert {
+    border-radius: 12px;
+    border: none;
+    font-weight: 500;
+}
+
+.badge {
+    font-weight: 500;
+    padding: 0.5em 0.8em;
+    border-radius: 8px;
+}
+
+.login-card {
+    backdrop-filter: blur(10px);
+    background: rgba(255,255,255,0.95);
+}
+
+@media (max-width: 768px) {
+    .stat-card .card-title {
+        font-size: 2.2rem;
+    }
+    
+    .chart-container {
+        height: 250px;
+    }
+    
+    .navbar-brand {
+        font-size: 1.2rem;
+    }
+}
+
+/* Animações */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card {
+    animation: fadeInUp 0.6s ease-out;
+}
+
+/* Loading spinner customizado */
+.spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+}

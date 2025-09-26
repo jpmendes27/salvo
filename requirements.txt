@@ -1,21 +1,16 @@
-Flask==2.3.3
-Flask-CORS==4.0.0
-python-dotenv==1.0.0
-gunicorn==21.2.0
-werkzeug==2.3.7
+# Salvô Analytics - Requirements
+Flask>=2.3.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+gunicorn>=21.2.0
 
-# === WHATSAPP BUSINESS API ===
-requests==2.31.0
-cryptography==41.0.4
+# Analytics específicas
+pandas>=1.5.0
+plotly>=5.17.0
 
-# === GEOLOCALIZAÇÃO ===
-geopy==2.3.0
-haversine==2.7.0
-
-# === VALIDAÇÃO ===
-phonenumbers==8.13.21
-email-validator==2.0.0
-jsonschema==4.19.0
-
-# === LOGGING ===
-structlog==23.1.0
+# Desenvolvimento
+Werkzeug>=2.3.0
+click>=8.1.0
+itsdangerous>=2.1.0
+Jinja2>=3.1.0
+MarkupSafe>=2.1.0
