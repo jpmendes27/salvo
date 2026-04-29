@@ -1,0 +1,122 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function memberPath(workspaceId) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid);
+    }
+
+    function isMember(workspaceId) {
+      return verified()
+        && exists(memberPath(workspaceId))
+        && get(memberPath(workspaceId)).data.status == "active";
+    }
+
+    function isOwner(workspaceId) {
+      return isMember(workspaceId)
+        && get(memberPath(workspaceId)).data.role == "owner";
+    }
+
+    function inviteIsValid(workspaceId, inviteId) {
+      return verified()
+        && exists(/databases/$(database)/documents/invites/$(inviteId))
+        && get(/databases/$(database)/documents/invites/$(inviteId)).data.workspaceId == workspaceId
+        && get(/databases/$(database)/documents/invites/$(inviteId)).data.status == "active"
+        && get(/databases/$(database)/documents/invites/$(inviteId)).data.expiresAt > request.time;
+    }
+
+    match /users/{userId} {
+      allow read, create, update: if verified() && request.auth.uid == userId;
+      allow delete: if verified() && request.auth.uid == userId;
+    }
+
+    match /consents/{consentId} {
+      allow create: if verified() && request.resource.data.uid == request.auth.uid;
+      allow read: if verified() && resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /invites/{inviteId} {
+      allow read: if verified()
+        && resource.data.status == "active"
+        && resource.data.expiresAt > request.time;
+      allow create: if verified()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == "active"
+        && isOwner(request.resource.data.workspaceId);
+      allow update: if verified()
+        && isOwner(resource.data.workspaceId);
+      allow delete: if verified()
+        && isOwner(resource.data.workspaceId);
+    }
+
+    match /workspaces/{workspaceId} {
+      allow read: if isMember(workspaceId);
+      allow create: if verified()
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isOwner(workspaceId);
+      allow delete: if isOwner(workspaceId)
+        && resource.data.confirmDelete == true;
+
+      match /members/{memberId} {
+        allow read: if (verified() && resource.data.uid == request.auth.uid)
+          || isMember(workspaceId);
+        allow create: if verified() && (
+          (
+            request.auth.uid == memberId
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.role == "owner"
+            && request.resource.data.status == "active"
+            && request.resource.data.createdBy == request.auth.uid
+          )
+          ||
+          (
+            request.auth.uid == memberId
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.role == "editor"
+            && request.resource.data.status == "active"
+            && request.resource.data.inviteId is string
+            && inviteIsValid(workspaceId, request.resource.data.inviteId)
+          )
+        );
+        allow update: if isOwner(workspaceId)
+          || (verified() && request.auth.uid == memberId && request.resource.data.status == "left");
+        allow delete: if isOwner(workspaceId);
+      }
+
+      match /categories/{categoryId} {
+        allow read, create, update: if isMember(workspaceId);
+        allow delete: if isOwner(workspaceId);
+      }
+
+      match /transactions/{transactionId} {
+        allow read, create, update: if isMember(workspaceId);
+        allow delete: if isMember(workspaceId);
+      }
+
+      match /summaries/{summaryId} {
+        allow read, create, update: if isMember(workspaceId);
+        allow delete: if isOwner(workspaceId);
+      }
+
+      match /openFinanceWaitlist/{waitlistId} {
+        allow read: if isOwner(workspaceId);
+        allow create: if isMember(workspaceId)
+          && waitlistId == request.auth.uid
+          && request.resource.data.uid == request.auth.uid;
+        allow update: if isMember(workspaceId)
+          && waitlistId == request.auth.uid
+          && resource.data.uid == request.auth.uid;
+        allow delete: if isOwner(workspaceId);
+      }
+    }
+  }
+}
