@@ -151,33 +151,66 @@ function AuthScreen() {
 
   return (
     <main className="auth-page">
+      <div className="cosmic-field" aria-hidden="true">
+        <span className="star-layer star-layer-one" />
+        <span className="star-layer star-layer-two" />
+        <span className="orbit-ring orbit-ring-one" />
+        <span className="orbit-ring orbit-ring-two" />
+        <span className="comet comet-one" />
+        <span className="comet comet-two" />
+      </div>
       <section className="auth-story">
-        <div className="brand" style={{ marginBottom: 36 }}>
-          <span className="brand-mark">F</span>
-          <span>Fincheck Pro</span>
+        <div className="brand auth-brand" style={{ marginBottom: 36 }}>
+          <img src="/fincheck-logo.svg" alt="" className="brand-logo" />
+          <span className="wordmark">
+            fincheck<em>pro</em>
+          </span>
+        </div>
+        <div className="auth-eyebrow">
+          <span /> vida financeira compartilhada
         </div>
         <h1>O futuro das financas tambem pode ser compartilhado.</h1>
         <p>
-          Comece solo ou convide alguem para cuidar da mesma vida financeira com
-          clareza, direitos simples e um resumo mensal que fala a lingua da vida real.
+          Comece solo, convide alguem quando fizer sentido e acompanhe o mes com
+          uma inteligencia simples, visual e pronta para Open Finance quando chegar a hora.
         </p>
+        <div className="signal-strip" aria-hidden="true">
+          <div>
+            <span>Total mapeado</span>
+            <strong>R$ 8.340</strong>
+          </div>
+          <div>
+            <span>Saldo projetado</span>
+            <strong className="neon-text">+R$ 1.204</strong>
+          </div>
+          <div>
+            <span>Workspace</span>
+            <strong>2 pessoas</strong>
+          </div>
+        </div>
       </section>
 
       <section className="auth-panel">
         <div className="card auth-card section">
           <div>
-            <h2>{mode === "signin" ? "Entrar" : "Criar conta"}</h2>
+            <span className="auth-kicker">acesso seguro</span>
+            <h2>{mode === "signin" ? "Entrar no Fincheck Pro" : "Criar sua conta"}</h2>
             <p className="muted">
-              Use Google ou e-mail e senha. Telefone e renda ficam para quando fizerem sentido.
+              Use Google ou e-mail e senha. Nada de telefone, renda ou pergunta desnecessaria.
             </p>
           </div>
 
           {error && <div className="error">{error}</div>}
           {message && <div className="success">{message}</div>}
 
-          <button className="btn" onClick={handleGoogle} disabled={busy}>
-            Entrar com Google <ArrowRight size={17} />
+          <button className="google-btn" onClick={handleGoogle} disabled={busy}>
+            <GoogleIcon />
+            <span>Continuar com Google</span>
           </button>
+
+          <div className="auth-divider">
+            <span>ou</span>
+          </div>
 
           <form className="form-grid" onSubmit={handleEmail}>
             {mode === "signup" && (
@@ -206,8 +239,9 @@ function AuthScreen() {
               onChange={(event) => setPassword(event.target.value)}
               required
             />
-            <button className="btn secondary" disabled={busy}>
+            <button className="btn auth-submit" disabled={busy}>
               {mode === "signin" ? "Entrar com e-mail" : "Criar conta por e-mail"}
+              <ArrowRight size={17} />
             </button>
           </form>
 
@@ -225,6 +259,29 @@ function AuthScreen() {
         </div>
       </section>
     </main>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M17.64 9.2c0-.63-.06-1.24-.16-1.82H9v3.44h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.91c1.7-1.57 2.69-3.88 2.69-6.6z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.47-.8 5.96-2.19l-2.91-2.26c-.81.54-1.85.86-3.05.86-2.34 0-4.33-1.58-5.04-3.71H.96v2.33A9 9 0 0 0 9 18z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.96 10.7a5.41 5.41 0 0 1 0-3.4V4.97H.96a9 9 0 0 0 0 8.06l3-2.33z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.58c1.32 0 2.5.45 3.44 1.34l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.97l3 2.33C4.67 5.16 6.66 3.58 9 3.58z"
+      />
+    </svg>
   );
 }
 
