@@ -28,36 +28,38 @@ export function buildMonthlySummary(
   const insights: string[] = [];
 
   if (!transactions.length) {
-    insights.push("Comece lancando uma entrada ou saida para gerar seu primeiro resumo.");
+    insights.push("Comece lançando uma entrada ou saída para gerar seu primeiro resumo.");
   } else if (balance >= 0) {
-    insights.push(`Seu mes esta positivo em ${formatCurrency(balance)}.`);
+    insights.push(`Seu mês fechou positivo em ${formatCurrency(balance)}.`);
   } else {
-    insights.push(`Seu mes esta negativo em ${formatCurrency(Math.abs(balance))}.`);
+    insights.push(`Seu mês fechou negativo em ${formatCurrency(Math.abs(balance))}.`);
   }
 
   if (income > 0) {
-    insights.push(`Voce usou ${Math.max(0, 100 - savingsRate)}% das entradas do mes.`);
+    insights.push(`Você comprometeu ${Math.max(0, 100 - savingsRate)}% das suas entradas.`);
   }
 
   if (topCategory && topCategoryAmount) {
     insights.push(
-      `${topCategory} e sua maior categoria de gastos, com ${formatCurrency(topCategoryAmount)}.`
+      `${topCategory} foi sua maior categoria de gastos, com ${formatCurrency(topCategoryAmount)}.`
     );
   }
 
   const contributors = new Set(transactions.map((item) => item.createdByName));
   if (contributors.size > 1) {
-    insights.push("Este resumo considera lancamentos feitos por mais de uma pessoa.");
+    insights.push("Este resumo considera lançamentos de mais de uma pessoa no workspace.");
   }
 
   const shareText = [
-    `Resumo Fincheck Pro de ${monthLabel(monthKey)}`,
-    `Entradas: ${formatCurrency(income)}`,
-    `Saidas: ${formatCurrency(expense)}`,
-    `Saldo: ${formatCurrency(balance)}`,
+    `📊 Resumo Fincheck Pro — ${monthLabel(monthKey)}`,
+    ``,
+    `💰 Entradas:  ${formatCurrency(income)}`,
+    `💸 Saídas:    ${formatCurrency(expense)}`,
+    `📈 Saldo:     ${formatCurrency(balance)}`,
+    ``,
     insights[0] || ""
   ]
-    .filter(Boolean)
+    .filter((l, i) => i < 5 || l !== "")
     .join("\n");
 
   return {

@@ -14,7 +14,6 @@ import {
 import {
   addDoc,
   collection,
-  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
@@ -31,24 +30,32 @@ import {
 } from "firebase/firestore";
 import {
   ArrowRight,
+  Check,
+  ChevronDown,
   Copy,
   Eye,
   EyeOff,
-  Handshake,
+  FileText,
+  ImageIcon,
   LogOut,
   Plus,
   RefreshCw,
-  Send,
+  Settings,
   Trash2,
-  Users
+  Upload,
+  Users,
+  X
 } from "lucide-react";
-import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, DragEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { auth, db, googleProvider } from "@/lib/firebase";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { currentMonthKey, formatCurrency, monthLabel } from "@/lib/money";
 import { buildMonthlySummary } from "@/lib/summary";
 import type { Member, Transaction, TransactionType, Workspace } from "@/lib/types";
 import { defaultCategories, demoTransactions } from "@/lib/demo";
+import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, fileToBase64, guessCategory, parseCSV, parseOFX, type ParsedTransaction } from "@/lib/parsers";
+import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
+import { extractPDFText } from "@/lib/pdf-extract";
 
 type Profile = {
   uid: string;
@@ -57,6 +64,7 @@ type Profile = {
   hasCreatedRealMonth?: boolean;
   acceptedTermsVersion?: string;
   acceptedPrivacyVersion?: string;
+  workspaceIds?: string[];
 };
 
 type WorkspaceWithMember = {
@@ -74,7 +82,10 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (currentUser) => {
+    return onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser?.emailVerified) {
+        await currentUser.getIdToken(true);
+      }
       setUser(currentUser);
       setLoading(false);
     });
@@ -465,14 +476,7 @@ function AuthScreen() {
 
       <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", width: "100%" }}>
         <div className="auth-left" style={{ width: "50%", flexShrink: 0, display: "flex", flexDirection: "column", justifyContent: "center", padding: "40px 48px", animation: "fadeUp .75s ease both" }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 7, background: G_10, border: "1px solid rgba(184,245,90,0.22)", borderRadius: 100, padding: "5px 14px 5px 9px", marginBottom: 28, width: "fit-content" }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: G, boxShadow: `0 0 8px ${G}`, display: "inline-block" }} />
-            <span style={{ fontSize: 11, color: G, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase" }}>
-              Diagnóstico financeiro inteligente
-            </span>
-          </div>
-
-          <h1 style={{ fontFamily: "'Inter Tight', 'Inter', system-ui, sans-serif", fontSize: "clamp(54px, 6.8vw, 82px)", fontWeight: 400, lineHeight: 0.96, letterSpacing: "-0.03em", marginBottom: 24, color: "#fff" }}>
+<h1 style={{ fontFamily: "'Inter Tight', 'Inter', system-ui, sans-serif", fontSize: "clamp(54px, 6.8vw, 82px)", fontWeight: 400, lineHeight: 0.96, letterSpacing: "-0.03em", marginBottom: 24, color: "#fff" }}>
             Você no controle
             <br />
             da sua{" "}
@@ -601,6 +605,17 @@ function AuthScreen() {
               <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
             </div>
 
+            {error && (
+              <div style={{ background: "rgba(255,80,80,0.12)", border: "1px solid rgba(255,80,80,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#ff8080", lineHeight: 1.5 }}>
+                {error}
+              </div>
+            )}
+            {message && (
+              <div style={{ background: "rgba(184,245,90,0.10)", border: "1px solid rgba(184,245,90,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: G, lineHeight: 1.5 }}>
+                {message}
+              </div>
+            )}
+
             <form onSubmit={handleEmail}>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
                 <FInput type="email" placeholder="email@exemplo.com" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -638,7 +653,7 @@ function AuthScreen() {
                   <div style={{ width: 17, height: 17, border: "2.5px solid rgba(0,0,0,0.35)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
                 ) : (
                   <>
-                    <span>Entrar com e-mail</span>
+                    <span>{mode === "signup" ? "Criar conta" : "Entrar com e-mail"}</span>
                     <ArrowRight size={15} />
                   </>
                 )}
@@ -657,7 +672,7 @@ function AuthScreen() {
                   event.currentTarget.style.color = "rgba(255,255,255,0.33)";
                 }}
               >
-                Criar conta
+                {mode === "signup" ? "Já tenho conta" : "Criar conta"}
               </button>
               <button
                 type="button"
@@ -724,6 +739,7 @@ function VerifyEmail({ user }: { user: User }) {
     try {
       await reload(user);
       if (auth.currentUser?.emailVerified) {
+        await auth.currentUser.getIdToken(true);
         window.location.reload();
       } else {
         setMessage("Ainda nao confirmamos seu e-mail. Confira sua caixa de entrada.");
@@ -776,7 +792,19 @@ function AuthenticatedApp({ user }: { user: User }) {
   useEffect(() => {
     async function loadProfile() {
       const snap = await getDoc(doc(db, "users", user.uid));
-      setProfile(snap.exists() ? (snap.data() as Profile) : null);
+      if (!snap.exists()) {
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+      const profile = snap.data() as Profile;
+      if (profile.acceptedTermsVersion && !profile.workspaceIds?.length) {
+        const displayName = user.displayName || user.email?.split("@")[0] || "Voce";
+        await ensureDefaultWorkspace(user, displayName);
+        window.location.reload();
+        return;
+      }
+      setProfile(profile);
       setLoading(false);
     }
     loadProfile().catch((err) => {
@@ -786,41 +814,29 @@ function AuthenticatedApp({ user }: { user: User }) {
   }, [user.uid]);
 
   useEffect(() => {
-    if (!profile?.acceptedTermsVersion) return;
+    const ids = profile?.workspaceIds;
+    if (!profile?.acceptedTermsVersion || !ids?.length) return;
 
-    const membersQuery = query(
-      collectionGroup(db, "members"),
-      where("uid", "==", user.uid),
-      where("status", "==", "active")
+    const unsubs = ids.map((wsId) =>
+      onSnapshot(doc(db, "workspaces", wsId), async (wsSnap) => {
+        if (!wsSnap.exists()) return;
+        const memberSnap = await getDoc(doc(db, "workspaces", wsId, "members", user.uid));
+        if (!memberSnap.exists()) return;
+        const entry: WorkspaceWithMember = {
+          workspace: { id: wsSnap.id, ...wsSnap.data() } as Workspace,
+          member: { id: memberSnap.id, workspaceId: wsId, ...memberSnap.data() } as Member
+        };
+        setWorkspaces((prev) => {
+          const rest = prev.filter((e) => e.workspace.id !== wsId);
+          return [...rest, entry];
+        });
+        setActiveWorkspaceId((current) => current || wsId);
+      })
     );
 
-    return onSnapshot(
-      membersQuery,
-      async (snapshot) => {
-        const entries = await Promise.all(
-          snapshot.docs.map(async (memberDoc) => {
-            const workspaceRef = memberDoc.ref.parent.parent;
-            if (!workspaceRef) return null;
-            const workspaceSnap = await getDoc(workspaceRef);
-            if (!workspaceSnap.exists()) return null;
-            return {
-              workspace: { id: workspaceSnap.id, ...workspaceSnap.data() } as Workspace,
-              member: {
-                id: memberDoc.id,
-                workspaceId: workspaceSnap.id,
-                ...memberDoc.data()
-              } as Member
-            };
-          })
-        );
-
-        const filtered = entries.filter(Boolean) as WorkspaceWithMember[];
-        setWorkspaces(filtered);
-        setActiveWorkspaceId((current) => current || filtered[0]?.workspace.id || "");
-      },
-      (err) => setError(errorMessage(err))
-    );
-  }, [profile?.acceptedTermsVersion, user.uid]);
+    return () => unsubs.forEach((u) => u());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.workspaceIds?.join(","), profile?.acceptedTermsVersion, user.uid]);
 
   async function acceptLegal() {
     setError("");
@@ -852,9 +868,9 @@ function AuthenticatedApp({ user }: { user: User }) {
         createdAt: serverTimestamp()
       });
 
-      setProfile(nextProfile);
       window.localStorage.removeItem("fincheck:pendingName");
       await ensureDefaultWorkspace(user, displayName);
+      window.location.reload();
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -933,6 +949,23 @@ function LegalGate({ onAccept }: { onAccept: () => Promise<void> }) {
   );
 }
 
+// ─── Workspace dashboard ────────────────────────────────────────────────────
+
+const PARSE_FUNCTION_URL =
+  process.env.NEXT_PUBLIC_FUNCTIONS_URL ||
+  "https://parsebankstatement-ihalwtxjpq-uc.a.run.app";
+
+type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
+
+type ImportState =
+  | { phase: "parsing" }
+  | { phase: "preview"; rows: ParsedWithMeta[]; error?: string }
+  | { phase: "saving"; rows: ParsedWithMeta[] };
+
+function categoryColor(cat: string): string {
+  return CATEGORY_COLORS[cat as keyof typeof CATEGORY_COLORS] ?? "#6b7080";
+}
+
 function WorkspaceApp({
   user,
   profile,
@@ -950,43 +983,195 @@ function WorkspaceApp({
 }) {
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [txLoading, setTxLoading] = useState(true);
   const [error, setError] = useState("");
+  const [txFilter, setTxFilter] = useState<"all" | "income" | "expense">("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [importState, setImportState] = useState<ImportState | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
-  const [waitlistDone, setWaitlistDone] = useState(false);
 
   const workspace = activeEntry.workspace;
   const member = activeEntry.member;
   const isOwner = member.role === "owner";
   const showDemo = !profile.hasCreatedRealMonth && transactions.length === 0;
-  const visibleTransactions = showDemo ? demoTransactions : transactions;
+  const visibleTx = showDemo ? demoTransactions : transactions;
+  const sources = useMemo(() => {
+    const labels = [...new Set(transactions.map((t) => t.sourceLabel).filter(Boolean))] as string[];
+    return labels.sort();
+  }, [transactions]);
+
+  const filteredTx = visibleTx.filter((t) => {
+    const typeOk = txFilter === "all" || t.type === txFilter;
+    const sourceOk = sourceFilter === "all" || t.sourceLabel === sourceFilter;
+    return typeOk && sourceOk;
+  });
   const summary = useMemo(
-    () => buildMonthlySummary(visibleTransactions, showDemo ? "2026-04" : monthKey),
-    [monthKey, showDemo, visibleTransactions]
+    () => buildMonthlySummary(visibleTx, showDemo ? "2026-04" : monthKey),
+    [monthKey, showDemo, visibleTx]
   );
 
   useEffect(() => {
-    setLoading(true);
+    setTxLoading(true);
     const txQuery = query(
       collection(db, "workspaces", workspace.id, "transactions"),
       where("monthKey", "==", monthKey),
       orderBy("date", "desc")
     );
-
     return onSnapshot(
       txQuery,
-      (snapshot) => {
-        setTransactions(
-          snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as Transaction)
-        );
-        setLoading(false);
+      (snap) => {
+        setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction));
+        setTxLoading(false);
       },
       (err) => {
         setError(errorMessage(err));
-        setLoading(false);
+        setTxLoading(false);
       }
     );
   }, [workspace.id, monthKey]);
+
+  async function markReal() {
+    if (profile.hasCreatedRealMonth) return;
+    await updateDoc(doc(db, "users", user.uid), {
+      hasCreatedRealMonth: true,
+      updatedAt: serverTimestamp()
+    });
+    setProfile({ ...profile, hasCreatedRealMonth: true });
+  }
+
+  async function handleFiles(files: File[]) {
+    setImportState({ phase: "parsing" });
+    const rows: ParsedWithMeta[] = [];
+
+    for (const file of files) {
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      const mime = file.type || `application/${ext}`;
+      try {
+        if (ext === "csv" || mime.includes("csv")) {
+          const text = await file.text();
+          parseCSV(text, file.name).forEach((t) =>
+            rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
+          );
+        } else if (ext === "ofx" || ext === "qfx" || mime.includes("ofx")) {
+          const text = await file.text();
+          parseOFX(text, file.name).forEach((t) =>
+            rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
+          );
+        } else if (ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf")) {
+          const pdfText = await extractPDFText(file);
+          const { transactions: bankTxs, sourceLabel: bankLabel } = parseBankText(pdfText, { filename: file.name });
+
+          if (bankTxs.length >= 3) {
+            bankTxs.forEach((t) =>
+              rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
+            );
+          } else {
+            // Fallback to Claude when deterministic parser yields too few results
+            const base64 = await fileToBase64(file);
+            const resp = await fetch(PARSE_FUNCTION_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fileData: base64, mimeType: "application/pdf" })
+            });
+            if (!resp.ok) {
+              const errJson = await resp.json().catch(() => ({}));
+              throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+            }
+            const data = await resp.json();
+            const claudeLabel: string = data.sourceLabel || bankLabel;
+            (data.transactions ?? []).forEach((t: ParsedTransaction) => {
+              if (Math.abs(t.amount ?? 0) === 0) return;
+              if (isStopDescription(t.description ?? "")) return;
+              const type = t.type ?? (t.amount < 0 ? "expense" : "income");
+              rows.push({
+                ...t,
+                type,
+                amount: Math.abs(t.amount ?? 0),
+                category: categorizeTransaction(t.description ?? "", type),
+                sourceLabel: claudeLabel,
+                _id: crypto.randomUUID(),
+                selected: true
+              });
+            });
+          }
+        } else if (mime.startsWith("image/")) {
+          const base64 = await fileToBase64(file);
+          const resp = await fetch(PARSE_FUNCTION_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileData: base64, mimeType: mime })
+          });
+          if (!resp.ok) {
+            const errJson = await resp.json().catch(() => ({}));
+            throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+          }
+          const data = await resp.json();
+          const imageLabel: string = data.sourceLabel || "Comprovante";
+          (data.transactions ?? []).forEach((t: ParsedTransaction) => {
+            if (Math.abs(t.amount ?? 0) === 0) return;
+            if (isStopDescription(t.description ?? "")) return;
+            const type = t.type ?? (t.amount < 0 ? "expense" : "income");
+            rows.push({
+              ...t,
+              type,
+              amount: Math.abs(t.amount ?? 0),
+              category: categorizeTransaction(t.description ?? "", type),
+              sourceLabel: imageLabel,
+              _id: crypto.randomUUID(),
+              selected: true
+            });
+          });
+        }
+      } catch (err) {
+        setImportState({
+          phase: "preview",
+          rows,
+          error: `Erro em ${file.name}: ${errorMessage(err)}`
+        });
+        return;
+      }
+    }
+
+    // Auto-deselect duplicates
+    const existingKeys = new Set(
+      transactions.map((t) => {
+        const raw = (t as Transaction & { dedupKey?: string }).dedupKey;
+        if (raw) return raw;
+        return `${t.date}|${t.description.toLowerCase().trim()}|${t.amount.toFixed(2)}`;
+      })
+    );
+    rows.forEach((r) => {
+      if (existingKeys.has(r.dedupKey)) r.selected = false;
+    });
+
+    setImportState({ phase: "preview", rows });
+  }
+
+  async function confirmImport(rows: ParsedWithMeta[]) {
+    setImportState({ phase: "saving", rows });
+    const selected = rows.filter((r) => r.selected);
+    for (const tx of selected) {
+      await addDoc(collection(db, "workspaces", workspace.id, "transactions"), {
+        type: tx.type,
+        description: tx.description,
+        amount: tx.amount,
+        category: tx.category || categorizeTransaction(tx.description, tx.type),
+        date: tx.date,
+        monthKey: tx.monthKey || tx.date.slice(0, 7),
+        createdBy: user.uid,
+        createdByName: profile.displayName,
+        sourceLabel: tx.sourceLabel ?? null,
+        dedupKey: tx.dedupKey || `${tx.date}|${tx.description.toLowerCase().trim()}|${tx.amount.toFixed(2)}`,
+        source: "import",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+    await markReal();
+    setImportState(null);
+  }
 
   async function createInvite() {
     setError("");
@@ -1006,251 +1191,1150 @@ function WorkspaceApp({
     }
   }
 
-  async function joinWaitlist() {
-    await setDoc(
-      doc(db, "workspaces", workspace.id, "openFinanceWaitlist", user.uid),
-      {
-        uid: user.uid,
-        email: user.email || "",
-        displayName: profile.displayName,
-        workspaceId: workspace.id,
-        createdAt: serverTimestamp(),
-        source: "dashboard_cta"
-      },
-      { merge: true }
-    );
-    setWaitlistDone(true);
-  }
-
   async function deleteWorkspace() {
-    const confirmation = window.prompt(
-      `Digite ${workspace.name} para excluir este workspace e seus dados financeiros.`
+    const conf = window.prompt(
+      `Digite "${workspace.name}" para confirmar a exclusão permanente.`
     );
-    if (confirmation !== workspace.name) return;
-
+    if (conf !== workspace.name) return;
     const batch = writeBatch(db);
-    const childCollections = ["transactions", "categories", "summaries", "openFinanceWaitlist"];
-
-    for (const collectionName of childCollections) {
-      const snapshot = await getDocs(collection(db, "workspaces", workspace.id, collectionName));
-      snapshot.docs.forEach((item) => batch.delete(item.ref));
+    for (const col of ["transactions", "categories", "summaries", "openFinanceWaitlist"]) {
+      const snap = await getDocs(collection(db, "workspaces", workspace.id, col));
+      snap.docs.forEach((d) => batch.delete(d.ref));
     }
-
-    await updateDoc(doc(db, "workspaces", workspace.id), {
-      confirmDelete: true,
-      updatedAt: serverTimestamp()
-    });
     batch.delete(doc(db, "workspaces", workspace.id));
     await batch.commit();
+    const membersSnap = await getDocs(
+      collection(db, "workspaces", workspace.id, "members")
+    );
+    for (const md of membersSnap.docs) await deleteDoc(md.ref);
+  }
 
-    const membersSnap = await getDocs(collection(db, "workspaces", workspace.id, "members"));
-    const memberDeletes = membersSnap.docs.sort((a, b) => {
-      if (a.id === user.uid) return 1;
-      if (b.id === user.uid) return -1;
-      return 0;
-    });
-    for (const memberDoc of memberDeletes) {
-      await deleteDoc(memberDoc.ref);
+  const D = {
+    shell: {
+      minHeight: "100vh",
+      background: "#050505",
+      color: "#fff",
+      fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+      display: "flex",
+      flexDirection: "column" as const
+    },
+    topbar: {
+      position: "sticky" as const,
+      top: 0,
+      zIndex: 20,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "0 clamp(16px,4vw,40px)",
+      height: 60,
+      background: "rgba(5,5,5,0.88)",
+      borderBottom: "1px solid rgba(255,255,255,0.07)",
+      backdropFilter: "blur(20px)",
+      gap: 16
+    },
+    content: {
+      flex: 1,
+      width: "min(1200px,calc(100% - 32px))",
+      margin: "0 auto",
+      padding: "32px 0 80px",
+      display: "grid",
+      gap: 24
     }
-  }
-
-  async function leaveWorkspace() {
-    await updateDoc(doc(db, "workspaces", workspace.id, "members", user.uid), {
-      status: "left",
-      leftAt: serverTimestamp()
-    });
-  }
+  };
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">F</span>
-          <span>Fincheck Pro</span>
+    <div style={D.shell}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800;900&family=DM+Serif+Display&family=DM+Mono:wght@400;500&display=swap');
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        .ws-tx-row:hover{background:rgba(255,255,255,0.03)!important}
+        .ws-filter-btn{cursor:pointer;transition:all .18s}
+        .ws-icon-btn:hover{background:rgba(255,255,255,0.08)!important;color:#fff!important}
+        @media(max-width:800px){.ws-sidebar{display:none!important}.ws-grid{grid-template-columns:1fr!important}}
+      `}</style>
+
+      {/* Topbar */}
+      <header style={D.topbar}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <Logo />
+          {workspaces.length > 1 ? (
+            <select
+              value={workspace.id}
+              onChange={(e) => onSelectWorkspace(e.target.value)}
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8,
+                color: "#fff",
+                fontSize: 13,
+                padding: "6px 10px",
+                cursor: "pointer"
+              }}
+            >
+              {workspaces.map((e) => (
+                <option key={e.workspace.id} value={e.workspace.id}>
+                  {e.workspace.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.46)" }}>
+              {workspace.name}
+            </span>
+          )}
         </div>
-        <div className="button-row">
-          <select
-            className="select"
-            value={workspace.id}
-            onChange={(event) => onSelectWorkspace(event.target.value)}
-            aria-label="Workspace"
-          >
-            {workspaces.map((entry) => (
-              <option key={entry.workspace.id} value={entry.workspace.id}>
-                {entry.workspace.name}
-              </option>
-            ))}
-          </select>
-          <button className="btn secondary" onClick={() => signOut(auth)}>
-            <LogOut size={17} /> Sair
-          </button>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <input
+            type="month"
+            value={monthKey}
+            onChange={(e) => setMonthKey(e.target.value)}
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 8,
+              color: "#fff",
+              fontSize: 13,
+              padding: "6px 10px",
+              cursor: "pointer"
+            }}
+          />
+          <IconBtn
+            icon={<Settings size={16} />}
+            label="Configurações"
+            onClick={() => setSettingsOpen(true)}
+          />
+          <IconBtn
+            icon={<LogOut size={16} />}
+            label="Sair"
+            onClick={() => signOut(auth)}
+          />
         </div>
       </header>
 
-      <div className="page section">
-        <div className="section-header">
-          <div>
-            <h1>{workspace.name}</h1>
-            <p className="muted">
-              {member.role === "owner" ? "Owner" : "Editor"} da vida financeira compartilhada.
-            </p>
-          </div>
-          <input
-            className="input"
-            style={{ maxWidth: 180 }}
-            type="month"
-            value={monthKey}
-            onChange={(event) => setMonthKey(event.target.value)}
-          />
-        </div>
-
+      <div style={D.content}>
+        {/* Demo banner */}
         {showDemo && (
-          <div className="demo-banner">
+          <div
+            style={{
+              background: "rgba(184,245,90,0.07)",
+              border: "1px solid rgba(184,245,90,0.18)",
+              borderRadius: 12,
+              padding: "14px 20px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
+              animation: "fadeUp .5s ease both"
+            }}
+          >
             <div>
-              <strong>Veja como o resumo fica antes de lancar seus dados.</strong>
-              <div className="muted">
-                Assim que voce criar o primeiro lancamento real, a demo sai do caminho.
-              </div>
+              <span style={{ fontWeight: 700, color: G, fontSize: 13 }}>
+                Visualização demo
+              </span>
+              <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", marginTop: 3 }}>
+                Importe seu extrato ou adicione um lançamento para ver seus dados reais.
+              </p>
             </div>
-            <span className="tag">Demo</span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                color: G,
+                background: "rgba(184,245,90,0.12)",
+                border: "1px solid rgba(184,245,90,0.22)",
+                borderRadius: 999,
+                padding: "4px 10px",
+                flexShrink: 0
+              }}
+            >
+              DEMO
+            </span>
           </div>
         )}
 
-        {error && <div className="error">{error}</div>}
+        {error && (
+          <div
+            style={{
+              background: "rgba(255,80,80,0.1)",
+              border: "1px solid rgba(255,80,80,0.25)",
+              borderRadius: 12,
+              padding: "12px 16px",
+              fontSize: 13,
+              color: "#ff8080"
+            }}
+          >
+            {error}
+          </div>
+        )}
 
-        <section className="stats-grid">
-          <Stat label="Entradas" value={formatCurrency(summary.income)} tone="income" />
-          <Stat label="Saidas" value={formatCurrency(summary.expense)} tone="expense" />
-          <Stat label="Saldo" value={formatCurrency(summary.balance)} tone="balance" />
-        </section>
+        {/* Balance header */}
+        <BalanceHeader summary={summary} showDemo={showDemo} monthKey={monthKey} />
 
-        <section className="dashboard-grid">
-          <div className="section">
-            <TransactionForm
-              user={user}
-              profile={profile}
-              workspaceId={workspace.id}
-              monthKey={monthKey}
-              onCreated={async () => {
-                if (!profile.hasCreatedRealMonth) {
-                  const nextProfile = { ...profile, hasCreatedRealMonth: true };
-                  await updateDoc(doc(db, "users", user.uid), {
-                    hasCreatedRealMonth: true,
-                    updatedAt: serverTimestamp()
-                  });
-                  setProfile(nextProfile);
-                }
-              }}
+        {/* Main grid */}
+        <div
+          className="ws-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 340px",
+            gap: 20,
+            alignItems: "start"
+          }}
+        >
+          {/* Left column */}
+          <div style={{ display: "grid", gap: 20 }}>
+            {/* Upload zone */}
+            <UploadZone
+              onFiles={handleFiles}
+              onAddManual={() => setAddOpen(true)}
             />
 
-            <div className="panel">
-              <div className="section-header">
-                <h2>Lancamentos</h2>
-                {loading && <span className="muted">Carregando...</span>}
+            {/* Transaction list */}
+            <WsCard>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 18
+                }}
+              >
+                <h2 style={{ fontSize: 15, fontWeight: 700 }}>Lançamentos</h2>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {(["all", "income", "expense"] as const).map((f) => (
+                    <button
+                      key={f}
+                      className="ws-filter-btn"
+                      onClick={() => setTxFilter(f)}
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        border: "none",
+                        background:
+                          txFilter === f
+                            ? f === "income"
+                              ? "rgba(184,245,90,0.15)"
+                              : f === "expense"
+                              ? "rgba(255,80,80,0.15)"
+                              : "rgba(255,255,255,0.10)"
+                            : "transparent",
+                        color:
+                          txFilter === f
+                            ? f === "income"
+                              ? G
+                              : f === "expense"
+                              ? "#ff8080"
+                              : "#fff"
+                            : "rgba(255,255,255,0.38)"
+                      }}
+                    >
+                      {f === "all" ? "Todas" : f === "income" ? "Entradas" : "Saídas"}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="transaction-list">
-                {visibleTransactions.map((transaction) => (
-                  <TransactionRow
-                    key={transaction.id}
-                    workspaceId={workspace.id}
-                    transaction={transaction}
-                    readonly={showDemo}
-                  />
-                ))}
-              </div>
-            </div>
+
+              {/* Source tabs — só aparece quando há mais de uma fonte */}
+              {sources.length > 1 && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                  {(["all", ...sources] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSourceFilter(s)}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        border: `1px solid ${sourceFilter === s ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
+                        background: sourceFilter === s ? "rgba(255,255,255,0.10)" : "transparent",
+                        color: sourceFilter === s ? "#fff" : "rgba(255,255,255,0.38)",
+                        cursor: "pointer",
+                        letterSpacing: "0.01em"
+                      }}
+                    >
+                      {s === "all" ? "Tudo" : s}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {txLoading ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "32px 0",
+                    color: "rgba(255,255,255,0.28)",
+                    fontSize: 13
+                  }}
+                >
+                  Carregando lançamentos...
+                </div>
+              ) : filteredTx.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "40px 0",
+                    color: "rgba(255,255,255,0.24)",
+                    fontSize: 13
+                  }}
+                >
+                  Nenhum lançamento neste mês.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 2 }}>
+                  {filteredTx.map((tx) => (
+                    <TxRow
+                      key={tx.id}
+                      tx={tx}
+                      readonly={showDemo}
+                      onDelete={async () =>
+                        deleteDoc(doc(db, "workspaces", workspace.id, "transactions", tx.id))
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </WsCard>
           </div>
 
-          <aside className="section">
-            <div className="panel section">
-              <h2>Resumo de {monthLabel(showDemo ? "2026-04" : monthKey)}</h2>
-              {summary.insights.map((insight) => (
-                <p key={insight} className="muted">
-                  {insight}
+          {/* Right sidebar */}
+          <aside className="ws-sidebar" style={{ display: "grid", gap: 16 }}>
+            {/* Summary card */}
+            <WsCard>
+              <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>
+                Resumo de {monthLabel(showDemo ? "2026-04" : monthKey)}
+              </h3>
+              {summary.insights.map((ins) => (
+                <p
+                  key={ins}
+                  style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 6 }}
+                >
+                  {ins}
                 </p>
               ))}
-              <textarea className="textarea" readOnly value={summary.shareText} />
+              <textarea
+                readOnly
+                value={summary.shareText}
+                style={{
+                  width: "100%",
+                  marginTop: 10,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 8,
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: 11.5,
+                  padding: "10px 12px",
+                  resize: "vertical",
+                  minHeight: 80,
+                  lineHeight: 1.6
+                }}
+              />
               <button
-                className="btn secondary"
                 onClick={() => navigator.clipboard.writeText(summary.shareText)}
+                style={{
+                  marginTop: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "rgba(255,255,255,0.45)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  transition: "color .18s"
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "#fff")}
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.color = "rgba(255,255,255,0.45)")
+                }
               >
-                <Copy size={17} /> Copiar resumo
+                <Copy size={13} /> Copiar
               </button>
-            </div>
+            </WsCard>
 
-            <div className="panel section">
-              <h2>Compartilhar acesso</h2>
-              <p className="muted">
-                Convide alguem para ver e editar os dados deste workspace como editor.
-              </p>
-              {isOwner ? (
-                <>
-                  <button className="btn" onClick={createInvite}>
-                    <Users size={17} /> Criar link de convite
-                  </button>
-                  {inviteLink && (
-                    <div className="success">
-                      <div style={{ wordBreak: "break-all" }}>{inviteLink}</div>
-                      <button
-                        className="btn secondary"
-                        style={{ marginTop: 10 }}
-                        onClick={() => navigator.clipboard.writeText(inviteLink)}
-                      >
-                        <Copy size={17} /> Copiar link
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="muted">Apenas owners gerenciam convites na v1.</div>
-              )}
-            </div>
-
-            <div className="panel section">
-              <h2>Open Finance</h2>
-              <p className="muted">
-                Estamos avaliando conexao bancaria automatica. Entre na fila sem compartilhar
-                dados bancarios agora.
-              </p>
-              {waitlistDone ? (
-                <div className="success">Interesse registrado.</div>
-              ) : (
-                <button className="btn secondary" onClick={joinWaitlist}>
-                  <Handshake size={17} /> Quero entrar na fila
+            {/* Invite card */}
+            {isOwner && (
+              <WsCard>
+                <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+                  Convidar membro
+                </h3>
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "rgba(255,255,255,0.38)",
+                    lineHeight: 1.6,
+                    marginBottom: 12
+                  }}
+                >
+                  Compartilhe acesso ao workspace como editor.
+                </p>
+                <button
+                  onClick={createInvite}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#000",
+                    background: G,
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "10px 14px",
+                    cursor: "pointer",
+                    width: "100%",
+                    justifyContent: "center"
+                  }}
+                >
+                  <Users size={14} /> Gerar link de convite
                 </button>
-              )}
-            </div>
-
-            <div className="panel section">
-              <h2>Controle do workspace</h2>
-              {isOwner ? (
-                <button className="btn danger" onClick={deleteWorkspace}>
-                  <Trash2 size={17} /> Excluir workspace
-                </button>
-              ) : (
-                <button className="btn secondary" onClick={leaveWorkspace}>
-                  Sair deste workspace
-                </button>
-              )}
-            </div>
+                {inviteLink && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      background: "rgba(184,245,90,0.07)",
+                      border: "1px solid rgba(184,245,90,0.18)",
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      fontSize: 11.5,
+                      color: G,
+                      wordBreak: "break-all",
+                      lineHeight: 1.5
+                    }}
+                  >
+                    {inviteLink}
+                    <button
+                      onClick={() => navigator.clipboard.writeText(inviteLink)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 5,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: G,
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                        marginTop: 6
+                      }}
+                    >
+                      <Copy size={11} /> Copiar link
+                    </button>
+                  </div>
+                )}
+              </WsCard>
+            )}
           </aside>
-        </section>
+        </div>
       </div>
-    </main>
+
+      {/* Add manual modal */}
+      {addOpen && (
+        <AddTransactionModal
+          user={user}
+          profile={profile}
+          workspaceId={workspace.id}
+          monthKey={monthKey}
+          onClose={() => setAddOpen(false)}
+          onCreated={async () => {
+            await markReal();
+            setAddOpen(false);
+          }}
+        />
+      )}
+
+      {/* Import preview modal */}
+      {importState && (
+        <ImportModal
+          state={importState}
+          onCancel={() => setImportState(null)}
+          onConfirm={confirmImport}
+          onToggle={(id) =>
+            importState.phase === "preview" &&
+            setImportState({
+              ...importState,
+              rows: importState.rows.map((r) =>
+                r._id === id ? { ...r, selected: !r.selected } : r
+              )
+            })
+          }
+          onCategoryChange={(id, cat) =>
+            importState.phase === "preview" &&
+            setImportState({
+              ...importState,
+              rows: importState.rows.map((r) =>
+                r._id === id ? { ...r, category: cat } : r
+              )
+            })
+          }
+        />
+      )}
+
+      {/* Settings drawer */}
+      {settingsOpen && (
+        <SettingsModal
+          workspace={workspace}
+          member={member}
+          isOwner={isOwner}
+          onClose={() => setSettingsOpen(false)}
+          onDelete={deleteWorkspace}
+          onLeave={async () => {
+            await updateDoc(
+              doc(db, "workspaces", workspace.id, "members", user.uid),
+              { status: "left", leftAt: serverTimestamp() }
+            );
+          }}
+        />
+      )}
+    </div>
   );
 }
 
-function TransactionForm({
+// ─── Balance header ──────────────────────────────────────────────────────────
+
+function BalanceHeader({
+  summary,
+  showDemo,
+  monthKey
+}: {
+  summary: ReturnType<typeof buildMonthlySummary>;
+  showDemo: boolean;
+  monthKey: string;
+}) {
+  const isPositive = summary.balance >= 0;
+  return (
+    <div
+      style={{
+        background: "rgba(255,255,255,0.025)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 16,
+        padding: "28px 32px",
+        animation: "fadeUp .45s ease both"
+      }}
+    >
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.36)", fontWeight: 600, marginBottom: 8, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        {showDemo ? "Demo — Abril 2026" : monthLabel(monthKey)}
+      </p>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 32, flexWrap: "wrap" }}>
+        <div>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Saldo do mês</p>
+          <p
+            style={{
+              fontSize: "clamp(36px,5vw,56px)",
+              fontWeight: 900,
+              letterSpacing: "-0.04em",
+              color: isPositive ? G : "#ff8080",
+              lineHeight: 1
+            }}
+          >
+            {formatCurrency(summary.balance)}
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 28, paddingBottom: 4 }}>
+          <div>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Entradas</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color: G, letterSpacing: "-0.03em" }}>
+              +{formatCurrency(summary.income)}
+            </p>
+          </div>
+          <div>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Saídas</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color: "#ff8080", letterSpacing: "-0.03em" }}>
+              -{formatCurrency(summary.expense)}
+            </p>
+          </div>
+          {summary.savingsRate > 0 && (
+            <div>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Economia</p>
+              <p style={{ fontSize: 20, fontWeight: 800, color: "rgba(255,255,255,0.7)", letterSpacing: "-0.03em" }}>
+                {summary.savingsRate.toFixed(0)}%
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Upload zone ─────────────────────────────────────────────────────────────
+
+function UploadZone({
+  onFiles,
+  onAddManual
+}: {
+  onFiles: (files: File[]) => void;
+  onAddManual: () => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const accept = ".pdf,.csv,.ofx,.qfx,image/*";
+
+  const onDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    setDragging(true);
+  };
+  const onDragLeave = () => setDragging(false);
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length) onFiles(files);
+  };
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length) onFiles(files);
+    e.target.value = "";
+  };
+
+  return (
+    <div>
+      <div
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          border: `1.5px dashed ${dragging ? G : "rgba(255,255,255,0.14)"}`,
+          borderRadius: 14,
+          padding: "28px 24px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
+          cursor: "pointer",
+          background: dragging
+            ? "rgba(184,245,90,0.05)"
+            : "rgba(255,255,255,0.018)",
+          transition: "all .2s"
+        }}
+      >
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            background: dragging ? "rgba(184,245,90,0.15)" : "rgba(255,255,255,0.06)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "all .2s"
+          }}
+        >
+          <Upload size={18} color={dragging ? G : "rgba(255,255,255,0.5)"} />
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+            {dragging ? "Solte os arquivos aqui" : "Importar extrato"}
+          </p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.36)" }}>
+            Arraste ou clique para selecionar
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          {[
+            { icon: <FileText size={13} />, label: "PDF" },
+            { icon: <FileText size={13} />, label: "CSV" },
+            { icon: <FileText size={13} />, label: "OFX" },
+            { icon: <ImageIcon size={13} />, label: "Imagem" }
+          ].map(({ icon, label }) => (
+            <span
+              key={label}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11,
+                fontWeight: 600,
+                color: "rgba(255,255,255,0.38)",
+                background: "rgba(255,255,255,0.06)",
+                borderRadius: 6,
+                padding: "3px 8px"
+              }}
+            >
+              {icon} {label}
+            </span>
+          ))}
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={accept}
+          multiple
+          style={{ display: "none" }}
+          onChange={onPick}
+        />
+      </div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onAddManual();
+        }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 12,
+          fontWeight: 600,
+          color: "rgba(255,255,255,0.36)",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          padding: "8px 0 0",
+          transition: "color .18s"
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = G)}
+        onMouseLeave={(e) =>
+          (e.currentTarget.style.color = "rgba(255,255,255,0.36)")
+        }
+      >
+        <Plus size={13} /> Adicionar manualmente
+      </button>
+    </div>
+  );
+}
+
+// ─── Transaction row ──────────────────────────────────────────────────────────
+
+function TxRow({
+  tx,
+  readonly,
+  onDelete
+}: {
+  tx: Transaction;
+  readonly: boolean;
+  onDelete: () => void;
+}) {
+  const [hov, setHov] = useState(false);
+  const isIncome = tx.type === "income";
+  const parts = tx.date.split("-");
+  const dateLabel = parts.length === 3 ? `${parts[2]}/${parts[1]}` : tx.date;
+
+  return (
+    <div
+      className="ws-tx-row"
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "8px 1fr auto auto",
+        gap: "0 14px",
+        alignItems: "center",
+        padding: "10px 12px",
+        borderRadius: 10,
+        transition: "background .15s"
+      }}
+    >
+      <div
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: categoryColor(tx.category),
+          boxShadow: `0 0 8px ${categoryColor(tx.category)}66`,
+          flexShrink: 0
+        }}
+      />
+      <div style={{ minWidth: 0 }}>
+        <p
+          style={{
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: "#e8e9ec",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis"
+          }}
+        >
+          {tx.description}
+        </p>
+        <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
+          {tx.category} · {dateLabel}
+        </p>
+      </div>
+      <span
+        style={{
+          fontSize: 14,
+          fontWeight: 800,
+          letterSpacing: "-0.02em",
+          color: isIncome ? G : "#ff8080",
+          whiteSpace: "nowrap"
+        }}
+      >
+        {isIncome ? "+" : "-"}
+        {formatCurrency(tx.amount)}
+      </span>
+      {!readonly && (
+        <button
+          onClick={onDelete}
+          style={{
+            opacity: hov ? 1 : 0,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "rgba(255,80,80,0.65)",
+            padding: 4,
+            borderRadius: 6,
+            display: "flex",
+            alignItems: "center",
+            transition: "opacity .15s"
+          }}
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Import modal ─────────────────────────────────────────────────────────────
+
+function ImportModal({
+  state,
+  onCancel,
+  onConfirm,
+  onToggle,
+  onCategoryChange
+}: {
+  state: ImportState;
+  onCancel: () => void;
+  onConfirm: (rows: ParsedWithMeta[]) => void;
+  onToggle: (id: string) => void;
+  onCategoryChange: (id: string, cat: string) => void;
+}) {
+  const isParsing = state.phase === "parsing";
+  const isSaving = state.phase === "saving";
+  const rows = state.phase !== "parsing" ? state.rows : [];
+  const selectedCount = rows.filter((r) => r.selected).length;
+  const error = state.phase === "preview" ? state.error : undefined;
+
+  const categoriesFor = (type: "income" | "expense") =>
+    type === "income"
+      ? CATEGORIES.filter((c) => true)
+      : CATEGORIES.filter((c) => c !== "Recebimentos");
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)",
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24
+      }}
+      onClick={(e) => e.target === e.currentTarget && !isSaving && onCancel()}
+    >
+      <div
+        style={{
+          background: "#0e0f11",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 18,
+          width: "100%",
+          maxWidth: 680,
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          boxShadow: "0 40px 100px rgba(0,0,0,0.6)"
+        }}
+      >
+        {/* Modal header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.07)"
+          }}
+        >
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>
+              {isParsing
+                ? "Lendo arquivo..."
+                : isSaving
+                ? "Salvando..."
+                : "Revisar importação"}
+            </h2>
+            {!isParsing && !isSaving && (
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 3 }}>
+                {selectedCount} de {rows.length} transações selecionadas
+              </p>
+            )}
+          </div>
+          {!isSaving && (
+            <button
+              onClick={onCancel}
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                border: "none",
+                borderRadius: 8,
+                color: "rgba(255,255,255,0.55)",
+                cursor: "pointer",
+                padding: "6px 8px",
+                display: "flex"
+              }}
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
+
+        {/* Modal body */}
+        <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
+          {isParsing || isSaving ? (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 14,
+                padding: "48px 0"
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  border: "3px solid rgba(184,245,90,0.2)",
+                  borderTopColor: G,
+                  borderRadius: "50%",
+                  animation: "spin .8s linear infinite"
+                }}
+              />
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
+                {isParsing
+                  ? "Extraindo transações com IA..."
+                  : "Salvando lançamentos..."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {error && (
+                <div
+                  style={{
+                    background: "rgba(255,80,80,0.1)",
+                    border: "1px solid rgba(255,80,80,0.25)",
+                    borderRadius: 8,
+                    padding: "10px 14px",
+                    fontSize: 12.5,
+                    color: "#ff8080",
+                    marginBottom: 14
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+              {rows.length === 0 ? (
+                <p
+                  style={{
+                    textAlign: "center",
+                    padding: "40px 0",
+                    color: "rgba(255,255,255,0.28)",
+                    fontSize: 13
+                  }}
+                >
+                  Nenhuma transação encontrada no arquivo.
+                </p>
+              ) : (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {/* Header */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "28px 1fr 140px 110px",
+                      gap: 10,
+                      padding: "4px 8px",
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      color: "rgba(255,255,255,0.28)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em"
+                    }}
+                  >
+                    <span />
+                    <span>Descrição</span>
+                    <span>Categoria</span>
+                    <span style={{ textAlign: "right" }}>Valor</span>
+                  </div>
+                  {rows.map((row) => (
+                    <div
+                      key={row._id}
+                      onClick={() => onToggle(row._id)}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "28px 1fr 140px 110px",
+                        gap: 10,
+                        alignItems: "center",
+                        padding: "10px 8px",
+                        borderRadius: 10,
+                        background: row.selected
+                          ? "rgba(255,255,255,0.04)"
+                          : "transparent",
+                        opacity: row.selected ? 1 : 0.38,
+                        cursor: "pointer",
+                        transition: "all .15s",
+                        border: `1px solid ${row.selected ? "rgba(255,255,255,0.07)" : "transparent"}`
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 5,
+                          border: `1.5px solid ${row.selected ? G : "rgba(255,255,255,0.22)"}`,
+                          background: row.selected ? G : "transparent",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                          transition: "all .15s"
+                        }}
+                      >
+                        {row.selected && <Check size={11} color="#000" strokeWidth={3} />}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <p
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: "#e8e9ec",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis"
+                          }}
+                        >
+                          {row.description}
+                        </p>
+                        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+                          {row.date}
+                        </p>
+                      </div>
+                      <select
+                        value={row.category}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          onCategoryChange(row._id, e.target.value);
+                        }}
+                        style={{
+                          fontSize: 12,
+                          background: `${categoryColor(row.category)}18`,
+                          border: `1px solid ${categoryColor(row.category)}44`,
+                          borderRadius: 6,
+                          color: categoryColor(row.category),
+                          padding: "4px 8px",
+                          cursor: "pointer",
+                          fontWeight: 600
+                        }}
+                      >
+                        {categoriesFor(row.type).map((c) => (
+                          <option key={c} value={c} style={{ background: "#111", color: "#fff" }}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 800,
+                          color: row.type === "income" ? G : "#ff8080",
+                          textAlign: "right",
+                          letterSpacing: "-0.02em"
+                        }}
+                      >
+                        {row.type === "income" ? "+" : "-"}
+                        {formatCurrency(row.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Modal footer */}
+        {!isParsing && !isSaving && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: 10,
+              padding: "16px 24px",
+              borderTop: "1px solid rgba(255,255,255,0.07)"
+            }}
+          >
+            <button
+              onClick={onCancel}
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "rgba(255,255,255,0.45)",
+                background: "transparent",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8,
+                padding: "10px 18px",
+                cursor: "pointer"
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => onConfirm(rows)}
+              disabled={selectedCount === 0}
+              style={{
+                fontSize: 13,
+                fontWeight: 800,
+                color: "#000",
+                background: selectedCount === 0 ? "rgba(184,245,90,0.35)" : G,
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 22px",
+                cursor: selectedCount === 0 ? "not-allowed" : "pointer",
+                transition: "all .18s"
+              }}
+            >
+              Importar {selectedCount} lançamento{selectedCount !== 1 ? "s" : ""}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Add transaction modal ────────────────────────────────────────────────────
+
+function AddTransactionModal({
   user,
   profile,
   workspaceId,
   monthKey,
+  onClose,
   onCreated
 }: {
   user: User;
   profile: Profile;
   workspaceId: string;
   monthKey: string;
+  onClose: () => void;
   onCreated: () => Promise<void>;
 }) {
   const [type, setType] = useState<TransactionType>("expense");
@@ -1259,14 +2343,11 @@ function TransactionForm({
   const [category, setCategory] = useState("Alimentacao");
   const [date, setDate] = useState(`${monthKey}-01`);
   const [busy, setBusy] = useState(false);
-  const categories = defaultCategories.filter((item) => item.type === type);
+  const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros");
+  const categories = type === "income" ? ["Recebimentos"] : [...expenseCategories, "Outros"];
 
-  useEffect(() => {
-    setDate(`${monthKey}-01`);
-  }, [monthKey]);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  async function submit(e: FormEvent) {
+    e.preventDefault();
     setBusy(true);
     try {
       await addDoc(collection(db, "workspaces", workspaceId, "transactions"), {
@@ -1281,8 +2362,6 @@ function TransactionForm({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      setDescription("");
-      setAmount("");
       await onCreated();
     } finally {
       setBusy(false);
@@ -1290,111 +2369,361 @@ function TransactionForm({
   }
 
   return (
-    <form className="panel section" onSubmit={submit}>
-      <div className="section-header">
-        <h2>Novo lancamento</h2>
-        <span className="tag">{type === "income" ? "Entrada" : "Saida"}</span>
-      </div>
-      <div className="two-col">
-        <select
-          className="select"
-          value={type}
-          onChange={(event) => {
-            const nextType = event.target.value as TransactionType;
-            setType(nextType);
-            setCategory(nextType === "income" ? "Renda" : "Alimentacao");
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)",
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: "#0e0f11",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 18,
+          width: "100%",
+          maxWidth: 440,
+          boxShadow: "0 40px 100px rgba(0,0,0,0.6)"
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.07)"
           }}
         >
-          <option value="expense">Saida</option>
-          <option value="income">Entrada</option>
-        </select>
-        <input
-          className="input"
-          type="number"
-          min="0"
-          step="0.01"
-          placeholder="Valor"
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
-          required
-        />
+          <h2 style={{ fontSize: 16, fontWeight: 700 }}>Adicionar lançamento</h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.07)",
+              border: "none",
+              borderRadius: 8,
+              color: "rgba(255,255,255,0.55)",
+              cursor: "pointer",
+              padding: "6px 8px",
+              display: "flex"
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={submit} style={{ padding: 24, display: "grid", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <select
+              value={type}
+              onChange={(e) => {
+                const t = e.target.value as TransactionType;
+                setType(t);
+                setCategory(t === "income" ? "Recebimentos" : "Alimentacao");
+              }}
+              style={inputStyle}
+            >
+              <option value="expense">Saída</option>
+              <option value="income">Entrada</option>
+            </select>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Valor (R$)"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              required
+              style={inputStyle}
+            />
+          </div>
+          <input
+            placeholder="Descrição"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+            style={inputStyle}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              style={inputStyle}
+            >
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              required
+              style={inputStyle}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={busy}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+              fontWeight: 800,
+              fontSize: 14,
+              color: "#000",
+              background: G,
+              border: "none",
+              borderRadius: 10,
+              padding: "13px 0",
+              cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.7 : 1,
+              transition: "all .18s"
+            }}
+          >
+            {busy ? (
+              <div
+                style={{
+                  width: 16,
+                  height: 16,
+                  border: "2.5px solid rgba(0,0,0,0.3)",
+                  borderTopColor: "#000",
+                  borderRadius: "50%",
+                  animation: "spin .7s linear infinite"
+                }}
+              />
+            ) : (
+              <>
+                <Plus size={16} /> Adicionar
+              </>
+            )}
+          </button>
+        </form>
       </div>
-      <input
-        className="input"
-        placeholder="Descricao"
-        value={description}
-        onChange={(event) => setDescription(event.target.value)}
-        required
-      />
-      <div className="two-col">
-        <select
-          className="select"
-          value={category}
-          onChange={(event) => setCategory(event.target.value)}
-        >
-          {categories.map((item) => (
-            <option key={item.name} value={item.name}>
-              {item.name}
-            </option>
-          ))}
-        </select>
-        <input
-          className="input"
-          type="date"
-          value={date}
-          onChange={(event) => setDate(event.target.value)}
-          required
-        />
-      </div>
-      <button className="btn" disabled={busy}>
-        <Plus size={17} /> Lancar
-      </button>
-    </form>
+    </div>
   );
 }
 
-function TransactionRow({
-  workspaceId,
-  transaction,
-  readonly
+// ─── Settings modal ───────────────────────────────────────────────────────────
+
+function SettingsModal({
+  workspace,
+  member,
+  isOwner,
+  onClose,
+  onDelete,
+  onLeave
 }: {
-  workspaceId: string;
-  transaction: Transaction;
-  readonly: boolean;
+  workspace: Workspace;
+  member: Member;
+  isOwner: boolean;
+  onClose: () => void;
+  onDelete: () => Promise<void>;
+  onLeave: () => Promise<void>;
 }) {
-  async function remove() {
-    await deleteDoc(doc(db, "workspaces", workspaceId, "transactions", transaction.id));
-  }
+  const [busy, setBusy] = useState(false);
 
   return (
-    <div className="transaction">
-      <div>
-        <strong>{transaction.description}</strong>
-        <div className="muted">
-          {transaction.category} · {transaction.date} · {transaction.createdByName}
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)",
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: "#0e0f11",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 18,
+          width: "100%",
+          maxWidth: 400,
+          boxShadow: "0 40px 100px rgba(0,0,0,0.6)"
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.07)"
+          }}
+        >
+          <h2 style={{ fontSize: 16, fontWeight: 700 }}>Configurações do workspace</h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.07)",
+              border: "none",
+              borderRadius: 8,
+              color: "rgba(255,255,255,0.55)",
+              cursor: "pointer",
+              padding: "6px 8px",
+              display: "flex"
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div style={{ padding: "20px 24px", display: "grid", gap: 20 }}>
+          <div>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginBottom: 4 }}>
+              Workspace
+            </p>
+            <p style={{ fontSize: 15, fontWeight: 700 }}>{workspace.name}</p>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 2 }}>
+              Seu papel: {member.role === "owner" ? "Owner" : "Editor"}
+            </p>
+          </div>
+          <div
+            style={{
+              borderTop: "1px solid rgba(255,255,255,0.07)",
+              paddingTop: 20,
+              display: "grid",
+              gap: 10
+            }}
+          >
+            {isOwner ? (
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  await onDelete();
+                  setBusy(false);
+                  onClose();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 7,
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: "#fff",
+                  background: "rgba(255,80,80,0.15)",
+                  border: "1px solid rgba(255,80,80,0.25)",
+                  borderRadius: 8,
+                  padding: "11px 0",
+                  cursor: "pointer"
+                }}
+              >
+                <Trash2 size={14} /> Excluir workspace
+              </button>
+            ) : (
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  await onLeave();
+                  setBusy(false);
+                  onClose();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 7,
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: "rgba(255,255,255,0.65)",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8,
+                  padding: "11px 0",
+                  cursor: "pointer"
+                }}
+              >
+                Sair do workspace
+              </button>
+            )}
+          </div>
         </div>
       </div>
-      <span className={transaction.type === "income" ? "amount-income" : "amount-expense"}>
-        {transaction.type === "income" ? "+" : "-"}
-        {formatCurrency(transaction.amount)}
-      </span>
-      {!readonly && (
-        <button className="btn ghost" aria-label="Excluir lancamento" onClick={remove}>
-          <Trash2 size={17} />
-        </button>
-      )}
     </div>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone: string }) {
+// ─── Shared UI helpers ───────────────────────────────────────────────────────
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: 8,
+  color: "#fff",
+  fontSize: 13,
+  padding: "11px 13px"
+};
+
+function WsCard({
+  children,
+  style = {}
+}: {
+  children: ReactNode;
+  style?: CSSProperties;
+}) {
   return (
-    <div className="stat">
-      <span className="muted">{label}</span>
-      <strong className={tone === "income" ? "amount-income" : tone === "expense" ? "amount-expense" : ""}>
-        {value}
-      </strong>
+    <div
+      style={{
+        background: "rgba(255,255,255,0.025)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 14,
+        padding: "20px 22px",
+        ...style
+      }}
+    >
+      {children}
     </div>
+  );
+}
+
+function IconBtn({
+  icon,
+  label,
+  onClick
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="ws-icon-btn"
+      onClick={onClick}
+      title={label}
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 8,
+        background: "transparent",
+        border: "1px solid rgba(255,255,255,0.1)",
+        color: "rgba(255,255,255,0.5)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "all .18s"
+      }}
+    >
+      {icon}
+    </button>
   );
 }
 
@@ -1414,15 +2743,7 @@ function CenteredCard({ children }: { children: React.ReactNode }) {
   );
 }
 
-async function ensureDefaultWorkspace(user: User, displayName: string) {
-  const memberQuery = query(
-    collectionGroup(db, "members"),
-    where("uid", "==", user.uid),
-    where("status", "==", "active")
-  );
-  const existing = await getDocs(memberQuery);
-  if (!existing.empty) return;
-
+async function ensureDefaultWorkspace(user: User, displayName: string): Promise<string> {
   const workspaceRef = doc(collection(db, "workspaces"));
   const batch = writeBatch(db);
 
@@ -1444,6 +2765,13 @@ async function ensureDefaultWorkspace(user: User, displayName: string) {
   });
 
   await batch.commit();
+
+  await updateDoc(doc(db, "users", user.uid), {
+    workspaceIds: [workspaceRef.id],
+    updatedAt: serverTimestamp()
+  });
+
+  return workspaceRef.id;
 }
 
 function errorMessage(err: unknown) {

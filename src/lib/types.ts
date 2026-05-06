@@ -39,6 +39,7 @@ export type Transaction = {
   monthKey: string;
   createdBy: string;
   createdByName: string;
+  sourceLabel?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 };
