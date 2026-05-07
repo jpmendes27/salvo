@@ -44,6 +44,39 @@ export type Transaction = {
   updatedAt?: unknown;
 };
 
+export type PlannedItemStatus = "planned" | "paid" | "skipped";
+
+export type PlannedItem = {
+  id: string;
+  type: TransactionType;
+  title: string;
+  amount: number;
+  category: string;
+  dueDay: number;
+  monthKey: string;
+  status: PlannedItemStatus;
+  createdBy: string;
+  createdByName: string;
+  linkedTransactionId?: string;
+  recurringId?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
+export type RecurringItem = {
+  id: string;
+  type: TransactionType;
+  title: string;
+  amount: number;
+  category: string;
+  dueDay: number;
+  active: boolean;
+  createdBy: string;
+  createdByName: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
 export type MonthlySummary = {
   income: number;
   expense: number;

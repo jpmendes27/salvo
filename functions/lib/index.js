@@ -39,6 +39,46 @@ Regras para transações:
 - "description" deve ser o texto original da transação, sem truncar
 - NÃO inclua campo "category" — isso é processado separadamente
 - Retorne APENAS o JSON puro, sem markdown, sem texto adicional, sem explicação`;
+function extractJsonObject(rawText) {
+    const start = rawText.indexOf("{");
+    const end = rawText.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start)
+        return null;
+    return rawText.slice(start, end + 1);
+}
+async function parseOrRepairJson(client, rawText) {
+    const jsonText = extractJsonObject(rawText);
+    if (!jsonText) {
+        throw new Error("No JSON in Claude response");
+    }
+    try {
+        return JSON.parse(jsonText);
+    }
+    catch (err) {
+        const repair = await client.messages.create({
+            model: "claude-sonnet-4-6",
+            max_tokens: 8192,
+            system: "Você corrige JSON financeiro. Retorne somente um JSON válido no formato {\"sourceLabel\":\"string\",\"transactions\":[{\"date\":\"YYYY-MM-DD\",\"description\":\"string\",\"amount\":number,\"type\":\"income\"|\"expense\"}]}. Não invente transações.",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: `Corrija este JSON inválido preservando os dados existentes. Erro original: ${err instanceof Error ? err.message : String(err)}\n\n${jsonText}`
+                        }
+                    ]
+                }
+            ]
+        });
+        const repairedText = repair.content.find((b) => b.type === "text")?.text ?? "{}";
+        const repairedJson = extractJsonObject(repairedText);
+        if (!repairedJson) {
+            throw new Error("No JSON in repaired Claude response");
+        }
+        return JSON.parse(repairedJson);
+    }
+}
 exports.parseBankStatement = (0, https_1.onRequest)({
     cors: true,
     secrets: ["ANTHROPIC_API_KEY"],
@@ -57,9 +97,9 @@ exports.parseBankStatement = (0, https_1.onRequest)({
         res.status(405).json({ error: "Method Not Allowed" });
         return;
     }
-    const { fileData, mimeType } = req.body;
-    if (!fileData || !mimeType) {
-        res.status(400).json({ error: "Missing fileData or mimeType" });
+    const { fileData, mimeType, textData, filename } = req.body;
+    if ((!fileData && !textData) || !mimeType) {
+        res.status(400).json({ error: "Missing fileData/textData or mimeType" });
         return;
     }
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -71,20 +111,29 @@ exports.parseBankStatement = (0, https_1.onRequest)({
     const isImage = mimeType.startsWith("image/") &&
         ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mimeType);
     const isPDF = mimeType === "application/pdf";
-    if (!isImage && !isPDF) {
+    const isText = mimeType === "text/plain";
+    if (!isImage && !isPDF && !isText) {
         res.status(400).json({ error: "Unsupported mimeType: " + mimeType });
         return;
     }
     try {
         let content;
-        if (isImage) {
+        if (isText) {
+            content = [
+                {
+                    type: "text",
+                    text: `Arquivo: ${filename || "extrato.txt"}\n\nExtraia todas as transações financeiras deste texto de extrato/fatura bancária:\n\n${(textData || "").slice(0, 120000)}`
+                }
+            ];
+        }
+        else if (isImage) {
             content = [
                 {
                     type: "image",
                     source: {
                         type: "base64",
                         media_type: mimeType,
-                        data: fileData
+                        data: fileData || ""
                     }
                 },
                 {
@@ -100,7 +149,7 @@ exports.parseBankStatement = (0, https_1.onRequest)({
                     source: {
                         type: "base64",
                         media_type: "application/pdf",
-                        data: fileData
+                        data: fileData || ""
                     }
                 },
                 {
@@ -111,17 +160,12 @@ exports.parseBankStatement = (0, https_1.onRequest)({
         }
         const message = await client.messages.create({
             model: "claude-sonnet-4-6",
-            max_tokens: 4096,
+            max_tokens: 8192,
             system: SYSTEM_PROMPT,
             messages: [{ role: "user", content }]
         });
         const rawText = message.content.find((b) => b.type === "text")?.text ?? "{}";
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            res.status(500).json({ error: "No JSON in Claude response", raw: rawText });
-            return;
-        }
-        const parsed = JSON.parse(jsonMatch[0]);
+        const parsed = await parseOrRepairJson(client, rawText);
         const sourceLabel = parsed.sourceLabel ?? "Extrato";
         const transactions = (parsed.transactions ?? []).map((t) => ({
             ...t,

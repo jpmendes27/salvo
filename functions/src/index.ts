@@ -1,7 +1,12 @@
 import { onRequest } from "firebase-functions/v2/https";
 import Anthropic from "@anthropic-ai/sdk";
+import { Resend } from "resend";
 
-const SYSTEM_PROMPT = `Você é um extrator especializado de transações financeiras de extratos bancários brasileiros.
+function buildSystemPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `Hoje é ${today}. Use esta data como referência para inferir o ano quando as datas do documento não tiverem ano explícito (ex: "06 MAI" → use o ano corrente ou o mais próximo cronologicamente).
+
+Você é um extrator especializado de transações financeiras de extratos bancários brasileiros.
 
 Dado um arquivo (PDF ou imagem), extraia TODAS as transações financeiras visíveis e retorne SOMENTE um JSON válido:
 
@@ -19,11 +24,13 @@ Dado um arquivo (PDF ou imagem), extraia TODAS as transações financeiras visí
 
 Regras para sourceLabel:
 - Identifique o banco/instituição e tipo do documento
-- Para fatura de cartão: "NomeBanco •••• XXXX" (últimos 4 dígitos do cartão principal, se visível)
-- Para extrato de conta corrente/poupança: "NomeBanco Conta"
+- Para fatura de cartão de crédito: "NomeBanco •••• XXXX" (últimos 4 dígitos do cartão, se visível; senão "NomeBanco Cartão")
+- Para extrato/tela de conta corrente, poupança ou conta digital: "NomeBanco Conta"
 - Para carteira digital (PicPay, Mercado Pago): nome da carteira
-- Exemplos: "Nubank •••• 3640", "Nubank Conta", "PicPay", "Itaú •••• 1234", "Bradesco Conta"
-- Se não identificar o banco: "Extrato"
+- Exemplos: "Nubank •••• 3640", "Nubank Conta", "Nubank Cartão", "PicPay", "Itaú •••• 1234", "Bradesco Conta", "Inter Conta"
+- Se vir o logo/nome Nubank e a tela mostrar PIX, transferências, débitos em conta → "Nubank Conta"
+- Se vir o logo/nome Nubank e a tela mostrar compras no crédito, fatura → "Nubank Cartão" ou "Nubank •••• XXXX"
+- NUNCA retorne "Extrato" se conseguir identificar o banco — só use "Extrato" como último recurso absoluto
 
 Regras para transações:
 - Débitos, saídas, compras, tarifas, IOF = "expense"
@@ -34,6 +41,66 @@ Regras para transações:
 - "description" deve ser o texto original da transação, sem truncar
 - NÃO inclua campo "category" — isso é processado separadamente
 - Retorne APENAS o JSON puro, sem markdown, sem texto adicional, sem explicação`;
+}
+
+type ParsedClaudeResponse = {
+  sourceLabel?: string;
+  transactions?: Array<{
+    date: string;
+    description: string;
+    amount: number;
+    type: "income" | "expense";
+  }>;
+};
+
+function extractJsonObject(rawText: string): string | null {
+  const start = rawText.indexOf("{");
+  const end = rawText.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return rawText.slice(start, end + 1);
+}
+
+async function parseOrRepairJson(
+  client: Anthropic,
+  rawText: string
+): Promise<ParsedClaudeResponse> {
+  const jsonText = extractJsonObject(rawText);
+  if (!jsonText) {
+    throw new Error("No JSON in Claude response");
+  }
+
+  try {
+    return JSON.parse(jsonText) as ParsedClaudeResponse;
+  } catch (err) {
+    const repair = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 8192,
+      system:
+        "Você corrige JSON financeiro. Retorne somente um JSON válido no formato {\"sourceLabel\":\"string\",\"transactions\":[{\"date\":\"YYYY-MM-DD\",\"description\":\"string\",\"amount\":number,\"type\":\"income\"|\"expense\"}]}. Não invente transações.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Corrija este JSON inválido preservando os dados existentes. Erro original: ${
+                err instanceof Error ? err.message : String(err)
+              }\n\n${jsonText}`
+            }
+          ]
+        }
+      ]
+    });
+
+    const repairedText =
+      repair.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
+    const repairedJson = extractJsonObject(repairedText);
+    if (!repairedJson) {
+      throw new Error("No JSON in repaired Claude response");
+    }
+    return JSON.parse(repairedJson) as ParsedClaudeResponse;
+  }
+}
 
 export const parseBankStatement = onRequest(
   {
@@ -57,13 +124,15 @@ export const parseBankStatement = onRequest(
       return;
     }
 
-    const { fileData, mimeType } = req.body as {
+    const { fileData, mimeType, textData, filename } = req.body as {
       fileData?: string;
       mimeType?: string;
+      textData?: string;
+      filename?: string;
     };
 
-    if (!fileData || !mimeType) {
-      res.status(400).json({ error: "Missing fileData or mimeType" });
+    if ((!fileData && !textData) || !mimeType) {
+      res.status(400).json({ error: "Missing fileData/textData or mimeType" });
       return;
     }
 
@@ -80,8 +149,9 @@ export const parseBankStatement = onRequest(
       mimeType.startsWith("image/") &&
       ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mimeType);
     const isPDF = mimeType === "application/pdf";
+    const isText = mimeType === "text/plain";
 
-    if (!isImage && !isPDF) {
+    if (!isImage && !isPDF && !isText) {
       res.status(400).json({ error: "Unsupported mimeType: " + mimeType });
       return;
     }
@@ -89,14 +159,21 @@ export const parseBankStatement = onRequest(
     try {
       let content: Anthropic.MessageParam["content"];
 
-      if (isImage) {
+      if (isText) {
+        content = [
+          {
+            type: "text",
+            text: `Arquivo: ${filename || "extrato.txt"}\n\nExtraia todas as transações financeiras deste texto de extrato/fatura bancária:\n\n${(textData || "").slice(0, 120000)}`
+          }
+        ];
+      } else if (isImage) {
         content = [
           {
             type: "image",
             source: {
               type: "base64",
               media_type: mimeType as ImageMediaType,
-              data: fileData
+              data: fileData || ""
             }
           },
           {
@@ -111,7 +188,7 @@ export const parseBankStatement = onRequest(
             source: {
               type: "base64",
               media_type: "application/pdf",
-              data: fileData
+              data: fileData || ""
             }
           },
           {
@@ -123,29 +200,15 @@ export const parseBankStatement = onRequest(
 
       const message = await client.messages.create({
         model: "claude-sonnet-4-6",
-        max_tokens: 4096,
-        system: SYSTEM_PROMPT,
+        max_tokens: 8192,
+        system: buildSystemPrompt(),
         messages: [{ role: "user", content }]
       });
 
       const rawText =
         message.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
 
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        res.status(500).json({ error: "No JSON in Claude response", raw: rawText });
-        return;
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        sourceLabel?: string;
-        transactions: Array<{
-          date: string;
-          description: string;
-          amount: number;
-          type: "income" | "expense";
-        }>;
-      };
+      const parsed = await parseOrRepairJson(client, rawText);
 
       const sourceLabel = parsed.sourceLabel ?? "Extrato";
 
@@ -161,6 +224,100 @@ export const parseBankStatement = onRequest(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Claude API error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
+
+export const sendInviteEmail = onRequest(
+  {
+    cors: true,
+    secrets: ["RESEND_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+  },
+  async (req, res) => {
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method Not Allowed" });
+      return;
+    }
+
+    const { to, workspaceName, inviteLink, fromName } = req.body as {
+      to?: string;
+      workspaceName?: string;
+      inviteLink?: string;
+      fromName?: string;
+    };
+
+    if (!to || !workspaceName || !inviteLink) {
+      res.status(400).json({ error: "Missing required fields: to, workspaceName, inviteLink" });
+      return;
+    }
+
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "RESEND_API_KEY not configured" });
+      return;
+    }
+
+    const resend = new Resend(apiKey);
+    const senderName = fromName || "Fincheck Pro";
+
+    try {
+      const { data, error } = await resend.emails.send({
+        from: `${senderName} via Fincheck Pro <convites@fincheck.pro>`,
+        to: [to],
+        subject: `Você foi convidado para o workspace "${workspaceName}"`,
+        html: `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#09090b;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;padding:40px 20px">
+    <tr><td align="center">
+      <table width="100%" style="max-width:520px;background:#111214;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden">
+        <tr><td style="padding:32px 36px 0">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.3)">FINCHECK PRO</p>
+          <h1 style="margin:0 0 24px;font-size:22px;font-weight:800;color:#fff;line-height:1.3">Você foi convidado para<br><span style="color:#b8f55a">${workspaceName}</span></h1>
+          <p style="margin:0 0 28px;font-size:14px;color:rgba(255,255,255,0.55);line-height:1.7">
+            ${senderName} convidou você para acessar o workspace <strong style="color:rgba(255,255,255,0.85)">${workspaceName}</strong> no Fincheck Pro — controle financeiro inteligente.
+          </p>
+          <a href="${inviteLink}" style="display:inline-block;background:#b8f55a;color:#09090b;font-size:14px;font-weight:800;text-decoration:none;padding:13px 28px;border-radius:9px;margin-bottom:24px">Aceitar convite →</a>
+          <p style="margin:0 0 8px;font-size:11.5px;color:rgba(255,255,255,0.3);line-height:1.6">Ou copie e cole este link no navegador:</p>
+          <p style="margin:0 0 32px;font-size:11px;color:rgba(255,255,255,0.4);word-break:break-all">${inviteLink}</p>
+        </td></tr>
+        <tr><td style="padding:20px 36px;border-top:1px solid rgba(255,255,255,0.06)">
+          <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.22);line-height:1.6">Este link expira em 7 dias. Se você não esperava este convite, pode ignorar este email com segurança.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+      });
+
+      if (error) {
+        console.error("Resend error:", error);
+        res.set("Access-Control-Allow-Origin", "*");
+        res.status(500).json({ error: error.message });
+        return;
+      }
+
+      res.set("Access-Control-Allow-Origin", "*");
+      res.json({ success: true, id: data?.id });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("sendInviteEmail error:", msg);
+      res.set("Access-Control-Allow-Origin", "*");
       res.status(500).json({ error: msg });
     }
   }

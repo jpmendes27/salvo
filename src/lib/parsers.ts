@@ -100,7 +100,7 @@ const CATEGORY_MAP: Record<string, string[]> = {
     "amazon prime", "amazon music", "disney plus", "youtube premium",
     "globoplay", "telecine", "hbo max", "office 365", "office365",
     "linkedin premium", "deezer", "netflix", "spotify", "disney",
-    "apple music", "applecombill", "apple.com", "google play",
+    "apple music", "applecombill", "apple.com", "apple -", "apple", "google play",
     "openai", "chatgpt", "claude", "cloudflare",
     "adobe", "microsoft", "canva", "figma", "notion",
     "kaspersky", "antivirus", "dropbox", "icloud", "onedrive",
@@ -241,15 +241,15 @@ export function categorizeTransaction(
 
   if (FORCE_OUTROS.some((p) => p.test(norm))) return "Outros";
 
-  // Regra 3: CREDITO sozinho
+  // Keyword matching primeiro (longest first)
+  for (const { kw, cat } of SORTED_KEYWORDS) {
+    if (norm.includes(kw)) return cat;
+  }
+
+  // CREDITO sozinho como fallback (ex: "PIX Credito" sem keyword conhecido)
   if (norm.includes("CREDITO")) {
     if (/EMPRESTIMO|FINANCIAMENTO|AFINZ/.test(norm)) return "Emprestimos";
     return "Recebimentos";
-  }
-
-  // Regra 2: keyword matching (longest first)
-  for (const { kw, cat } of SORTED_KEYWORDS) {
-    if (norm.includes(kw)) return cat;
   }
 
   return "Outros";

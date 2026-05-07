@@ -1051,6 +1051,122 @@ button {
   }
 }
 
+/* ── Workspace app ────────────────────────────────────────────── */
+.ws-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+}
+.ws-sidebar { display: grid; gap: 16px; min-width: 0; }
+
+.ws-icon-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(255,255,255,0.45);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.ws-icon-btn:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.ws-tx-row {
+  transition: background .15s;
+}
+.ws-tx-row:hover {
+  background: rgba(255,255,255,0.04) !important;
+  cursor: default;
+}
+
+.ws-filter-btn {
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+/* ── Insights ─────────────────────────────────────────────────── */
+.ins-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.ins-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.ins-card {
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.07);
+  transition: background .2s, border-color .2s, transform .2s;
+}
+.ins-card:hover {
+  background: rgba(255,255,255,0.055);
+  border-color: rgba(255,255,255,0.11);
+}
+.ins-card-accent {
+  background: rgba(255,128,128,0.06);
+  border-color: rgba(255,128,128,0.15);
+}
+.ins-card-accent:hover {
+  background: rgba(255,128,128,0.09);
+}
+.ins-bar-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  align-items: end;
+  height: 72px;
+}
+
+/* Insights grid children need min-width: 0 to allow text truncation */
+.ins-2col > * { min-width: 0; overflow: hidden; }
+.ins-metrics > * { min-width: 0; }
+
+@media (max-width: 960px) {
+  .ws-grid { grid-template-columns: 1fr; }
+  .ws-sidebar { grid-row: 1; display: none; }
+  .ins-metrics { grid-template-columns: repeat(2, 1fr); }
+  .ins-2col { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .ins-metrics { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── Neon loader ──────────────────────────────────────────────── */
+@keyframes neonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes neonCenterPulse {
+  0%, 100% {
+    box-shadow: 0 0 18px #b8f55a, 0 0 36px #b8f55a66, 0 0 70px #b8f55a22;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    box-shadow: 0 0 28px #b8f55a, 0 0 56px #b8f55a88, 0 0 110px #b8f55a33;
+    transform: translate(-50%, -50%) scale(1.18);
+  }
+}
+
+/* Calendar picker icon verde */
+input[type="month"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) sepia(1) saturate(4) hue-rotate(60deg) brightness(1.05);
+  opacity: 0.75;
+  cursor: pointer;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -38,6 +38,9 @@ import {
   FileText,
   ImageIcon,
   LogOut,
+  Mail,
+  MessageCircle,
+  Pencil,
   Plus,
   RefreshCw,
   Settings,
@@ -50,8 +53,9 @@ import { CSSProperties, DragEvent, FormEvent, ReactNode, useCallback, useEffect,
 import { auth, db, googleProvider } from "@/lib/firebase";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { currentMonthKey, formatCurrency, monthLabel } from "@/lib/money";
+import { buildMonthlyPlanSummary } from "@/lib/planning";
 import { buildMonthlySummary } from "@/lib/summary";
-import type { Member, Transaction, TransactionType, Workspace } from "@/lib/types";
+import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction, TransactionType, Workspace } from "@/lib/types";
 import { defaultCategories, demoTransactions } from "@/lib/demo";
 import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, fileToBase64, guessCategory, parseCSV, parseOFX, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
@@ -82,10 +86,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser?.emailVerified) {
-        await currentUser.getIdToken(true);
-      }
+    return onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
     });
@@ -787,6 +788,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceWithMember[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [repairingWorkspace, setRepairingWorkspace] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -818,25 +820,62 @@ function AuthenticatedApp({ user }: { user: User }) {
     if (!profile?.acceptedTermsVersion || !ids?.length) return;
 
     const unsubs = ids.map((wsId) =>
-      onSnapshot(doc(db, "workspaces", wsId), async (wsSnap) => {
-        if (!wsSnap.exists()) return;
-        const memberSnap = await getDoc(doc(db, "workspaces", wsId, "members", user.uid));
-        if (!memberSnap.exists()) return;
-        const entry: WorkspaceWithMember = {
-          workspace: { id: wsSnap.id, ...wsSnap.data() } as Workspace,
-          member: { id: memberSnap.id, workspaceId: wsId, ...memberSnap.data() } as Member
-        };
-        setWorkspaces((prev) => {
-          const rest = prev.filter((e) => e.workspace.id !== wsId);
-          return [...rest, entry];
-        });
-        setActiveWorkspaceId((current) => current || wsId);
-      })
+      onSnapshot(
+        doc(db, "workspaces", wsId, "members", user.uid),
+        (memberSnap) => {
+          if (!memberSnap.exists()) return;
+          const member = { id: memberSnap.id, workspaceId: wsId, ...memberSnap.data() } as Member;
+          if (member.status !== "active") return;
+
+          getDoc(doc(db, "workspaces", wsId))
+            .then((wsSnap) => {
+              if (!wsSnap.exists()) return;
+              const entry: WorkspaceWithMember = {
+                workspace: { id: wsSnap.id, ...wsSnap.data() } as Workspace,
+                member
+              };
+              setWorkspaces((prev) => {
+                const rest = prev.filter((e) => e.workspace.id !== wsId);
+                return [...rest, entry];
+              });
+              setActiveWorkspaceId((current) => current || wsId);
+            })
+            .catch((err) => {
+              setError(`Nao foi possivel abrir o workspace: ${errorMessage(err)}`);
+            });
+        },
+        (err) => {
+          setError(`Nao foi possivel validar seu acesso ao workspace: ${errorMessage(err)}`);
+        }
+      )
     );
 
     return () => unsubs.forEach((u) => u());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.workspaceIds?.join(","), profile?.acceptedTermsVersion, user.uid]);
+
+  useEffect(() => {
+    if (!profile?.acceptedTermsVersion || !profile.workspaceIds?.length || loading || workspaces.length || repairingWorkspace) return;
+    const timer = window.setTimeout(() => {
+      setRepairingWorkspace(true);
+      const displayName = profile.displayName || user.displayName || user.email?.split("@")[0] || "Voce";
+      ensureDefaultWorkspace(user, displayName)
+        .then((workspaceId) => {
+          setError("");
+          setProfile({
+            ...profile,
+            workspaceIds: [workspaceId]
+          });
+          setActiveWorkspaceId(workspaceId);
+        })
+        .catch((err) => {
+          setError(`Nao foi possivel recriar seu workspace: ${errorMessage(err)}`);
+        })
+        .finally(() => setRepairingWorkspace(false));
+    }, 4000);
+
+    return () => window.clearTimeout(timer);
+  }, [loading, profile, repairingWorkspace, setProfile, user, workspaces.length]);
 
   async function acceptLegal() {
     setError("");
@@ -896,7 +935,11 @@ function AuthenticatedApp({ user }: { user: User }) {
   }
 
   if (!workspaces.length) {
-    return <CenteredStatus text="Criando seu primeiro workspace..." />;
+    return (
+      <CenteredStatus
+        text={repairingWorkspace ? "Recriando seu workspace..." : "Criando seu primeiro workspace..."}
+      />
+    );
   }
 
   const activeEntry =
@@ -955,6 +998,10 @@ const PARSE_FUNCTION_URL =
   process.env.NEXT_PUBLIC_FUNCTIONS_URL ||
   "https://parsebankstatement-ihalwtxjpq-uc.a.run.app";
 
+const SEND_EMAIL_FUNCTION_URL =
+  process.env.NEXT_PUBLIC_SEND_EMAIL_URL ||
+  "https://sendinviteemail-ihalwtxjpq-uc.a.run.app";
+
 type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
 
 type ImportState =
@@ -983,6 +1030,8 @@ function WorkspaceApp({
 }) {
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [plannedItems, setPlannedItems] = useState<PlannedItem[]>([]);
+  const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([]);
   const [txLoading, setTxLoading] = useState(true);
   const [error, setError] = useState("");
   const [txFilter, setTxFilter] = useState<"all" | "income" | "expense">("all");
@@ -990,7 +1039,13 @@ function WorkspaceApp({
   const [importState, setImportState] = useState<ImportState | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
+  const [inviteModal, setInviteModal] = useState<"whatsapp" | "email" | null>(null);
+  const [view, setView] = useState<"lancamentos" | "diagnostico">("diagnostico");
+  const [reconcilePrompt, setReconcilePrompt] = useState<
+    { sourceLabel: string; monthKey: string; amount: number; include: boolean }[]
+  >([]);
 
   const workspace = activeEntry.workspace;
   const member = activeEntry.member;
@@ -1011,6 +1066,17 @@ function WorkspaceApp({
     () => buildMonthlySummary(visibleTx, showDemo ? "2026-04" : monthKey),
     [monthKey, showDemo, visibleTx]
   );
+  const planSummary = useMemo(
+    () => buildMonthlyPlanSummary(showDemo ? demoTransactions : transactions, showDemo ? [] : plannedItems),
+    [plannedItems, showDemo, transactions]
+  );
+
+  const prevMonthKey = useMemo(() => {
+    const [y, m] = monthKey.split("-").map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+  }, [monthKey]);
+
+  const [prevTransactions, setPrevTransactions] = useState<Transaction[]>([]);
 
   useEffect(() => {
     setTxLoading(true);
@@ -1031,6 +1097,89 @@ function WorkspaceApp({
       }
     );
   }, [workspace.id, monthKey]);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, "workspaces", workspace.id, "transactions"),
+      where("monthKey", "==", prevMonthKey)
+    );
+    return onSnapshot(q, (snap) => {
+      setPrevTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction));
+    });
+  }, [workspace.id, prevMonthKey]);
+
+  useEffect(() => {
+    if (showDemo) {
+      setPlannedItems([]);
+      return;
+    }
+    const planQuery = query(
+      collection(db, "workspaces", workspace.id, "plannedItems"),
+      where("monthKey", "==", monthKey)
+    );
+    return onSnapshot(
+      planQuery,
+      (snap) => {
+        const items = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }) as PlannedItem)
+          .sort((a, b) => a.dueDay - b.dueDay || a.title.localeCompare(b.title));
+        setPlannedItems(items);
+      },
+      (err) => setError(errorMessage(err))
+    );
+  }, [monthKey, showDemo, workspace.id]);
+
+  // Load all active recurring items (not month-scoped)
+  useEffect(() => {
+    if (showDemo) {
+      setRecurringItems([]);
+      return;
+    }
+    const q = query(
+      collection(db, "workspaces", workspace.id, "recurringItems"),
+      where("active", "==", true)
+    );
+    return onSnapshot(
+      q,
+      (snap) => setRecurringItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RecurringItem)),
+      (err) => setError(errorMessage(err))
+    );
+  }, [showDemo, workspace.id]);
+
+  // Keep a ref so the auto-generation effect reads latest plannedItems without re-triggering itself
+  const plannedItemsRef = useRef<PlannedItem[]>([]);
+  useEffect(() => { plannedItemsRef.current = plannedItems; }, [plannedItems]);
+
+  // Auto-generate plannedItems for current month from active recurring items (idempotent)
+  useEffect(() => {
+    if (!recurringItems.length) return;
+    const existingRecurringIds = new Set(
+      plannedItemsRef.current.filter((p) => p.recurringId).map((p) => p.recurringId!)
+    );
+    const toCreate = recurringItems.filter((r) => !existingRecurringIds.has(r.id));
+    if (!toCreate.length) return;
+
+    const batch = writeBatch(db);
+    for (const r of toCreate) {
+      // Deterministic ID prevents duplicates on concurrent loads
+      const docRef = doc(db, "workspaces", workspace.id, "plannedItems", `${r.id}_${monthKey}`);
+      batch.set(docRef, {
+        type: r.type,
+        title: r.title,
+        amount: r.amount,
+        category: r.category,
+        dueDay: r.dueDay,
+        monthKey,
+        status: "planned",
+        createdBy: r.createdBy,
+        createdByName: r.createdByName,
+        recurringId: r.id,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+    batch.commit().catch(console.error);
+  }, [recurringItems, monthKey, workspace.id]);
 
   async function markReal() {
     if (profile.hasCreatedRealMonth) return;
@@ -1068,12 +1217,14 @@ function WorkspaceApp({
               rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
             );
           } else {
-            // Fallback to Claude when deterministic parser yields too few results
-            const base64 = await fileToBase64(file);
             const resp = await fetch(PARSE_FUNCTION_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ fileData: base64, mimeType: "application/pdf" })
+              body: JSON.stringify({
+                textData: pdfText,
+                mimeType: "text/plain",
+                filename: file.name
+              })
             });
             if (!resp.ok) {
               const errJson = await resp.json().catch(() => ({}));
@@ -1171,6 +1322,29 @@ function WorkspaceApp({
     }
     await markReal();
     setImportState(null);
+
+    // Reconciliação: detecta faturas de cartão e propõe adicionar ao Plano do mês
+    const isCard = (label: string) => label.includes("••••") || /cartão|fatura/i.test(label);
+    const totals: Record<string, { sourceLabel: string; monthKey: string; amount: number }> = {};
+    for (const tx of selected) {
+      const label = tx.sourceLabel ?? "";
+      if (!isCard(label) || tx.type !== "expense") continue;
+      const mk = tx.monthKey || tx.date.slice(0, 7);
+      const key = `${label}|${mk}`;
+      if (!totals[key]) totals[key] = { sourceLabel: label, monthKey: mk, amount: 0 };
+      totals[key].amount += tx.amount;
+    }
+    const suggestions = Object.values(totals);
+    if (suggestions.length > 0) {
+      setReconcilePrompt(suggestions.map((s) => ({ ...s, include: true })));
+    }
+  }
+
+  async function updatePlannedStatus(item: PlannedItem, status: PlannedItemStatus) {
+    await updateDoc(doc(db, "workspaces", workspace.id, "plannedItems", item.id), {
+      status,
+      updatedAt: serverTimestamp()
+    });
   }
 
   async function createInvite() {
@@ -1197,7 +1371,7 @@ function WorkspaceApp({
     );
     if (conf !== workspace.name) return;
     const batch = writeBatch(db);
-    for (const col of ["transactions", "categories", "summaries", "openFinanceWaitlist"]) {
+    for (const col of ["transactions", "categories", "summaries", "plannedItems", "openFinanceWaitlist"]) {
       const snap = await getDocs(collection(db, "workspaces", workspace.id, col));
       snap.docs.forEach((d) => batch.delete(d.ref));
     }
@@ -1252,7 +1426,7 @@ function WorkspaceApp({
         .ws-tx-row:hover{background:rgba(255,255,255,0.03)!important}
         .ws-filter-btn{cursor:pointer;transition:all .18s}
         .ws-icon-btn:hover{background:rgba(255,255,255,0.08)!important;color:#fff!important}
-        @media(max-width:800px){.ws-sidebar{display:none!important}.ws-grid{grid-template-columns:1fr!important}}
+        @media(max-width:960px){.ws-sidebar{display:none!important}.ws-grid{grid-template-columns:1fr!important}}
       `}</style>
 
       {/* Topbar */}
@@ -1371,18 +1545,17 @@ function WorkspaceApp({
         )}
 
         {/* Balance header */}
-        <BalanceHeader summary={summary} showDemo={showDemo} monthKey={monthKey} />
+        <BalanceHeader
+          summary={summary}
+          showDemo={showDemo}
+          monthKey={monthKey}
+          prevMonthKey={prevMonthKey}
+          prevExpense={prevTransactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0)}
+          prevIncome={prevTransactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0)}
+        />
 
         {/* Main grid */}
-        <div
-          className="ws-grid"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 340px",
-            gap: 20,
-            alignItems: "start"
-          }}
-        >
+        <div className="ws-grid">
           {/* Left column */}
           <div style={{ display: "grid", gap: 20 }}>
             {/* Upload zone */}
@@ -1391,119 +1564,140 @@ function WorkspaceApp({
               onAddManual={() => setAddOpen(true)}
             />
 
-            {/* Transaction list */}
+            {/* View tabs */}
             <WsCard>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 18
-                }}
-              >
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>Lançamentos</h2>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {(["all", "income", "expense"] as const).map((f) => (
+              {/* Aba switcher */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+                <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 3 }}>
+                  {(["diagnostico", "lancamentos"] as const).map((v) => (
                     <button
-                      key={f}
-                      className="ws-filter-btn"
-                      onClick={() => setTxFilter(f)}
+                      key={v}
+                      onClick={() => setView(v)}
                       style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        border: "none",
-                        background:
-                          txFilter === f
-                            ? f === "income"
-                              ? "rgba(184,245,90,0.15)"
-                              : f === "expense"
-                              ? "rgba(255,80,80,0.15)"
-                              : "rgba(255,255,255,0.10)"
-                            : "transparent",
-                        color:
-                          txFilter === f
-                            ? f === "income"
-                              ? G
-                              : f === "expense"
-                              ? "#ff8080"
-                              : "#fff"
-                            : "rgba(255,255,255,0.38)"
+                        fontSize: 12.5, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+                        background: view === v ? "rgba(255,255,255,0.10)" : "transparent",
+                        color: view === v ? "#fff" : "rgba(255,255,255,0.38)",
+                        transition: "all .15s"
                       }}
                     >
-                      {f === "all" ? "Todas" : f === "income" ? "Entradas" : "Saídas"}
+                      {v === "diagnostico" ? "Visão Geral" : "Transações"}
                     </button>
                   ))}
                 </div>
+
+                {view === "lancamentos" && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {(["all", "income", "expense"] as const).map((f) => (
+                      <button
+                        key={f}
+                        className="ws-filter-btn"
+                        onClick={() => setTxFilter(f)}
+                        style={{
+                          fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 999, border: "none",
+                          background: txFilter === f
+                            ? f === "income" ? "rgba(184,245,90,0.15)" : f === "expense" ? "rgba(255,80,80,0.15)" : "rgba(255,255,255,0.10)"
+                            : "transparent",
+                          color: txFilter === f
+                            ? f === "income" ? G : f === "expense" ? "#ff8080" : "#fff"
+                            : "rgba(255,255,255,0.38)"
+                        }}
+                      >
+                        {f === "all" ? "Todas" : f === "income" ? "Entradas" : "Saídas"}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Source tabs — só aparece quando há mais de uma fonte */}
-              {sources.length > 1 && (
-                <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                  {(["all", ...sources] as const).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setSourceFilter(s)}
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        padding: "4px 10px",
-                        borderRadius: 999,
-                        border: `1px solid ${sourceFilter === s ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
-                        background: sourceFilter === s ? "rgba(255,255,255,0.10)" : "transparent",
-                        color: sourceFilter === s ? "#fff" : "rgba(255,255,255,0.38)",
-                        cursor: "pointer",
-                        letterSpacing: "0.01em"
-                      }}
-                    >
-                      {s === "all" ? "Tudo" : s}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {view === "lancamentos" ? (<>
+                {/* Source tabs */}
+                {sources.length > 1 && (
+                  <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                    {(["all", ...sources] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setSourceFilter(s)}
+                        style={{
+                          fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
+                          border: `1px solid ${sourceFilter === s ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
+                          background: sourceFilter === s ? "rgba(255,255,255,0.10)" : "transparent",
+                          color: sourceFilter === s ? "#fff" : "rgba(255,255,255,0.38)", cursor: "pointer"
+                        }}
+                      >
+                        {s === "all" ? "Tudo" : s}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-              {txLoading ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "32px 0",
-                    color: "rgba(255,255,255,0.28)",
-                    fontSize: 13
-                  }}
-                >
-                  Carregando lançamentos...
-                </div>
-              ) : filteredTx.length === 0 ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "40px 0",
-                    color: "rgba(255,255,255,0.24)",
-                    fontSize: 13
-                  }}
-                >
-                  Nenhum lançamento neste mês.
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: 2 }}>
-                  {filteredTx.map((tx) => (
-                    <TxRow
-                      key={tx.id}
-                      tx={tx}
-                      readonly={showDemo}
-                      onDelete={async () =>
-                        deleteDoc(doc(db, "workspaces", workspace.id, "transactions", tx.id))
-                      }
-                    />
-                  ))}
-                </div>
+                {txLoading ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "rgba(255,255,255,0.28)", fontSize: 13 }}>
+                    Carregando lançamentos...
+                  </div>
+                ) : filteredTx.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "40px 0", color: "rgba(255,255,255,0.24)", fontSize: 13 }}>
+                    Nenhum lançamento neste mês.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 2 }}>
+                    {filteredTx.slice(0, 10).map((tx) => (
+                      <TxRow
+                        key={tx.id}
+                        tx={tx}
+                        readonly={showDemo}
+                        onDelete={async () => deleteDoc(doc(db, "workspaces", workspace.id, "transactions", tx.id))}
+                      />
+                    ))}
+                    {filteredTx.length > 10 && (
+                      <button
+                        onClick={() => {
+                          localStorage.setItem("fincheck_workspace", workspace.id);
+                          window.location.href = `/transactions?month=${monthKey}`;
+                        }}
+                        style={{
+                          marginTop: 6, padding: "10px 0", borderRadius: 10,
+                          border: "1px solid rgba(255,255,255,0.08)", background: "transparent",
+                          color: "rgba(255,255,255,0.45)", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6
+                        }}
+                      >
+                        Ver todas as {filteredTx.length} transações <ArrowRight size={13} />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </>) : (
+                <InsightsView
+                  transactions={showDemo ? demoTransactions : transactions}
+                  prevTransactions={showDemo ? [] : prevTransactions}
+                  monthKey={showDemo ? "2026-04" : monthKey}
+                  workspaceId={workspace.id}
+                />
               )}
             </WsCard>
           </div>
 
           {/* Right sidebar */}
           <aside className="ws-sidebar" style={{ display: "grid", gap: 16 }}>
+            <PlanCard
+              monthKey={showDemo ? "2026-04" : monthKey}
+              summary={planSummary}
+              plannedItems={showDemo ? [] : plannedItems}
+              recurringItems={showDemo ? [] : recurringItems}
+              readonly={showDemo}
+              onAdd={() => setPlanOpen(true)}
+              onStatusChange={updatePlannedStatus}
+              onDelete={(item) =>
+                deleteDoc(doc(db, "workspaces", workspace.id, "plannedItems", item.id))
+              }
+              onDeactivateRecurring={(r) =>
+                updateDoc(doc(db, "workspaces", workspace.id, "recurringItems", r.id), {
+                  active: false,
+                  updatedAt: serverTimestamp()
+                })
+              }
+            />
+
             {/* Summary card */}
             <WsCard>
               <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>
@@ -1562,74 +1756,34 @@ function WorkspaceApp({
             {/* Invite card */}
             {isOwner && (
               <WsCard>
-                <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+                <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
                   Convidar membro
                 </h3>
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: "rgba(255,255,255,0.38)",
-                    lineHeight: 1.6,
-                    marginBottom: 12
-                  }}
-                >
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", lineHeight: 1.6, marginBottom: 12 }}>
                   Compartilhe acesso ao workspace como editor.
                 </p>
-                <button
-                  onClick={createInvite}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "#000",
-                    background: G,
-                    border: "none",
-                    borderRadius: 8,
-                    padding: "10px 14px",
-                    cursor: "pointer",
-                    width: "100%",
-                    justifyContent: "center"
-                  }}
-                >
-                  <Users size={14} /> Gerar link de convite
-                </button>
-                {inviteLink && (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      background: "rgba(184,245,90,0.07)",
-                      border: "1px solid rgba(184,245,90,0.18)",
-                      borderRadius: 8,
-                      padding: "10px 12px",
-                      fontSize: 11.5,
-                      color: G,
-                      wordBreak: "break-all",
-                      lineHeight: 1.5
-                    }}
+                <div style={{ display: "grid", gap: 8 }}>
+                  <button
+                    onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("whatsapp"); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "#fff", background: "rgba(37,211,102,0.12)", border: "1px solid rgba(37,211,102,0.22)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", justifyContent: "center" }}
                   >
-                    {inviteLink}
+                    <WhatsAppIcon /> Enviar por WhatsApp
+                  </button>
+                  <button
+                    onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("email"); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", justifyContent: "center" }}
+                  >
+                    <GmailIcon /> Enviar por Email
+                  </button>
+                  {inviteLink && (
                     <button
                       onClick={() => navigator.clipboard.writeText(inviteLink)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 5,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: G,
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: 0,
-                        marginTop: 6
-                      }}
+                      style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: "rgba(255,255,255,0.3)", background: "transparent", border: "none", cursor: "pointer", justifyContent: "center", padding: "4px 0" }}
                     >
                       <Copy size={11} /> Copiar link
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </WsCard>
             )}
           </aside>
@@ -1678,6 +1832,61 @@ function WorkspaceApp({
         />
       )}
 
+      {/* Reconcile modal */}
+      {reconcilePrompt.length > 0 && (
+        <ReconcileModal
+          items={reconcilePrompt}
+          onChange={setReconcilePrompt}
+          onClose={() => setReconcilePrompt([])}
+          onConfirm={async (items) => {
+            for (const item of items.filter((i) => i.include)) {
+              const docId = `fatura_${item.sourceLabel.replace(/\s+/g, "_")}_${item.monthKey}`;
+              await setDoc(
+                doc(db, "workspaces", workspace.id, "plannedItems", docId),
+                {
+                  type: "expense",
+                  title: `Cartão ${item.sourceLabel}`,
+                  amount: Math.round(item.amount * 100) / 100,
+                  category: "Contas",
+                  dueDay: 10,
+                  monthKey: item.monthKey,
+                  status: "planned",
+                  createdBy: user.uid,
+                  createdByName: profile.displayName,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp()
+                },
+                { merge: true }
+              );
+            }
+            setReconcilePrompt([]);
+          }}
+        />
+      )}
+
+      {/* Invite modal */}
+      {inviteModal && (
+        <InviteContactModal
+          type={inviteModal}
+          workspaceName={workspace.name}
+          inviteLink={inviteLink}
+          senderName={profile?.displayName || user.displayName || "Alguém"}
+          onClose={() => setInviteModal(null)}
+        />
+      )}
+
+      {/* Plan item modal */}
+      {planOpen && (
+        <AddPlannedItemModal
+          user={user}
+          profile={profile}
+          workspaceId={workspace.id}
+          monthKey={monthKey}
+          onClose={() => setPlanOpen(false)}
+          onCreated={() => setPlanOpen(false)}
+        />
+      )}
+
       {/* Settings drawer */}
       {settingsOpen && (
         <SettingsModal
@@ -1698,18 +1907,334 @@ function WorkspaceApp({
   );
 }
 
+// ─── Monthly plan ────────────────────────────────────────────────────────────
+
+function PlanCard({
+  monthKey,
+  summary,
+  plannedItems,
+  recurringItems,
+  readonly,
+  onAdd,
+  onStatusChange,
+  onDelete,
+  onDeactivateRecurring
+}: {
+  monthKey: string;
+  summary: ReturnType<typeof buildMonthlyPlanSummary>;
+  plannedItems: PlannedItem[];
+  recurringItems: RecurringItem[];
+  readonly: boolean;
+  onAdd: () => void;
+  onStatusChange: (item: PlannedItem, status: PlannedItemStatus) => Promise<void>;
+  onDelete: (item: PlannedItem) => Promise<void>;
+  onDeactivateRecurring: (r: RecurringItem) => Promise<void>;
+}) {
+  const [showRecurring, setShowRecurring] = useState(false);
+  const projectedPositive = summary.projectedBalance >= 0;
+  const activeItems = plannedItems.filter((item) => item.status !== "skipped");
+
+  return (
+    <WsCard>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
+        <div>
+          <h3 style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>Plano do mês</h3>
+          <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.34)", lineHeight: 1.5 }}>
+            Previsto para {monthLabel(monthKey)}
+          </p>
+        </div>
+        {!readonly && (
+          <button
+            onClick={onAdd}
+            title="Adicionar ao plano"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: "1px solid rgba(184,245,90,0.22)",
+              background: "rgba(184,245,90,0.10)",
+              color: G,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Plus size={15} />
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.34)" }}>Sobra projetada</span>
+          <strong style={{ fontSize: 18, color: projectedPositive ? G : "#ff8080", letterSpacing: "-0.03em", whiteSpace: "nowrap" }}>
+            {formatCurrency(summary.projectedBalance)}
+          </strong>
+        </div>
+        <div style={{ height: 1, background: "rgba(255,255,255,0.07)" }} />
+        <PlanMetric label="Ja entrou" value={summary.paidIncome} tone="income" />
+        <PlanMetric label="Ainda entra" value={summary.pendingIncome} tone="income" />
+        <PlanMetric label="Ja saiu" value={summary.paidExpense} tone="expense" />
+        <PlanMetric label="Ainda sai" value={summary.pendingExpense} tone="expense" />
+      </div>
+
+      {activeItems.length === 0 ? (
+        <div
+          style={{
+            border: "1px dashed rgba(255,255,255,0.12)",
+            borderRadius: 10,
+            padding: "14px 12px",
+            color: "rgba(255,255,255,0.34)",
+            fontSize: 12,
+            lineHeight: 1.55
+          }}
+        >
+          Adicione salario, aluguel, cartao ou qualquer conta prevista para o Fincheck mostrar o que ainda falta e quanto deve sobrar.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {activeItems.map((item) => (
+            <PlanItemRow
+              key={item.id}
+              item={item}
+              readonly={readonly}
+              onStatusChange={onStatusChange}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Recurring items management */}
+      {!readonly && recurringItems.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <button
+            onClick={() => setShowRecurring((v) => !v)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.38)",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 0
+            }}
+          >
+            <RefreshCw size={12} />
+            {recurringItems.length} recorrência{recurringItems.length !== 1 ? "s" : ""} ativa{recurringItems.length !== 1 ? "s" : ""}
+            <ChevronDown
+              size={12}
+              style={{ transform: showRecurring ? "rotate(180deg)" : "none", transition: "transform .2s" }}
+            />
+          </button>
+
+          {showRecurring && (
+            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+              {recurringItems.map((r) => (
+                <div
+                  key={r.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    padding: "7px 10px",
+                    borderRadius: 8,
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.06)"
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.title}
+                    </div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>
+                      dia {r.dueDay} · {formatCurrency(r.amount)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onDeactivateRecurring(r)}
+                    title="Pausar recorrência"
+                    style={{
+                      flexShrink: 0,
+                      background: "rgba(255,80,80,0.10)",
+                      border: "1px solid rgba(255,80,80,0.18)",
+                      borderRadius: 6,
+                      color: "#ff8080",
+                      cursor: "pointer",
+                      padding: "4px 8px",
+                      fontSize: 11,
+                      fontWeight: 600
+                    }}
+                  >
+                    Pausar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </WsCard>
+  );
+}
+
+function PlanMetric({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: number;
+  tone: "income" | "expense";
+}) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.34)" }}>{label}</span>
+      <span style={{ fontSize: 12.5, fontWeight: 800, color: tone === "income" ? G : "#ff8080", whiteSpace: "nowrap" }}>
+        {formatCurrency(value)}
+      </span>
+    </div>
+  );
+}
+
+function PlanItemRow({
+  item,
+  readonly,
+  onStatusChange,
+  onDelete
+}: {
+  item: PlannedItem;
+  readonly: boolean;
+  onStatusChange: (item: PlannedItem, status: PlannedItemStatus) => Promise<void>;
+  onDelete: (item: PlannedItem) => Promise<void>;
+}) {
+  const isPaid = item.status === "paid";
+  const color = item.type === "income" ? G : "#ff8080";
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: readonly ? "1fr auto" : "1fr auto auto",
+        gap: 8,
+        alignItems: "center",
+        padding: "9px 10px",
+        borderRadius: 10,
+        background: isPaid ? "rgba(184,245,90,0.06)" : "rgba(255,255,255,0.035)",
+        border: `1px solid ${isPaid ? "rgba(184,245,90,0.14)" : "rgba(255,255,255,0.06)"}`
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <p style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {item.title}
+          </p>
+          {item.recurringId && (
+            <span
+              title="Recorrente"
+              style={{ fontSize: 9, fontWeight: 700, color: G, background: "rgba(184,245,90,0.12)", borderRadius: 4, padding: "1px 4px", flexShrink: 0 }}
+            >
+              ∞
+            </span>
+          )}
+        </div>
+        <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.32)", marginTop: 2 }}>
+          dia {String(item.dueDay).padStart(2, "0")} · {isPaid ? "pago" : "previsto"}
+        </p>
+      </div>
+      <span style={{ fontSize: 12.5, fontWeight: 800, color, whiteSpace: "nowrap" }}>
+        {item.type === "income" ? "+" : "-"}
+        {formatCurrency(item.amount)}
+      </span>
+      {!readonly && (
+        <div style={{ display: "flex", gap: 4 }}>
+          <button
+            title={isPaid ? "Marcar como previsto" : "Marcar como pago"}
+            onClick={() => onStatusChange(item, isPaid ? "planned" : "paid")}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 7,
+              border: "1px solid rgba(255,255,255,0.10)",
+              background: isPaid ? G : "rgba(255,255,255,0.05)",
+              color: isPaid ? "#000" : "rgba(255,255,255,0.48)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Check size={13} />
+          </button>
+          <button
+            title="Remover do plano"
+            onClick={() => onDelete(item)}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 7,
+              border: "1px solid rgba(255,80,80,0.14)",
+              background: "rgba(255,80,80,0.06)",
+              color: "rgba(255,80,80,0.68)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Balance header ──────────────────────────────────────────────────────────
+
+function MoMBadge({ current, prev, prevMonthKey, positiveWhenUp, hasData = true, prevLabel }: { current: number; prev: number; prevMonthKey: string; positiveWhenUp: boolean; hasData?: boolean; prevLabel?: string }) {
+  if (!hasData) return null;
+  const diff = current - prev;
+  const pct = prev !== 0 ? (diff / Math.abs(prev)) * 100 : (diff !== 0 ? Infinity : 0);
+  const isFlat = Math.abs(diff) < 0.01;
+  const isUp = diff > 0;
+  const color = isFlat ? "#facc15" : (positiveWhenUp ? isUp : !isUp) ? G : "#ff8080";
+  const pctLabel = !isFlat && isFinite(pct) ? Math.abs(pct).toFixed(1) + "%" : "";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color }}>
+        {isFlat ? "—" : isUp ? "▲" : "▼"}{pctLabel ? " " + pctLabel : ""}
+      </span>
+      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
+        vs {prevLabel ?? formatCurrency(prev)} {monthLabel(prevMonthKey)}
+      </span>
+    </div>
+  );
+}
 
 function BalanceHeader({
   summary,
   showDemo,
-  monthKey
+  monthKey,
+  prevMonthKey,
+  prevExpense,
+  prevIncome
 }: {
   summary: ReturnType<typeof buildMonthlySummary>;
   showDemo: boolean;
   monthKey: string;
+  prevMonthKey: string;
+  prevExpense: number;
+  prevIncome: number;
 }) {
   const isPositive = summary.balance >= 0;
+  const prevSavingsRate = prevIncome > 0 ? Math.round(((prevIncome - prevExpense) / prevIncome) * 100) : 0;
+
   return (
     <div
       style={{
@@ -1726,15 +2251,7 @@ function BalanceHeader({
       <div style={{ display: "flex", alignItems: "flex-end", gap: 32, flexWrap: "wrap" }}>
         <div>
           <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Saldo do mês</p>
-          <p
-            style={{
-              fontSize: "clamp(36px,5vw,56px)",
-              fontWeight: 900,
-              letterSpacing: "-0.04em",
-              color: isPositive ? G : "#ff8080",
-              lineHeight: 1
-            }}
-          >
+          <p style={{ fontSize: "clamp(36px,5vw,56px)", fontWeight: 900, letterSpacing: "-0.04em", color: isPositive ? G : "#ff8080", lineHeight: 1 }}>
             {formatCurrency(summary.balance)}
           </p>
         </div>
@@ -1744,12 +2261,14 @@ function BalanceHeader({
             <p style={{ fontSize: 20, fontWeight: 800, color: G, letterSpacing: "-0.03em" }}>
               +{formatCurrency(summary.income)}
             </p>
+            <MoMBadge current={summary.income} prev={prevIncome} prevMonthKey={prevMonthKey} positiveWhenUp={true} hasData={prevIncome > 0} />
           </div>
           <div>
             <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Saídas</p>
             <p style={{ fontSize: 20, fontWeight: 800, color: "#ff8080", letterSpacing: "-0.03em" }}>
               -{formatCurrency(summary.expense)}
             </p>
+            <MoMBadge current={summary.expense} prev={prevExpense} prevMonthKey={prevMonthKey} positiveWhenUp={false} hasData={prevExpense > 0} />
           </div>
           {summary.savingsRate > 0 && (
             <div>
@@ -1757,6 +2276,7 @@ function BalanceHeader({
               <p style={{ fontSize: 20, fontWeight: 800, color: "rgba(255,255,255,0.7)", letterSpacing: "-0.03em" }}>
                 {summary.savingsRate.toFixed(0)}%
               </p>
+              <MoMBadge current={summary.savingsRate} prev={prevSavingsRate} prevMonthKey={prevMonthKey} positiveWhenUp={true} hasData={prevIncome > 0} prevLabel={prevSavingsRate + "%"} />
             </div>
           )}
         </div>
@@ -1900,6 +2420,282 @@ function UploadZone({
       >
         <Plus size={13} /> Adicionar manualmente
       </button>
+    </div>
+  );
+}
+
+// ─── Insights view ───────────────────────────────────────────────────────────
+
+
+function InsightsView({
+  transactions,
+  prevTransactions,
+  monthKey,
+  workspaceId
+}: {
+  transactions: Transaction[];
+  prevTransactions: Transaction[];
+  monthKey: string;
+  workspaceId: string;
+}) {
+  const [renda, setRenda] = useState<number>(() => {
+    if (typeof window === "undefined") return 0;
+    return Number(localStorage.getItem(`fincheck_renda_${workspaceId}`) ?? 0);
+  });
+  const [editingRenda, setEditingRenda] = useState(false);
+
+  const expenses = transactions.filter((t) => t.type === "expense");
+  const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
+  const totalEntradas = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+
+  const prevExpenses = prevTransactions.filter((t) => t.type === "expense");
+  const prevTotalGasto = prevExpenses.reduce((s, t) => s + t.amount, 0);
+
+  // Dias com gasto para média/dia
+  const daysWithExpenses = useMemo(() => new Set(expenses.map((t) => t.date)).size, [expenses]);
+  const mediaGastoPorDia = daysWithExpenses > 0 ? totalGasto / daysWithExpenses : 0;
+
+  const rendaRef = renda > 0 ? renda : (totalEntradas > 0 ? totalEntradas : 1);
+  const comprometimento = totalGasto > 0 ? Math.min(100, Math.round((totalGasto / rendaRef) * 100)) : 0;
+
+  // ratio sem cap — score e comprometimento usam a mesma base para serem consistentes
+  const ratio = totalGasto / rendaRef;
+
+  const score = expenses.length === 0 ? null : (() => {
+    if (ratio >= 2.0)  return 0;
+    if (ratio >= 1.5)  return 1;
+    if (ratio >= 1.0)  return 2.5;
+    if (ratio >= 0.90) return 4.5;
+    if (ratio >= 0.75) return 6.5;
+    if (ratio >= 0.50) return 8.5;
+    return 10;
+  })();
+  const scoreColor = score === null ? G : score >= 8 ? G : score >= 6 ? "#facc15" : "#ff8080";
+  const scoreLabel = score === null ? "—" : score >= 8 ? "Saúde em dia" : score >= 6 ? "Atenção" : "Situação crítica";
+
+  const byDay = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of expenses) m[tx.date] = (m[tx.date] ?? 0) + tx.amount;
+    return m;
+  }, [expenses]);
+
+  const topDays = useMemo(() => {
+    return Object.entries(byDay).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [byDay]);
+  const maxDayAmount = topDays[0]?.[1] ?? 1;
+
+  const byCategory = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of expenses) m[tx.category] = (m[tx.category] ?? 0) + tx.amount;
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, [expenses]);
+
+  const prevByCategory = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of prevExpenses) m[tx.category] = (m[tx.category] ?? 0) + tx.amount;
+    return m;
+  }, [prevExpenses]);
+
+  const subscriptions = useMemo(() => {
+    const subs = transactions.filter((t) => t.category === "Assinaturas");
+    const byDesc: Record<string, number> = {};
+    for (const tx of subs) byDesc[tx.description] = (byDesc[tx.description] ?? 0) + tx.amount;
+    return Object.entries(byDesc).sort((a, b) => b[1] - a[1]);
+  }, [transactions]);
+
+  const maxCategory = byCategory[0]?.[1] ?? 1;
+
+  if (!expenses.length) {
+    return (
+      <div style={{ textAlign: "center", padding: "40px 0", color: "rgba(255,255,255,0.24)", fontSize: 13 }}>
+        Sem gastos em {monthLabel(monthKey)} para diagnosticar.
+      </div>
+    );
+  }
+
+  const INS_LABEL: CSSProperties = { fontSize: 11, color: "rgba(255,255,255,0.32)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10, fontWeight: 700 };
+  const scoreRgb = scoreColor === G ? "184,245,90" : scoreColor === "#facc15" ? "250,204,21" : "255,128,128";
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      {/* Métricas rápidas */}
+      <div className="ins-metrics">
+        {([
+          { label: "Mês anterior", value: prevTotalGasto > 0 ? formatCurrency(prevTotalGasto) : "—", accent: false },
+          { label: "Transações", value: String(expenses.length), accent: false },
+          { label: "Média/dia", value: formatCurrency(mediaGastoPorDia), accent: false },
+          { label: "% Comprometida", value: `${comprometimento}%`, accent: comprometimento > 75 }
+        ] as { label: string; value: string; accent: boolean }[]).map(({ label, value, accent }) => (
+          <div key={label} className={`ins-card${accent ? " ins-card-accent" : ""}`}>
+            <p style={INS_LABEL}>{label}</p>
+            <p style={{ fontSize: 22, fontWeight: 800, color: accent ? "#ff8080" : "#fff", letterSpacing: "-0.03em", lineHeight: 1 }}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Renda + barra comprometimento */}
+      <div className="ins-card" style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 160 }}>
+          <p style={INS_LABEL}>Renda mensal</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {editingRenda ? (
+              <input
+                type="number" min="0" step="100" autoFocus
+                defaultValue={renda > 0 ? renda : ""}
+                placeholder="0"
+                onBlur={(e) => { const v = Number(e.target.value); setRenda(v); localStorage.setItem(`fincheck_renda_${workspaceId}`, String(v)); setEditingRenda(false); }}
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, outline: "none", color: "#fff", fontSize: 18, fontWeight: 800, width: 140, letterSpacing: "-0.03em", padding: "4px 8px" }}
+              />
+            ) : (
+              <span
+                onClick={() => setEditingRenda(true)}
+                style={{ fontSize: 20, fontWeight: 800, color: renda > 0 ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", cursor: "pointer" }}
+              >
+                {renda > 0 ? formatCurrency(renda) : "Declarar renda"}
+              </span>
+            )}
+            {!editingRenda && (
+              <button onClick={() => setEditingRenda(true)} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}>
+                <Pencil size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{formatCurrency(totalGasto)} gastos</span>
+            <span style={{ fontSize: 11, color: comprometimento > 75 ? "#ff8080" : "rgba(255,255,255,0.3)", fontWeight: 700 }}>{comprometimento}%</span>
+          </div>
+          <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+            <div style={{ height: "100%", borderRadius: 3, width: `${Math.min(100, comprometimento)}%`, background: comprometimento > 90 ? "#ff8080" : comprometimento > 75 ? "#facc15" : G, transition: "width .5s cubic-bezier(.4,0,.2,1), background .4s" }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Diagnóstico hero */}
+      <div className="ins-card" style={{ border: `1px solid rgba(${scoreRgb},0.18)`, background: `rgba(${scoreRgb},0.04)`, position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: -60, right: -60, width: 220, height: 220, borderRadius: "50%", background: `rgba(${scoreRgb},0.10)`, filter: "blur(55px)", pointerEvents: "none" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 24, position: "relative" }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 10.5, color: `rgba(${scoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10 }}>
+              Diagnóstico Geral
+            </p>
+            <p style={{ fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: "-0.03em", marginBottom: 10, lineHeight: 1.1 }}>
+              {scoreLabel}
+            </p>
+            <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65 }}>
+              Você teve {formatCurrency(totalGasto)} em gastos neste período, comprometendo {comprometimento}% da renda declarada.
+            </p>
+          </div>
+          <InsightScoreRing score={score} color={scoreColor} size={90} />
+        </div>
+      </div>
+
+      {/* Dias de maior gasto */}
+      <div className="ins-card">
+        <p style={INS_LABEL}>Dias de maior gasto</p>
+        {topDays.length === 0 ? (
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>Sem dados suficientes.</p>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {topDays.map(([date, amount], idx) => {
+              const parts = date.split("-");
+              const dateLabel = `${parts[2]}/${parts[1]}`;
+              const isTop = idx === 0;
+              const barW = Math.round((amount / maxDayAmount) * 100);
+              return (
+                <div key={date}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: isTop ? 800 : 600, color: isTop ? G : "rgba(255,255,255,0.65)" }}>{dateLabel}</span>
+                    <span style={{ fontSize: 12, fontWeight: isTop ? 800 : 600, color: isTop ? G : "rgba(255,255,255,0.45)" }}>{formatCurrency(amount)}</span>
+                  </div>
+                  <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 2, width: `${barW}%`, background: isTop ? G : "rgba(255,255,255,0.22)", boxShadow: isTop ? `0 0 8px ${G}55` : "none", transition: "width .5s cubic-bezier(.4,0,.2,1)" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Top 3 Categorias + Assinaturas */}
+      <div className="ins-2col">
+        <div className="ins-card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <p style={{ ...INS_LABEL, marginBottom: 0 }}>Top categorias</p>
+            <button
+              onClick={() => { localStorage.setItem("fincheck_workspace", workspaceId); window.location.href = `/top-categories?month=${monthKey}`; }}
+              style={{ fontSize: 11, fontWeight: 600, color: G, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, opacity: 0.8 }}
+            >
+              Ver tudo <ArrowRight size={11} />
+            </button>
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {byCategory.slice(0, 3).map(([cat, total]) => {
+              const color = (CATEGORY_COLORS as Record<string, string>)[cat] ?? "#888";
+              const pct = Math.round((total / totalGasto) * 100);
+              const prev = prevByCategory[cat] ?? 0;
+              const changePct = prev > 0 ? ((total - prev) / prev) * 100 : null;
+              return (
+                <div key={cat}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>{cat}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0, marginLeft: 8 }}>
+                      {changePct !== null && (
+                        <span style={{ fontSize: 10.5, fontWeight: 700, color: changePct < 0 ? G : "#ff8080" }}>
+                          {changePct < 0 ? "▼" : "▲"} {Math.abs(changePct).toFixed(0)}%
+                        </span>
+                      )}
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.36)" }}>{formatCurrency(total)} <span style={{ opacity: 0.7 }}>{pct}%</span></span>
+                    </div>
+                  </div>
+                  <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 2, width: `${Math.round((total / maxCategory) * 100)}%`, background: color, boxShadow: `0 0 8px ${color}55`, transition: "width .5s cubic-bezier(.4,0,.2,1)" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="ins-card">
+          <p style={INS_LABEL}>Assinaturas detectadas</p>
+          {subscriptions.length === 0 ? (
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", lineHeight: 1.6 }}>
+              Nenhuma assinatura encontrada neste mês.
+            </p>
+          ) : (
+            <div style={{ display: "grid", gap: 9 }}>
+              {subscriptions.map(([desc, total]) => (
+                <div key={desc} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{desc}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", flexShrink: 0 }}>{formatCurrency(total)}</span>
+                </div>
+              ))}
+              <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Total mensal</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "#ff8080" }}>{formatCurrency(subscriptions.reduce((s, [, v]) => s + v, 0))}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InsightScoreRing({ score, color }: { score: number | null; color: string; size?: number }) {
+  return (
+    <div style={{ flexShrink: 0, textAlign: "right" }}>
+      <span style={{ fontSize: 52, fontWeight: 900, color, letterSpacing: "-0.04em", lineHeight: 1, display: "block", textShadow: `0 0 32px ${color}66` }}>
+        {score !== null ? score.toFixed(1).replace(".", ",") : "—"}
+      </span>
+      <span style={{ fontSize: 10, color: `${color}88`, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+        / nota
+      </span>
     </div>
   );
 }
@@ -2513,6 +3309,391 @@ function AddTransactionModal({
   );
 }
 
+// ─── Add planned item modal ──────────────────────────────────────────────────
+
+function AddPlannedItemModal({
+  user,
+  profile,
+  workspaceId,
+  monthKey,
+  onClose,
+  onCreated
+}: {
+  user: User;
+  profile: Profile;
+  workspaceId: string;
+  monthKey: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [type, setType] = useState<TransactionType>("expense");
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState("Moradia");
+  const [dueDay, setDueDay] = useState("10");
+  const [recurring, setRecurring] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros");
+  const categories = type === "income" ? ["Recebimentos"] : [...expenseCategories, "Outros"];
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const safeDay = Math.min(31, Math.max(1, Number(dueDay)));
+      let recurringId: string | undefined;
+
+      if (recurring) {
+        const rRef = await addDoc(collection(db, "workspaces", workspaceId, "recurringItems"), {
+          type,
+          title,
+          amount: Number(amount),
+          category,
+          dueDay: safeDay,
+          active: true,
+          createdBy: user.uid,
+          createdByName: profile.displayName,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        recurringId = rRef.id;
+      }
+
+      // Use deterministic ID when recurring so auto-gen won't create a duplicate
+      const plannedData = {
+        type,
+        title,
+        amount: Number(amount),
+        category,
+        dueDay: safeDay,
+        monthKey,
+        status: "planned",
+        createdBy: user.uid,
+        createdByName: profile.displayName,
+        ...(recurringId ? { recurringId } : {}),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      if (recurringId) {
+        await setDoc(
+          doc(db, "workspaces", workspaceId, "plannedItems", `${recurringId}_${monthKey}`),
+          plannedData
+        );
+      } else {
+        await addDoc(collection(db, "workspaces", workspaceId, "plannedItems"), plannedData);
+      }
+
+      onCreated();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)",
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: "#0e0f11",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 18,
+          width: "100%",
+          maxWidth: 440,
+          boxShadow: "0 40px 100px rgba(0,0,0,0.6)"
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.07)"
+          }}
+        >
+          <h2 style={{ fontSize: 16, fontWeight: 700 }}>Adicionar ao plano</h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.07)",
+              border: "none",
+              borderRadius: 8,
+              color: "rgba(255,255,255,0.55)",
+              cursor: "pointer",
+              padding: "6px 8px",
+              display: "flex"
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={submit} style={{ padding: 24, display: "grid", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <select
+              value={type}
+              onChange={(e) => {
+                const nextType = e.target.value as TransactionType;
+                setType(nextType);
+                setCategory(nextType === "income" ? "Recebimentos" : "Moradia");
+              }}
+              style={inputStyle}
+            >
+              <option value="expense">Conta a pagar</option>
+              <option value="income">Dinheiro a entrar</option>
+            </select>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Valor previsto"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              required
+              style={inputStyle}
+            />
+          </div>
+          <input
+            placeholder="Nome. Ex: Aluguel, Salario, Cartao"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            style={inputStyle}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 12 }}>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              style={inputStyle}
+            >
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min="1"
+              max="31"
+              value={dueDay}
+              onChange={(e) => setDueDay(e.target.value)}
+              required
+              style={inputStyle}
+            />
+          </div>
+          {/* Recurring toggle */}
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              cursor: "pointer",
+              userSelect: "none",
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: recurring ? "rgba(184,245,90,0.07)" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${recurring ? "rgba(184,245,90,0.22)" : "rgba(255,255,255,0.07)"}`,
+              transition: "all .2s"
+            }}
+          >
+            <div
+              style={{
+                width: 36,
+                height: 20,
+                borderRadius: 10,
+                background: recurring ? G : "rgba(255,255,255,0.14)",
+                position: "relative",
+                transition: "background .2s",
+                flexShrink: 0
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 3,
+                  left: recurring ? 19 : 3,
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: recurring ? "#000" : "rgba(255,255,255,0.7)",
+                  transition: "left .2s"
+                }}
+              />
+            </div>
+            <input
+              type="checkbox"
+              checked={recurring}
+              onChange={(e) => setRecurring(e.target.checked)}
+              style={{ display: "none" }}
+            />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Repetir todo mês</div>
+              <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.38)", marginTop: 1 }}>
+                Lança automaticamente nos próximos meses
+              </div>
+            </div>
+          </label>
+
+          <button
+            type="submit"
+            disabled={busy}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+              fontWeight: 800,
+              fontSize: 14,
+              color: "#000",
+              background: G,
+              border: "none",
+              borderRadius: 10,
+              padding: "13px 0",
+              cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.7 : 1
+            }}
+          >
+            {busy ? (
+              <div
+                style={{
+                  width: 16,
+                  height: 16,
+                  border: "2.5px solid rgba(0,0,0,0.3)",
+                  borderTopColor: "#000",
+                  borderRadius: "50%",
+                  animation: "spin .7s linear infinite"
+                }}
+              />
+            ) : (
+              <>
+                <Plus size={16} /> Adicionar ao plano
+              </>
+            )}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Reconcile modal ─────────────────────────────────────────────────────────
+
+function ReconcileModal({
+  items,
+  onChange,
+  onClose,
+  onConfirm
+}: {
+  items: { sourceLabel: string; monthKey: string; amount: number; include: boolean }[];
+  onChange: (items: { sourceLabel: string; monthKey: string; amount: number; include: boolean }[]) => void;
+  onClose: () => void;
+  onConfirm: (items: { sourceLabel: string; monthKey: string; amount: number; include: boolean }[]) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)", zIndex: 100,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 24
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: "#0e0f11", border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 18, width: "100%", maxWidth: 420,
+        boxShadow: "0 40px 100px rgba(0,0,0,0.6)"
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "20px 24px", borderBottom: "1px solid rgba(255,255,255,0.07)"
+        }}>
+          <div>
+            <h2 style={{ fontSize: 15, fontWeight: 700 }}>Adicionar fatura ao Plano do mês?</h2>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 3 }}>
+              Pra você marcar quando pagar o cartão
+            </p>
+          </div>
+          <button onClick={onClose} style={{
+            background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 8,
+            color: "rgba(255,255,255,0.55)", cursor: "pointer", padding: "6px 8px", display: "flex"
+          }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ padding: "16px 24px", display: "grid", gap: 10 }}>
+          {items.map((item, i) => (
+            <label key={i} style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              gap: 12, padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+              background: item.include ? "rgba(184,245,90,0.06)" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${item.include ? "rgba(184,245,90,0.18)" : "rgba(255,255,255,0.07)"}`,
+              transition: "all .15s"
+            }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Cartão {item.sourceLabel}</div>
+                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.38)", marginTop: 2 }}>
+                  {monthLabel(item.monthKey)} · {formatCurrency(item.amount)}
+                </div>
+              </div>
+              <div style={{
+                width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+                background: item.include ? G : "rgba(255,255,255,0.08)",
+                border: `1.5px solid ${item.include ? G : "rgba(255,255,255,0.18)"}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all .15s"
+              }}>
+                {item.include && <Check size={12} color="#000" strokeWidth={3} />}
+              </div>
+              <input type="checkbox" checked={item.include} style={{ display: "none" }}
+                onChange={(e) => onChange(items.map((it, j) => j === i ? { ...it, include: e.target.checked } : it))}
+              />
+            </label>
+          ))}
+        </div>
+
+        <div style={{ padding: "0 24px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button onClick={onClose} style={{
+            padding: "11px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)",
+            background: "transparent", color: "rgba(255,255,255,0.55)", fontSize: 13,
+            fontWeight: 600, cursor: "pointer"
+          }}>
+            Agora não
+          </button>
+          <button
+            disabled={busy || items.every((i) => !i.include)}
+            onClick={async () => { setBusy(true); await onConfirm(items); }}
+            style={{
+              padding: "11px 0", borderRadius: 10, border: "none",
+              background: items.every((i) => !i.include) ? "rgba(255,255,255,0.08)" : G,
+              color: items.every((i) => !i.include) ? "rgba(255,255,255,0.3)" : "#000",
+              fontSize: 13, fontWeight: 800, cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.7 : 1
+            }}
+          >
+            {busy ? "Salvando..." : "Adicionar ao plano"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Settings modal ───────────────────────────────────────────────────────────
 
 function SettingsModal({
@@ -2727,11 +3908,241 @@ function IconBtn({
   );
 }
 
-function CenteredStatus({ text }: { text: string }) {
+// ─── Brand icons ─────────────────────────────────────────────────────────────
+
+function WhatsAppIcon() {
   return (
-    <main className="auth-panel" style={{ minHeight: "100vh" }}>
-      <p className="muted">{text}</p>
-    </main>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="#25D366">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+    </svg>
+  );
+}
+
+function GmailIcon() {
+  return (
+    <svg width="16" height="12" viewBox="0 0 24 18">
+      <path fill="#4285F4" d="M0 16.5V1.5L12 9z"/>
+      <path fill="#34A853" d="M24 16.5V1.5L12 9z"/>
+      <path fill="#FBBC05" d="M0 1.5l12 7.5 12-7.5H0z"/>
+      <path fill="#EA4335" d="M0 1.5v15h4.5V7.5L12 13l7.5-5.5V16.5H24v-15L12 9z"/>
+    </svg>
+  );
+}
+
+// ─── Invite contact modal ────────────────────────────────────────────────────
+
+const COUNTRY_CODES = [
+  { code: "+55", flag: "🇧🇷", name: "Brasil" },
+  { code: "+1",  flag: "🇺🇸", name: "EUA / Canadá" },
+  { code: "+351", flag: "🇵🇹", name: "Portugal" },
+  { code: "+54", flag: "🇦🇷", name: "Argentina" },
+  { code: "+52", flag: "🇲🇽", name: "México" },
+  { code: "+57", flag: "🇨🇴", name: "Colômbia" },
+  { code: "+56", flag: "🇨🇱", name: "Chile" },
+  { code: "+598", flag: "🇺🇾", name: "Uruguai" },
+  { code: "+595", flag: "🇵🇾", name: "Paraguai" },
+  { code: "+244", flag: "🇦🇴", name: "Angola" },
+  { code: "+258", flag: "🇲🇿", name: "Moçambique" },
+  { code: "+238", flag: "🇨🇻", name: "Cabo Verde" },
+  { code: "+44",  flag: "🇬🇧", name: "Reino Unido" },
+  { code: "+49",  flag: "🇩🇪", name: "Alemanha" },
+  { code: "+33",  flag: "🇫🇷", name: "França" },
+  { code: "+34",  flag: "🇪🇸", name: "Espanha" },
+  { code: "+39",  flag: "🇮🇹", name: "Itália" },
+  { code: "+61",  flag: "🇦🇺", name: "Austrália" },
+  { code: "+81",  flag: "🇯🇵", name: "Japão" },
+  { code: "+91",  flag: "🇮🇳", name: "Índia" },
+  { code: "+971", flag: "🇦🇪", name: "Emirados" },
+] as const;
+
+function formatBrazilianPhone(digits: string): string {
+  const d = digits.slice(0, 11);
+  if (d.length <= 2) return d;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+function InviteContactModal({
+  type,
+  workspaceName,
+  inviteLink,
+  senderName,
+  onClose
+}: {
+  type: "whatsapp" | "email";
+  workspaceName: string;
+  inviteLink: string;
+  senderName: string;
+  onClose: () => void;
+}) {
+  const [countryCode, setCountryCode] = useState("+55");
+  const [rawPhone, setRawPhone] = useState("");
+  const [emailAddr, setEmailAddr] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState("");
+  const isWa = type === "whatsapp";
+
+  const displayPhone = countryCode === "+55" ? formatBrazilianPhone(rawPhone.replace(/\D/g, "")) : rawPhone;
+
+  function handlePhoneChange(val: string) {
+    if (countryCode === "+55") {
+      setRawPhone(val.replace(/\D/g, "").slice(0, 11));
+    } else {
+      setRawPhone(val);
+    }
+  }
+
+  async function send() {
+    setErr("");
+    if (isWa) {
+      const digits = rawPhone.replace(/\D/g, "");
+      const phone = countryCode.replace("+", "") + digits;
+      const msg = `Olá! Você foi convidado para o workspace *${workspaceName}* no Fincheck Pro.\n\nAcesse aqui: ${inviteLink}`;
+      window.open(
+        `https://api.whatsapp.com/send/?phone=${phone}&text=${encodeURIComponent(msg)}&type=phone_number&app_absent=0`,
+        "_blank"
+      );
+      onClose();
+    } else {
+      if (!emailAddr.trim()) { setErr("Digite o email do convidado."); return; }
+      setSending(true);
+      try {
+        const resp = await fetch(SEND_EMAIL_FUNCTION_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: emailAddr.trim(), workspaceName, inviteLink, fromName: senderName })
+        });
+        const data = await resp.json() as { success?: boolean; error?: string };
+        if (!resp.ok || data.error) throw new Error(data.error || "Falha ao enviar.");
+        setSent(true);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Erro ao enviar email.");
+      } finally {
+        setSending(false);
+      }
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box",
+    background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 8, color: "#fff", fontSize: 14, padding: "10px 12px",
+    outline: "none", marginBottom: 12
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div style={{ background: "#111214", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: "28px 28px 24px", width: "100%", maxWidth: 400, animation: "fadeUp .2s ease both" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          {isWa ? <WhatsAppIcon /> : <GmailIcon />}
+          <h3 style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>
+            {isWa ? "Enviar por WhatsApp" : "Enviar por Email"}
+          </h3>
+        </div>
+
+        {sent ? (
+          <div style={{ textAlign: "center", padding: "16px 0 8px" }}>
+            <p style={{ fontSize: 15, fontWeight: 700, color: G, marginBottom: 6 }}>Email enviado!</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>O convite foi enviado para {emailAddr}.</p>
+            <button onClick={onClose} style={{ marginTop: 20, width: "100%", padding: "10px", borderRadius: 8, background: G, border: "none", color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Fechar</button>
+          </div>
+        ) : (
+          <>
+            {isWa ? (
+              <>
+                <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.4)", marginBottom: 14, lineHeight: 1.6 }}>
+                  Selecione o país e informe o número. Você pode deixar em branco para escolher o contato no WhatsApp.
+                </p>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <select
+                    value={countryCode}
+                    onChange={(e) => { setCountryCode(e.target.value); setRawPhone(""); }}
+                    style={{ flex: "0 0 auto", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, color: "#fff", fontSize: 13, padding: "10px 8px", outline: "none", cursor: "pointer" }}
+                  >
+                    {COUNTRY_CODES.map((c) => (
+                      <option key={c.code + c.name} value={c.code} style={{ background: "#1a1a1d" }}>
+                        {c.flag} {c.code} {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    autoFocus
+                    type="tel"
+                    placeholder={countryCode === "+55" ? "(11) 99999-9999" : "Número com DDD"}
+                    value={displayPhone}
+                    onChange={(e) => handlePhoneChange(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && send()}
+                    style={{ ...inputStyle, flex: 1, marginBottom: 0 }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.4)", marginBottom: 14, lineHeight: 1.6 }}>
+                  O convidado receberá um email com o link de acesso ao workspace.
+                </p>
+                <input
+                  autoFocus
+                  type="email"
+                  placeholder="email@exemplo.com"
+                  value={emailAddr}
+                  onChange={(e) => setEmailAddr(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && send()}
+                  style={inputStyle}
+                />
+              </>
+            )}
+
+            {err && <p style={{ fontSize: 12, color: "#ff8080", marginBottom: 10, marginTop: -4 }}>{err}</p>}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                Cancelar
+              </button>
+              <button onClick={send} disabled={sending} style={{ flex: 2, padding: "10px", borderRadius: 8, background: isWa ? "#25D366" : G, border: "none", color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer", opacity: sending ? 0.6 : 1 }}>
+                {sending ? "Enviando..." : isWa ? "Enviar no WhatsApp" : "Enviar"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CenteredStatus({ text: _ }: { text: string }) {
+  return <FincheckLoader />;
+}
+
+function FincheckLoader() {
+  const RINGS = [160, 118, 82, 48] as const;
+  return (
+    <div style={{ minHeight: "100vh", background: "#050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ position: "relative", width: 180, height: 180 }}>
+        {RINGS.map((size, i) => (
+          <div
+            key={i}
+            style={{
+              position: "absolute", top: "50%", left: "50%",
+              width: size, height: size, borderRadius: "50%",
+              transform: "translate(-50%, -50%)",
+              border: `${i === 3 ? 2 : 1}px solid rgba(184,245,90,${(0.85 - i * 0.19).toFixed(2)})`,
+              boxShadow: `0 0 ${28 - i * 6}px rgba(184,245,90,${(0.22 - i * 0.045).toFixed(3)}), inset 0 0 ${16 - i * 3}px rgba(184,245,90,${(0.06 - i * 0.012).toFixed(3)})`,
+              animation: "neonPulse 3s ease-in-out infinite",
+              animationDelay: `${i * 0.28}s`
+            }}
+          />
+        ))}
+        <div style={{
+          position: "absolute", top: "50%", left: "50%",
+          width: 14, height: 14, borderRadius: "50%",
+          background: G,
+          animation: "neonCenterPulse 3s ease-in-out infinite"
+        }} />
+      </div>
+    </div>
   );
 }
 
