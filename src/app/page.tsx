@@ -45,6 +45,7 @@ import {
   RefreshCw,
   Settings,
   Trash2,
+  TrendingUp,
   Upload,
   Users,
   X
@@ -1786,6 +1787,14 @@ function WorkspaceApp({
                 </div>
               </WsCard>
             )}
+
+            {/* Projeção link */}
+            <button
+              onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); window.location.href = "/projecao"; }}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "11px 0", borderRadius: 10, background: "rgba(184,245,90,0.06)", border: "1px solid rgba(184,245,90,0.14)", color: G, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+            >
+              <TrendingUp size={14} /> Projeção 12 meses
+            </button>
           </aside>
         </div>
       </div>
