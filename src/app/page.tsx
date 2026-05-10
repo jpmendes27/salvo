@@ -1051,11 +1051,11 @@ const PARSE_FUNCTION_URL =
 
 const SEND_EMAIL_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_EMAIL_URL ||
-  "https://us-central1-fincheck-pro.cloudfunctions.net/sendInviteEmail";
+  "https://sendinviteemail-ihalwtxjpq-uc.a.run.app";
 
 const SEND_WA_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_WA_URL ||
-  "https://us-central1-fincheck-pro.cloudfunctions.net/sendInviteWhatsApp";
+  "https://sendinvitewhatsapp-ihalwtxjpq-uc.a.run.app";
 
 type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
 
