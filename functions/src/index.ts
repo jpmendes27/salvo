@@ -229,6 +229,62 @@ export const parseBankStatement = onRequest(
   }
 );
 
+const EVOLUTION_URL = "http://136.248.106.93:8080";
+const EVOLUTION_INSTANCE = "fincheck-pro";
+
+export const sendInviteWhatsApp = onRequest(
+  {
+    cors: true,
+    secrets: ["EVOLUTION_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
+
+    const { phone, workspaceName, inviteLink, fromName } = req.body as {
+      phone?: string; workspaceName?: string; inviteLink?: string; fromName?: string;
+    };
+    if (!phone || !workspaceName || !inviteLink) {
+      res.status(400).json({ error: "Missing required fields: phone, workspaceName, inviteLink" });
+      return;
+    }
+
+    const apiKey = process.env.EVOLUTION_API_KEY;
+    if (!apiKey) { res.status(500).json({ error: "EVOLUTION_API_KEY not configured" }); return; }
+
+    const sender = fromName || "Fincheck Pro";
+    const message = `Olá! 👋 *${sender}* convidou você para o workspace *${workspaceName}* no Fincheck Pro.\n\nClique para acessar: ${inviteLink}`;
+
+    try {
+      const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: apiKey },
+        body: JSON.stringify({
+          number: phone,
+          options: { delay: 500 },
+          textMessage: { text: message }
+        })
+      });
+      const data = await resp.json() as { key?: unknown; error?: string };
+      if (!resp.ok) throw new Error(JSON.stringify(data));
+      res.json({ success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("sendInviteWhatsApp error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
+
 export const sendInviteEmail = onRequest(
   {
     cors: true,

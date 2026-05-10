@@ -3,10 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseBankStatement = void 0;
+exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
-const SYSTEM_PROMPT = `Você é um extrator especializado de transações financeiras de extratos bancários brasileiros.
+const resend_1 = require("resend");
+function buildSystemPrompt() {
+    const today = new Date().toISOString().slice(0, 10);
+    return `Hoje é ${today}. Use esta data como referência para inferir o ano quando as datas do documento não tiverem ano explícito (ex: "06 MAI" → use o ano corrente ou o mais próximo cronologicamente).
+
+Você é um extrator especializado de transações financeiras de extratos bancários brasileiros.
 
 Dado um arquivo (PDF ou imagem), extraia TODAS as transações financeiras visíveis e retorne SOMENTE um JSON válido:
 
@@ -24,11 +29,13 @@ Dado um arquivo (PDF ou imagem), extraia TODAS as transações financeiras visí
 
 Regras para sourceLabel:
 - Identifique o banco/instituição e tipo do documento
-- Para fatura de cartão: "NomeBanco •••• XXXX" (últimos 4 dígitos do cartão principal, se visível)
-- Para extrato de conta corrente/poupança: "NomeBanco Conta"
+- Para fatura de cartão de crédito: "NomeBanco •••• XXXX" (últimos 4 dígitos do cartão, se visível; senão "NomeBanco Cartão")
+- Para extrato/tela de conta corrente, poupança ou conta digital: "NomeBanco Conta"
 - Para carteira digital (PicPay, Mercado Pago): nome da carteira
-- Exemplos: "Nubank •••• 3640", "Nubank Conta", "PicPay", "Itaú •••• 1234", "Bradesco Conta"
-- Se não identificar o banco: "Extrato"
+- Exemplos: "Nubank •••• 3640", "Nubank Conta", "Nubank Cartão", "PicPay", "Itaú •••• 1234", "Bradesco Conta", "Inter Conta"
+- Se vir o logo/nome Nubank e a tela mostrar PIX, transferências, débitos em conta → "Nubank Conta"
+- Se vir o logo/nome Nubank e a tela mostrar compras no crédito, fatura → "Nubank Cartão" ou "Nubank •••• XXXX"
+- NUNCA retorne "Extrato" se conseguir identificar o banco — só use "Extrato" como último recurso absoluto
 
 Regras para transações:
 - Débitos, saídas, compras, tarifas, IOF = "expense"
@@ -39,6 +46,7 @@ Regras para transações:
 - "description" deve ser o texto original da transação, sem truncar
 - NÃO inclua campo "category" — isso é processado separadamente
 - Retorne APENAS o JSON puro, sem markdown, sem texto adicional, sem explicação`;
+}
 function extractJsonObject(rawText) {
     const start = rawText.indexOf("{");
     const end = rawText.lastIndexOf("}");
@@ -161,7 +169,7 @@ exports.parseBankStatement = (0, https_1.onRequest)({
         const message = await client.messages.create({
             model: "claude-sonnet-4-6",
             max_tokens: 8192,
-            system: SYSTEM_PROMPT,
+            system: buildSystemPrompt(),
             messages: [{ role: "user", content }]
         });
         const rawText = message.content.find((b) => b.type === "text")?.text ?? "{}";
@@ -179,6 +187,137 @@ exports.parseBankStatement = (0, https_1.onRequest)({
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("Claude API error:", msg);
+        res.status(500).json({ error: msg });
+    }
+});
+const EVOLUTION_URL = "http://136.248.106.93:8080";
+const EVOLUTION_INSTANCE = "fincheck-pro";
+exports.sendInviteWhatsApp = (0, https_1.onRequest)({
+    cors: true,
+    secrets: ["EVOLUTION_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+}, async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+        res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+        res.set("Access-Control-Allow-Headers", "Content-Type");
+        res.status(204).send("");
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method Not Allowed" });
+        return;
+    }
+    const { phone, workspaceName, inviteLink, fromName } = req.body;
+    if (!phone || !workspaceName || !inviteLink) {
+        res.status(400).json({ error: "Missing required fields: phone, workspaceName, inviteLink" });
+        return;
+    }
+    const apiKey = process.env.EVOLUTION_API_KEY;
+    if (!apiKey) {
+        res.status(500).json({ error: "EVOLUTION_API_KEY not configured" });
+        return;
+    }
+    const sender = fromName || "Fincheck Pro";
+    const message = `Olá! 👋 *${sender}* convidou você para o workspace *${workspaceName}* no Fincheck Pro.\n\nClique para acessar: ${inviteLink}`;
+    try {
+        const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: apiKey },
+            body: JSON.stringify({
+                number: phone,
+                options: { delay: 500 },
+                textMessage: { text: message }
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok)
+            throw new Error(JSON.stringify(data));
+        res.json({ success: true });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("sendInviteWhatsApp error:", msg);
+        res.status(500).json({ error: msg });
+    }
+});
+exports.sendInviteEmail = (0, https_1.onRequest)({
+    cors: true,
+    secrets: ["RESEND_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+}, async (req, res) => {
+    if (req.method === "OPTIONS") {
+        res.set("Access-Control-Allow-Origin", "*");
+        res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+        res.set("Access-Control-Allow-Headers", "Content-Type");
+        res.status(204).send("");
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method Not Allowed" });
+        return;
+    }
+    const { to, workspaceName, inviteLink, fromName } = req.body;
+    if (!to || !workspaceName || !inviteLink) {
+        res.status(400).json({ error: "Missing required fields: to, workspaceName, inviteLink" });
+        return;
+    }
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+        res.status(500).json({ error: "RESEND_API_KEY not configured" });
+        return;
+    }
+    const resend = new resend_1.Resend(apiKey);
+    const senderName = fromName || "Fincheck Pro";
+    try {
+        const { data, error } = await resend.emails.send({
+            from: `${senderName} via Fincheck Pro <convites@fincheck.pro>`,
+            to: [to],
+            subject: `Você foi convidado para o workspace "${workspaceName}"`,
+            html: `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#09090b;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;padding:40px 20px">
+    <tr><td align="center">
+      <table width="100%" style="max-width:520px;background:#111214;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden">
+        <tr><td style="padding:32px 36px 0">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.3)">FINCHECK PRO</p>
+          <h1 style="margin:0 0 24px;font-size:22px;font-weight:800;color:#fff;line-height:1.3">Você foi convidado para<br><span style="color:#b8f55a">${workspaceName}</span></h1>
+          <p style="margin:0 0 28px;font-size:14px;color:rgba(255,255,255,0.55);line-height:1.7">
+            ${senderName} convidou você para acessar o workspace <strong style="color:rgba(255,255,255,0.85)">${workspaceName}</strong> no Fincheck Pro — controle financeiro inteligente.
+          </p>
+          <a href="${inviteLink}" style="display:inline-block;background:#b8f55a;color:#09090b;font-size:14px;font-weight:800;text-decoration:none;padding:13px 28px;border-radius:9px;margin-bottom:24px">Aceitar convite →</a>
+          <p style="margin:0 0 8px;font-size:11.5px;color:rgba(255,255,255,0.3);line-height:1.6">Ou copie e cole este link no navegador:</p>
+          <p style="margin:0 0 32px;font-size:11px;color:rgba(255,255,255,0.4);word-break:break-all">${inviteLink}</p>
+        </td></tr>
+        <tr><td style="padding:20px 36px;border-top:1px solid rgba(255,255,255,0.06)">
+          <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.22);line-height:1.6">Este link expira em 7 dias. Se você não esperava este convite, pode ignorar este email com segurança.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+        });
+        if (error) {
+            console.error("Resend error:", error);
+            res.set("Access-Control-Allow-Origin", "*");
+            res.status(500).json({ error: error.message });
+            return;
+        }
+        res.set("Access-Control-Allow-Origin", "*");
+        res.json({ success: true, id: data?.id });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("sendInviteEmail error:", msg);
+        res.set("Access-Control-Allow-Origin", "*");
         res.status(500).json({ error: msg });
     }
 });

@@ -916,6 +916,18 @@ function AuthenticatedApp({ user }: { user: User }) {
     return () => window.clearTimeout(timer);
   }, [loading, profile, repairingWorkspace, setProfile, user, workspaces.length]);
 
+  useEffect(() => {
+    if (!workspaces.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const wsParam = params.get("workspace");
+    if (wsParam && workspaces.some((e) => e.workspace.id === wsParam)) {
+      setActiveWorkspaceId(wsParam);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("workspace");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [workspaces]);
+
   async function acceptLegal() {
     setError("");
     try {
@@ -1039,7 +1051,11 @@ const PARSE_FUNCTION_URL =
 
 const SEND_EMAIL_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_EMAIL_URL ||
-  "https://sendinviteemail-ihalwtxjpq-uc.a.run.app";
+  "https://us-central1-fincheck-pro.cloudfunctions.net/sendInviteEmail";
+
+const SEND_WA_FUNCTION_URL =
+  process.env.NEXT_PUBLIC_SEND_WA_URL ||
+  "https://us-central1-fincheck-pro.cloudfunctions.net/sendInviteWhatsApp";
 
 type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
 
@@ -4523,13 +4539,23 @@ function InviteContactModal({
     setErr("");
     if (isWa) {
       const digits = rawPhone.replace(/\D/g, "");
+      if (!digits) { setErr("Digite o número do WhatsApp."); return; }
       const phone = countryCode.replace("+", "") + digits;
-      const msg = `Olá! Você foi convidado para o workspace *${workspaceName}* no Fincheck Pro.\n\nAcesse aqui: ${inviteLink}`;
-      window.open(
-        `https://api.whatsapp.com/send/?phone=${phone}&text=${encodeURIComponent(msg)}&type=phone_number&app_absent=0`,
-        "_blank"
-      );
-      onClose();
+      setSending(true);
+      try {
+        const resp = await fetch(SEND_WA_FUNCTION_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, workspaceName, inviteLink, fromName: senderName })
+        });
+        const data = await resp.json() as { success?: boolean; error?: string };
+        if (!resp.ok || data.error) throw new Error(data.error || "Falha ao enviar.");
+        setSent(true);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Erro ao enviar mensagem.");
+      } finally {
+        setSending(false);
+      }
     } else {
       if (!emailAddr.trim()) { setErr("Digite o email do convidado."); return; }
       setSending(true);
@@ -4569,8 +4595,8 @@ function InviteContactModal({
 
         {sent ? (
           <div style={{ textAlign: "center", padding: "16px 0 8px" }}>
-            <p style={{ fontSize: 15, fontWeight: 700, color: G, marginBottom: 6 }}>Email enviado!</p>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>O convite foi enviado para {emailAddr}.</p>
+            <p style={{ fontSize: 15, fontWeight: 700, color: G, marginBottom: 6 }}>{isWa ? "Mensagem enviada!" : "Email enviado!"}</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>O convite foi enviado para {isWa ? displayPhone : emailAddr}.</p>
             <button onClick={onClose} style={{ marginTop: 20, width: "100%", padding: "10px", borderRadius: 8, background: G, border: "none", color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Fechar</button>
           </div>
         ) : (
