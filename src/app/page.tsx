@@ -1422,15 +1422,18 @@ function WorkspaceApp({
     setError("");
     try {
       const token = crypto.randomUUID();
+      const createdByName = user.displayName || user.email?.split("@")[0] || "Alguém";
       await setDoc(doc(db, "invites", token), {
         workspaceId: workspace.id,
         workspaceName: workspace.name,
         createdBy: user.uid,
+        createdByName,
         status: "active",
         createdAt: serverTimestamp(),
         expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
       });
-      setInviteLink(`${window.location.origin}/convite?token=${token}`);
+      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+      setInviteLink(`${window.location.origin}${basePath}/convite?token=${token}`);
     } catch (err) {
       setError(errorMessage(err));
     }

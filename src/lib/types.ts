@@ -111,6 +111,7 @@ export type Invite = {
   workspaceId: string;
   workspaceName: string;
   createdBy: string;
+  createdByName?: string;
   status: "active" | "revoked" | "accepted";
   expiresAt: unknown;
   createdAt?: unknown;
