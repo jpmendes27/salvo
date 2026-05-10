@@ -32,6 +32,8 @@ import {
   ArrowRight,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Eye,
   EyeOff,
@@ -44,6 +46,7 @@ import {
   Plus,
   RefreshCw,
   Settings,
+  Target,
   Trash2,
   TrendingUp,
   Upload,
@@ -52,6 +55,8 @@ import {
 } from "lucide-react";
 import { CSSProperties, DragEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { auth, db, googleProvider } from "@/lib/firebase";
+import { useRouter } from "next/navigation";
+import { useAuthUser } from "@/app/auth-provider";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { currentMonthKey, formatCurrency, monthLabel } from "@/lib/money";
 import { buildMonthlyPlanSummary } from "@/lib/planning";
@@ -83,17 +88,9 @@ const G_20 = "rgba(184,245,90,0.18)";
 const G_30 = "rgba(184,245,90,0.28)";
 
 export default function HomePage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, authLoading } = useAuthUser();
 
-  useEffect(() => {
-    return onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
-  }, []);
-
-  if (loading) {
+  if (authLoading) {
     return <CenteredStatus text="Preparando seu Fincheck Pro..." />;
   }
 
@@ -784,11 +781,37 @@ function VerifyEmail({ user }: { user: User }) {
   );
 }
 
+const PROFILE_CACHE_KEY = "fincheck_profile_v1";
+const WS_CACHE_KEY = "fincheck_workspaces_v1";
+
+function getCachedProfile(uid: string): Profile | null {
+  try {
+    const raw = sessionStorage.getItem(`${PROFILE_CACHE_KEY}_${uid}`);
+    return raw ? (JSON.parse(raw) as Profile) : null;
+  } catch { return null; }
+}
+function setCachedProfile(uid: string, profile: Profile) {
+  try { sessionStorage.setItem(`${PROFILE_CACHE_KEY}_${uid}`, JSON.stringify(profile)); } catch {}
+}
+function getCachedWorkspaces(uid: string): WorkspaceWithMember[] | null {
+  try {
+    const raw = sessionStorage.getItem(`${WS_CACHE_KEY}_${uid}`);
+    return raw ? (JSON.parse(raw) as WorkspaceWithMember[]) : null;
+  } catch { return null; }
+}
+function setCachedWorkspaces(uid: string, ws: WorkspaceWithMember[]) {
+  try { sessionStorage.setItem(`${WS_CACHE_KEY}_${uid}`, JSON.stringify(ws)); } catch {}
+}
+
 function AuthenticatedApp({ user }: { user: User }) {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [workspaces, setWorkspaces] = useState<WorkspaceWithMember[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
-  const [loading, setLoading] = useState(true);
+  const cachedProfile = typeof window !== "undefined" ? getCachedProfile(user.uid) : null;
+  const cachedWorkspaces = typeof window !== "undefined" ? getCachedWorkspaces(user.uid) : null;
+  const [profile, setProfile] = useState<Profile | null>(cachedProfile);
+  const [workspaces, setWorkspaces] = useState<WorkspaceWithMember[]>(cachedWorkspaces ?? []);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(
+    typeof window !== "undefined" ? (localStorage.getItem("fincheck_workspace") ?? "") : ""
+  );
+  const [loading, setLoading] = useState(!cachedProfile);
   const [repairingWorkspace, setRepairingWorkspace] = useState(false);
   const [error, setError] = useState("");
 
@@ -807,6 +830,20 @@ function AuthenticatedApp({ user }: { user: User }) {
         window.location.reload();
         return;
       }
+      setCachedProfile(user.uid, profile);
+
+      // Se os workspaceIds do servidor diferem do que está em cache,
+      // descarta o cache de workspaces (evita usar workspace stale)
+      const cachedWs = getCachedWorkspaces(user.uid);
+      const cachedIds = new Set(cachedWs?.map((e) => e.workspace.id) ?? []);
+      const freshIds  = new Set(profile.workspaceIds ?? []);
+      const sameIds   = cachedIds.size === freshIds.size && [...freshIds].every((id) => cachedIds.has(id));
+      if (!sameIds) {
+        try { sessionStorage.removeItem(`${WS_CACHE_KEY}_${user.uid}`); } catch {}
+        setWorkspaces([]);
+        setActiveWorkspaceId("");
+      }
+
       setProfile(profile);
       setLoading(false);
     }
@@ -836,8 +873,9 @@ function AuthenticatedApp({ user }: { user: User }) {
                 member
               };
               setWorkspaces((prev) => {
-                const rest = prev.filter((e) => e.workspace.id !== wsId);
-                return [...rest, entry];
+                const next = [...prev.filter((e) => e.workspace.id !== wsId), entry];
+                setCachedWorkspaces(user.uid, next);
+                return next;
               });
               setActiveWorkspaceId((current) => current || wsId);
             })
@@ -1029,6 +1067,7 @@ function WorkspaceApp({
   activeEntry: WorkspaceWithMember;
   onSelectWorkspace: (workspaceId: string) => void;
 }) {
+  const router = useRouter();
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [plannedItems, setPlannedItems] = useState<PlannedItem[]>([]);
@@ -1047,10 +1086,24 @@ function WorkspaceApp({
   const [reconcilePrompt, setReconcilePrompt] = useState<
     { sourceLabel: string; monthKey: string; amount: number; include: boolean }[]
   >([]);
+  const [editingRendaMob, setEditingRendaMob] = useState(false);
+  const [emBrevePos, setEmBrevePos] = useState<{ bottom: number; centerX: number } | null>(null);
 
   const workspace = activeEntry.workspace;
   const member = activeEntry.member;
   const isOwner = member.role === "owner";
+
+  const [monthlyIncome, setMonthlyIncome] = useState<number>(workspace.monthlyIncome ?? 0);
+
+  useEffect(() => {
+    setMonthlyIncome(workspace.monthlyIncome ?? 0);
+  }, [workspace.monthlyIncome]);
+
+  const handleRendaChange = async (v: number) => {
+    setMonthlyIncome(v);
+    await updateDoc(doc(db, "workspaces", workspace.id), { monthlyIncome: v });
+  };
+
   const showDemo = !profile.hasCreatedRealMonth && transactions.length === 0;
   const visibleTx = showDemo ? demoTransactions : transactions;
   const sources = useMemo(() => {
@@ -1093,7 +1146,7 @@ function WorkspaceApp({
         setTxLoading(false);
       },
       (err) => {
-        setError(errorMessage(err));
+        if ((err as { code?: string }).code !== "permission-denied") setError(errorMessage(err));
         setTxLoading(false);
       }
     );
@@ -1104,9 +1157,10 @@ function WorkspaceApp({
       collection(db, "workspaces", workspace.id, "transactions"),
       where("monthKey", "==", prevMonthKey)
     );
-    return onSnapshot(q, (snap) => {
-      setPrevTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction));
-    });
+    return onSnapshot(q,
+      (snap) => setPrevTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)),
+      () => {}
+    );
   }, [workspace.id, prevMonthKey]);
 
   useEffect(() => {
@@ -1126,7 +1180,7 @@ function WorkspaceApp({
           .sort((a, b) => a.dueDay - b.dueDay || a.title.localeCompare(b.title));
         setPlannedItems(items);
       },
-      (err) => setError(errorMessage(err))
+      (err) => { if ((err as { code?: string }).code !== "permission-denied") setError(errorMessage(err)); }
     );
   }, [monthKey, showDemo, workspace.id]);
 
@@ -1143,7 +1197,7 @@ function WorkspaceApp({
     return onSnapshot(
       q,
       (snap) => setRecurringItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RecurringItem)),
-      (err) => setError(errorMessage(err))
+      (err) => { if ((err as { code?: string }).code !== "permission-denied") setError(errorMessage(err)); }
     );
   }, [showDemo, workspace.id]);
 
@@ -1384,6 +1438,52 @@ function WorkspaceApp({
     for (const md of membersSnap.docs) await deleteDoc(md.ref);
   }
 
+  // Mobile insights computations
+  const mobExpenses = useMemo(() => visibleTx.filter(t => t.type === "expense"), [visibleTx]);
+  const mobTotalGasto = useMemo(() => mobExpenses.reduce((s, t) => s + t.amount, 0), [mobExpenses]);
+  const mobTotalEntradas = useMemo(() => visibleTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [visibleTx]);
+  const mobDaysWithExpenses = useMemo(() => new Set(mobExpenses.map(t => t.date)).size, [mobExpenses]);
+  const mobMediaDia = mobDaysWithExpenses > 0 ? mobTotalGasto / mobDaysWithExpenses : 0;
+  const mobRendaRef = monthlyIncome > 0 ? monthlyIncome : (mobTotalEntradas > 0 ? mobTotalEntradas : 1);
+  const mobComprometimento = mobTotalGasto > 0 ? Math.min(100, Math.round((mobTotalGasto / mobRendaRef) * 100)) : 0;
+  const mobRatio = mobTotalGasto / mobRendaRef;
+  const mobScore: number | null = mobExpenses.length === 0 ? null : (() => {
+    if (mobRatio >= 2.0) return 0;
+    if (mobRatio >= 1.5) return 1;
+    if (mobRatio >= 1.0) return 2.5;
+    if (mobRatio >= 0.90) return 4.5;
+    if (mobRatio >= 0.75) return 6.5;
+    if (mobRatio >= 0.50) return 8.5;
+    return 10;
+  })();
+  const mobScoreColor = mobScore === null ? G : mobScore >= 8 ? G : mobScore >= 6 ? "#facc15" : "#ff8080";
+  const mobScoreLabel = mobScore === null ? "—" : mobScore >= 8 ? "Saúde em dia" : mobScore >= 6 ? "Atenção" : "Situação crítica";
+  const mobScoreRgb = mobScoreColor === G ? "184,245,90" : mobScoreColor === "#facc15" ? "250,204,21" : "255,128,128";
+  const mobByCategory = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of mobExpenses) m[tx.category] = (m[tx.category] ?? 0) + tx.amount;
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, [mobExpenses]);
+  const mobMaxCategory = mobByCategory[0]?.[1] ?? 1;
+  const mobPrevByCategory = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of prevTransactions.filter(t => t.type === "expense")) m[tx.category] = (m[tx.category] ?? 0) + tx.amount;
+    return m;
+  }, [prevTransactions]);
+  const mobSubscriptions = useMemo(() => {
+    const subs = visibleTx.filter(t => t.category === "Assinaturas");
+    const byDesc: Record<string, number> = {};
+    for (const tx of subs) byDesc[tx.description] = (byDesc[tx.description] ?? 0) + tx.amount;
+    return Object.entries(byDesc).sort((a, b) => b[1] - a[1]);
+  }, [visibleTx]);
+  const mobRecentTx = useMemo(() => [...visibleTx].slice(0, 6), [visibleTx]);
+  const mobPrevExpense = useMemo(() => prevTransactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0), [prevTransactions]);
+  const mobPrevIncome = useMemo(() => prevTransactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [prevTransactions]);
+  const mobExpenseChange = mobPrevExpense > 0 && summary.expense > 0 ? Math.round(((summary.expense - mobPrevExpense) / mobPrevExpense) * 100) : null;
+  const mobIncomeChange = mobPrevIncome > 0 && summary.income > 0 ? Math.round(((summary.income - mobPrevIncome) / mobPrevIncome) * 100) : null;
+  const prevSavingsRate = mobPrevIncome > 0 ? Math.round(((mobPrevIncome - mobPrevExpense) / mobPrevIncome) * 100) : null;
+  const mobSavingsChange = prevSavingsRate !== null ? summary.savingsRate - prevSavingsRate : null;
+
   const D = {
     shell: {
       minHeight: "100vh",
@@ -1402,7 +1502,7 @@ function WorkspaceApp({
       justifyContent: "space-between",
       padding: "0 clamp(16px,4vw,40px)",
       height: 60,
-      background: "rgba(5,5,5,0.88)",
+      background: "rgba(5,5,5,0.65)",
       borderBottom: "1px solid rgba(255,255,255,0.07)",
       backdropFilter: "blur(20px)",
       gap: 16
@@ -1427,69 +1527,106 @@ function WorkspaceApp({
         .ws-tx-row:hover{background:rgba(255,255,255,0.03)!important}
         .ws-filter-btn{cursor:pointer;transition:all .18s}
         .ws-icon-btn:hover{background:rgba(255,255,255,0.08)!important;color:#fff!important}
-        @media(max-width:960px){.ws-sidebar{display:none!important}.ws-grid{grid-template-columns:1fr!important}}
+        @media(max-width:960px){.ws-sidebar{display:none}.ws-grid{grid-template-columns:1fr}}
       `}</style>
 
       {/* Topbar */}
-      <header style={D.topbar}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <header className="ws-topbar" style={D.topbar}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Logo />
-          {workspaces.length > 1 ? (
-            <select
-              value={workspace.id}
-              onChange={(e) => onSelectWorkspace(e.target.value)}
-              style={{
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                borderRadius: 8,
-                color: "#fff",
-                fontSize: 13,
-                padding: "6px 10px",
-                cursor: "pointer"
-              }}
-            >
-              {workspaces.map((e) => (
-                <option key={e.workspace.id} value={e.workspace.id}>
-                  {e.workspace.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.46)" }}>
-              {workspace.name}
-            </span>
-          )}
+          <div className="ws-top-workspace" style={{ display: "flex", alignItems: "center" }}>
+            {workspaces.length > 1 ? (
+              <select
+                value={workspace.id}
+                onChange={(e) => onSelectWorkspace(e.target.value)}
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8,
+                  color: "#fff",
+                  fontSize: 13,
+                  padding: "6px 10px",
+                  cursor: "pointer"
+                }}
+              >
+                {workspaces.map((e) => (
+                  <option key={e.workspace.id} value={e.workspace.id}>
+                    {e.workspace.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.46)" }}>
+                {workspace.name}
+              </span>
+            )}
+          </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <input
-            type="month"
-            value={monthKey}
-            onChange={(e) => setMonthKey(e.target.value)}
-            style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 8,
-              color: "#fff",
-              fontSize: 13,
-              padding: "6px 10px",
-              cursor: "pointer"
-            }}
-          />
+        <div className="ws-top-right" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="ws-top-month" style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, overflow: "hidden" }}>
+            <button
+              onClick={() => {
+                const [y, m] = monthKey.split("-").map(Number);
+                const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+                setMonthKey(prev);
+              }}
+              style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", padding: "6px 8px", display: "flex", alignItems: "center", transition: "color .15s" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#fff")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.5)")}
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <input
+              type="month"
+              value={monthKey}
+              onChange={(e) => setMonthKey(e.target.value)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#fff",
+                fontSize: 13,
+                padding: "6px 4px",
+                cursor: "pointer",
+                outline: "none"
+              }}
+            />
+            <button
+              onClick={() => {
+                const [y, m] = monthKey.split("-").map(Number);
+                const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+                setMonthKey(next);
+              }}
+              style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", padding: "6px 8px", display: "flex", alignItems: "center", transition: "color .15s" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#fff")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.5)")}
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
           <IconBtn
+            className="ws-top-settings"
             icon={<Settings size={16} />}
             label="Configurações"
             onClick={() => setSettingsOpen(true)}
           />
           <IconBtn
+            className="ws-top-logout"
             icon={<LogOut size={16} />}
             label="Sair"
             onClick={() => signOut(auth)}
           />
+          <button
+            className="mob-avatar-btn"
+            onClick={() => setSettingsOpen(true)}
+            title="Menu"
+          >
+            {(profile.displayName || "U").charAt(0).toUpperCase()}
+          </button>
         </div>
       </header>
 
-      <div style={D.content}>
+      <div className="ws-main-content ws-desktop-layout" style={D.content}>
         {/* Demo banner */}
         {showDemo && (
           <div
@@ -1653,7 +1790,7 @@ function WorkspaceApp({
                       <button
                         onClick={() => {
                           localStorage.setItem("fincheck_workspace", workspace.id);
-                          window.location.href = `/transactions?month=${monthKey}`;
+                          router.push(`/transactions?month=${monthKey}`);
                         }}
                         style={{
                           marginTop: 6, padding: "10px 0", borderRadius: 10,
@@ -1673,6 +1810,8 @@ function WorkspaceApp({
                   prevTransactions={showDemo ? [] : prevTransactions}
                   monthKey={showDemo ? "2026-04" : monthKey}
                   workspaceId={workspace.id}
+                  renda={monthlyIncome}
+                  onRendaChange={handleRendaChange}
                 />
               )}
             </WsCard>
@@ -1790,14 +1929,339 @@ function WorkspaceApp({
 
             {/* Projeção link */}
             <button
-              onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); window.location.href = "/projecao"; }}
+              onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); router.push("/projecao"); }}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "11px 0", borderRadius: 10, background: "rgba(184,245,90,0.06)", border: "1px solid rgba(184,245,90,0.14)", color: G, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
             >
               <TrendingUp size={14} /> Projeção 12 meses
             </button>
+
+            {/* Metas link */}
+            <button
+              onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); router.push("/metas"); }}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "11px 0", borderRadius: 10, background: "rgba(167,139,250,0.06)", border: "1px solid rgba(167,139,250,0.18)", color: "#a78bfa", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+            >
+              <Target size={14} /> Metas financeiras
+            </button>
           </aside>
         </div>
       </div>
+
+      {/* ── Mobile layout ──────────────────────────────────── */}
+      <div className="ws-mobile-layout">
+
+        {/* Workspace pills */}
+        <div className="mob-ws-pills">
+          {workspaces.map((e) => (
+            <button
+              key={e.workspace.id}
+              type="button"
+              onClick={() => onSelectWorkspace(e.workspace.id)}
+              className={`mob-ws-pill ${e.workspace.id === workspace.id ? "active" : "inactive"}`}
+            >
+              {e.workspace.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="mob-ws-add"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setEmBrevePos({ bottom: window.innerHeight - r.top + 8, centerX: r.left + r.width / 2 });
+              setTimeout(() => setEmBrevePos(null), 2200);
+            }}
+          >+</button>
+        </div>
+        {emBrevePos && (
+          <div style={{
+            position: "fixed", bottom: emBrevePos.bottom, left: emBrevePos.centerX,
+            transform: "translateX(-50%)",
+            background: "rgba(28,28,28,0.97)", border: "1px solid rgba(255,255,255,0.13)",
+            borderRadius: 10, padding: "6px 12px", fontSize: 12, fontWeight: 600,
+            color: "rgba(255,255,255,0.75)", whiteSpace: "nowrap", zIndex: 9999,
+            backdropFilter: "blur(8px)", boxShadow: "0 4px 20px rgba(0,0,0,0.45)",
+            pointerEvents: "none"
+          }}>
+            <div style={{
+              position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%) rotate(45deg)",
+              width: 8, height: 8,
+              background: "rgba(28,28,28,0.97)", border: "1px solid rgba(255,255,255,0.13)",
+              borderTop: "none", borderLeft: "none"
+            }} />
+            Em breve!
+          </div>
+        )}
+
+        {/* 1. Saldo do mês */}
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "20px 16px 16px" }}>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
+            Saldo do mês
+          </p>
+          <p style={{ fontSize: 38, fontWeight: 900, letterSpacing: "-0.04em", color: summary.balance >= 0 ? G : "#ff8080", lineHeight: 1, marginBottom: 4 }}>
+            {formatCurrency(summary.balance)}
+          </p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.32)", marginBottom: 16 }}>
+            {monthLabel(showDemo ? "2026-04" : monthKey)}
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {(() => {
+              const prevMonthShort = (() => { const [y, m] = prevMonthKey.split("-").map(Number); return `${["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][m-1]}/${String(y).slice(2)}`; })();
+              type MiniCell = { label: string; value: string; color: string; badge: { arrow: "up"|"down"|null; arrowColor: string; pct: string; ctx: string } | null; plain?: string };
+              const cells: MiniCell[] = [
+                {
+                  label: "Entradas", value: `+${formatCurrency(summary.income)}`, color: G,
+                  badge: mobIncomeChange !== null ? {
+                    arrow: mobIncomeChange > 0 ? "up" : "down",
+                    arrowColor: mobIncomeChange >= 0 ? G : "#ff8080",
+                    pct: `${Math.abs(mobIncomeChange).toFixed(1)}%`,
+                    ctx: `vs ${formatCurrency(mobPrevIncome)} ${prevMonthShort}`
+                  } : null
+                },
+                {
+                  label: "Saídas", value: `−${formatCurrency(summary.expense)}`, color: "#ff8080",
+                  badge: mobExpenseChange !== null ? {
+                    arrow: mobExpenseChange > 0 ? "up" : "down",
+                    arrowColor: mobExpenseChange <= 0 ? G : "#ff8080",
+                    pct: `${Math.abs(mobExpenseChange).toFixed(1)}%`,
+                    ctx: `vs ${formatCurrency(mobPrevExpense)} ${prevMonthShort}`
+                  } : null
+                },
+                {
+                  label: "Economia", value: `${summary.savingsRate.toFixed(0)}%`, color: G,
+                  badge: mobSavingsChange !== null ? {
+                    arrow: mobSavingsChange > 0 ? "up" : "down",
+                    arrowColor: mobSavingsChange >= 0 ? G : "#ff8080",
+                    pct: `${Math.abs(Math.round(mobSavingsChange))}pp`,
+                    ctx: `vs ${prevSavingsRate}% ${prevMonthShort}`
+                  } : null
+                },
+                {
+                  label: "Média/dia", value: formatCurrency(mobMediaDia), color: "rgba(255,255,255,0.75)",
+                  badge: null, plain: `${mobExpenses.length} transações`
+                }
+              ];
+              return cells.map(({ label, value, color, badge, plain }) => (
+                <div key={label} style={{ background: "#050505", borderRadius: 12, padding: "10px 12px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <p style={{ fontSize: 10, color: "rgba(255,255,255,0.36)", marginBottom: 4 }}>{label}</p>
+                  <p style={{ fontSize: 15, fontWeight: 800, color, letterSpacing: "-0.02em" }}>{value}</p>
+                  {badge && (
+                    <div style={{ marginTop: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: badge.arrowColor }}>
+                        {badge.arrow === "up" ? "▲" : "▼"} {badge.pct}
+                      </span>
+                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", marginLeft: 4 }}>
+                        {badge.ctx}
+                      </span>
+                    </div>
+                  )}
+                  {plain && <p style={{ fontSize: 10, color: "rgba(255,255,255,0.32)", marginTop: 4 }}>{plain}</p>}
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+
+        {/* 2. Diagnóstico geral */}
+        {mobExpenses.length > 0 && (
+          <div style={{ border: `1px solid rgba(${mobScoreRgb},0.12)`, borderLeft: `3px solid ${mobScoreColor}`, borderRadius: 12, background: `rgba(${mobScoreRgb},0.05)`, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.65)`, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Diagnóstico geral</p>
+              <p style={{ fontSize: 17, fontWeight: 800, color: mobScoreColor, marginBottom: 6, lineHeight: 1.2 }}>{mobScoreLabel}</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.5, maxWidth: 180 }}>{mobComprometimento}% da renda comprometida.</p>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <p style={{ fontSize: 36, fontWeight: 900, color: mobScoreColor, lineHeight: 1, letterSpacing: "-0.03em" }}>
+                {mobScore !== null ? mobScore.toFixed(1).replace(".", ",") : "—"}
+              </p>
+              <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.5)`, marginTop: 2 }}>/ nota</p>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Renda mensal */}
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>Renda mensal</p>
+            <button onClick={() => setEditingRendaMob(true)} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}><Pencil size={13} /></button>
+          </div>
+          {editingRendaMob ? (
+            <input type="number" min="0" step="100" autoFocus
+              defaultValue={monthlyIncome > 0 ? monthlyIncome : ""}
+              placeholder="0"
+              onBlur={(e) => { const v = Number(e.target.value); handleRendaChange(v); setEditingRendaMob(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, outline: "none", color: "#fff", fontSize: 18, fontWeight: 800, width: "100%", padding: "6px 10px", marginBottom: 10 }}
+            />
+          ) : (
+            <p onClick={() => setEditingRendaMob(true)} style={{ fontSize: 18, fontWeight: 800, color: monthlyIncome > 0 ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", cursor: "pointer", marginBottom: 10 }}>
+              {monthlyIncome > 0 ? formatCurrency(monthlyIncome) : "Declarar renda"}
+            </p>
+          )}
+          <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginBottom: 6 }}>
+            <div style={{ height: "100%", borderRadius: 2, width: `${Math.min(100, mobComprometimento)}%`, background: mobComprometimento > 90 ? "#ff8080" : mobComprometimento > 75 ? "#facc15" : G, transition: "width .5s cubic-bezier(.4,0,.2,1)" }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.32)" }}>{formatCurrency(mobTotalGasto)} gastos</span>
+            <span style={{ fontSize: 10.5, color: mobComprometimento > 75 ? "#ff8080" : "rgba(255,255,255,0.32)", fontWeight: 700 }}>{mobComprometimento}% comprometida</span>
+          </div>
+        </div>
+
+        {/* 4. Importar extrato */}
+        <UploadZone onFiles={handleFiles} onAddManual={() => setAddOpen(true)} />
+
+        {/* 5. Plano do mês */}
+        <PlanCard
+          monthKey={showDemo ? "2026-04" : monthKey}
+          summary={planSummary}
+          plannedItems={showDemo ? [] : plannedItems}
+          recurringItems={showDemo ? [] : recurringItems}
+          readonly={showDemo}
+          onAdd={() => setPlanOpen(true)}
+          onStatusChange={updatePlannedStatus}
+          onDelete={(item) => deleteDoc(doc(db, "workspaces", workspace.id, "plannedItems", item.id))}
+          onDeactivateRecurring={(r) => updateDoc(doc(db, "workspaces", workspace.id, "recurringItems", r.id), { active: false, updatedAt: serverTimestamp() })}
+        />
+
+        {/* 6. Top categorias */}
+        {mobByCategory.length > 0 && (
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>Top categorias</p>
+              <button onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); router.push(`/top-categories?month=${showDemo ? "2026-04" : monthKey}`); }}
+                style={{ fontSize: 11, color: G, background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3, opacity: 0.8 }}>
+                ver todas <ArrowRight size={11} />
+              </button>
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {mobByCategory.slice(0, 3).map(([cat, total]) => {
+                const color = (CATEGORY_COLORS as Record<string, string>)[cat] ?? "#888";
+                const pct = Math.round((total / mobTotalGasto) * 100);
+                return (
+                  <div key={cat} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}66`, flexShrink: 0 }} />
+                    <span style={{ flex: 1, fontSize: 13, color: "rgba(255,255,255,0.78)", fontWeight: 600 }}>{cat}</span>
+                    <div style={{ width: 60, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${Math.round((total / mobMaxCategory) * 100)}%`, background: color, borderRadius: 2 }} />
+                    </div>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.36)", minWidth: 28, textAlign: "right" }}>{pct}%</span>
+                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", minWidth: 72, textAlign: "right" }}>{formatCurrency(total)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 7. Transações recentes */}
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>Transações recentes</p>
+            <button onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); router.push(`/transactions?month=${showDemo ? "2026-04" : monthKey}`); }}
+              style={{ fontSize: 11, color: G, background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3, opacity: 0.8 }}>
+              ver todas <ArrowRight size={11} />
+            </button>
+          </div>
+          {mobRecentTx.length === 0 ? (
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", textAlign: "center", padding: "12px 0" }}>Nenhuma transação.</p>
+          ) : (
+            <div>
+              {mobRecentTx.map((tx) => {
+                const isIncome = tx.type === "income";
+                const parts = tx.date.split("-");
+                const dateLabel = parts.length === 3 ? `${parts[2]}/${parts[1]}` : tx.date;
+                const color = categoryColor(tx.category);
+                return (
+                  <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: isIncome ? "rgba(184,245,90,0.08)" : "rgba(255,255,255,0.05)", border: `1px solid ${isIncome ? "rgba(184,245,90,0.15)" : "rgba(255,255,255,0.08)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}66` }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: "rgba(232,233,236,0.9)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tx.description}</p>
+                      <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.32)", marginTop: 2 }}>{tx.category} · {dateLabel}</p>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: isIncome ? G : "#ff8080", letterSpacing: "-0.02em", flexShrink: 0 }}>
+                      {isIncome ? "+" : "−"}{formatCurrency(tx.amount)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 8. Assinaturas */}
+        {mobSubscriptions.length > 0 && (
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
+            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Assinaturas</p>
+            <p style={{ fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: "-0.03em", marginBottom: 2 }}>
+              {formatCurrency(mobSubscriptions.reduce((s, [, v]) => s + v, 0))}
+              <span style={{ fontSize: 13, fontWeight: 400, color: "rgba(255,255,255,0.36)", marginLeft: 4 }}>/mês</span>
+            </p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 12 }}>{mobSubscriptions.length} detectada{mobSubscriptions.length !== 1 ? "s" : ""}</p>
+            <div>
+              {mobSubscriptions.map(([desc, total]) => (
+                <div key={desc} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: 13, color: "rgba(232,233,236,0.85)", fontWeight: 500 }}>{desc}</p>
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#ff8080" }}>−{formatCurrency(total)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 9. Convidar membro */}
+        {isOwner && (
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
+            <div style={{ padding: "16px 16px 10px" }}>
+              <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Convidar membro</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", lineHeight: 1.5 }}>Compartilhe acesso ao workspace como editor</p>
+            </div>
+            <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("whatsapp"); }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px", borderRadius: 12, background: "rgba(37,211,102,0.10)", border: "1px solid rgba(37,211,102,0.18)", color: "#4dcc8f", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                <WhatsAppIcon /> Enviar por WhatsApp
+              </button>
+              <button onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("email"); }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px", borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                <GmailIcon /> Enviar por Email
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 10. Projeção 12 meses */}
+        <button onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); router.push("/projecao"); }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", cursor: "pointer", width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(184,245,90,0.08)", border: "1px solid rgba(184,245,90,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <TrendingUp size={16} color={G} />
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "rgba(232,233,236,0.9)" }}>Projeção 12 meses</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.36)", marginTop: 2 }}>Veja para onde suas finanças vão</p>
+            </div>
+          </div>
+          <ArrowRight size={16} color="rgba(255,255,255,0.3)" />
+        </button>
+
+        {/* 11. Metas financeiras */}
+        <button onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); router.push("/metas"); }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", cursor: "pointer", width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Target size={16} color="#a78bfa" />
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "rgba(232,233,236,0.9)" }}>Metas financeiras</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.36)", marginTop: 2 }}>Defina e acompanhe seus objetivos</p>
+            </div>
+          </div>
+          <ArrowRight size={16} color="rgba(255,255,255,0.3)" />
+        </button>
+
+      </div>
+      {/* ── End mobile layout ── */}
 
       {/* Add manual modal */}
       {addOpen && (
@@ -1940,7 +2404,10 @@ function PlanCard({
   onDeactivateRecurring: (r: RecurringItem) => Promise<void>;
 }) {
   const [showRecurring, setShowRecurring] = useState(false);
+  const [showPaid, setShowPaid] = useState(false);
   const projectedPositive = summary.projectedBalance >= 0;
+  const pendingItems = plannedItems.filter((item) => item.status === "planned");
+  const paidItems = plannedItems.filter((item) => item.status === "paid");
   const activeItems = plannedItems.filter((item) => item.status !== "skipped");
 
   return (
@@ -2002,17 +2469,62 @@ function PlanCard({
           Adicione salario, aluguel, cartao ou qualquer conta prevista para o Fincheck mostrar o que ainda falta e quanto deve sobrar.
         </div>
       ) : (
-        <div style={{ display: "grid", gap: 8 }}>
-          {activeItems.map((item) => (
-            <PlanItemRow
-              key={item.id}
-              item={item}
-              readonly={readonly}
-              onStatusChange={onStatusChange}
-              onDelete={onDelete}
-            />
-          ))}
-        </div>
+        <>
+          {/* Itens pendentes */}
+          {pendingItems.length > 0 && (
+            <div style={{ display: "grid", gap: 8 }}>
+              {pendingItems.map((item) => (
+                <PlanItemRow
+                  key={item.id}
+                  item={item}
+                  readonly={readonly}
+                  onStatusChange={onStatusChange}
+                  onDelete={onDelete}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Seção colapsável: Já resolvido */}
+          {paidItems.length > 0 && (
+            <div style={{ marginTop: pendingItems.length > 0 ? 12 : 0 }}>
+              <button
+                onClick={() => setShowPaid((v) => !v)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "transparent",
+                  border: "none",
+                  color: "rgba(255,255,255,0.36)",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  padding: "4px 0",
+                  width: "100%"
+                }}
+              >
+                <ChevronDown size={13} style={{ transform: showPaid ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+                Já resolvido ({paidItems.length})
+              </button>
+              {showPaid && (
+                <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                  {paidItems.map((item) => (
+                    <PlanItemRow
+                      key={item.id}
+                      item={item}
+                      readonly={readonly}
+                      onStatusChange={onStatusChange}
+                      onDelete={onDelete}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* Recurring items management */}
@@ -2246,6 +2758,7 @@ function BalanceHeader({
 
   return (
     <div
+      className="ws-balance-card"
       style={{
         background: "rgba(255,255,255,0.025)",
         border: "1px solid rgba(255,255,255,0.07)",
@@ -2257,24 +2770,24 @@ function BalanceHeader({
       <p style={{ fontSize: 12, color: "rgba(255,255,255,0.36)", fontWeight: 600, marginBottom: 8, letterSpacing: "0.06em", textTransform: "uppercase" }}>
         {showDemo ? "Demo — Abril 2026" : monthLabel(monthKey)}
       </p>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 32, flexWrap: "wrap" }}>
+      <div className="ws-balance-row" style={{ display: "flex", alignItems: "flex-end", gap: 32, flexWrap: "wrap" }}>
         <div>
           <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Saldo do mês</p>
-          <p style={{ fontSize: "clamp(36px,5vw,56px)", fontWeight: 900, letterSpacing: "-0.04em", color: isPositive ? G : "#ff8080", lineHeight: 1 }}>
+          <p style={{ fontSize: "clamp(32px,5vw,56px)", fontWeight: 900, letterSpacing: "-0.04em", color: isPositive ? G : "#ff8080", lineHeight: 1 }}>
             {formatCurrency(summary.balance)}
           </p>
         </div>
-        <div style={{ display: "flex", gap: 28, paddingBottom: 4 }}>
+        <div className="ws-balance-stats" style={{ display: "flex", gap: 28, paddingBottom: 4 }}>
           <div>
             <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Entradas</p>
-            <p style={{ fontSize: 20, fontWeight: 800, color: G, letterSpacing: "-0.03em" }}>
+            <p className="ws-stat-val" style={{ fontSize: 20, fontWeight: 800, color: G, letterSpacing: "-0.03em" }}>
               +{formatCurrency(summary.income)}
             </p>
             <MoMBadge current={summary.income} prev={prevIncome} prevMonthKey={prevMonthKey} positiveWhenUp={true} hasData={prevIncome > 0} />
           </div>
           <div>
             <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Saídas</p>
-            <p style={{ fontSize: 20, fontWeight: 800, color: "#ff8080", letterSpacing: "-0.03em" }}>
+            <p className="ws-stat-val" style={{ fontSize: 20, fontWeight: 800, color: "#ff8080", letterSpacing: "-0.03em" }}>
               -{formatCurrency(summary.expense)}
             </p>
             <MoMBadge current={summary.expense} prev={prevExpense} prevMonthKey={prevMonthKey} positiveWhenUp={false} hasData={prevExpense > 0} />
@@ -2282,7 +2795,7 @@ function BalanceHeader({
           {summary.savingsRate > 0 && (
             <div>
               <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginBottom: 4 }}>Economia</p>
-              <p style={{ fontSize: 20, fontWeight: 800, color: "rgba(255,255,255,0.7)", letterSpacing: "-0.03em" }}>
+              <p className="ws-stat-val" style={{ fontSize: 20, fontWeight: 800, color: "rgba(255,255,255,0.7)", letterSpacing: "-0.03em" }}>
                 {summary.savingsRate.toFixed(0)}%
               </p>
               <MoMBadge current={summary.savingsRate} prev={prevSavingsRate} prevMonthKey={prevMonthKey} positiveWhenUp={true} hasData={prevIncome > 0} prevLabel={prevSavingsRate + "%"} />
@@ -2440,17 +2953,18 @@ function InsightsView({
   transactions,
   prevTransactions,
   monthKey,
-  workspaceId
+  workspaceId,
+  renda,
+  onRendaChange
 }: {
   transactions: Transaction[];
   prevTransactions: Transaction[];
   monthKey: string;
   workspaceId: string;
+  renda: number;
+  onRendaChange: (v: number) => void;
 }) {
-  const [renda, setRenda] = useState<number>(() => {
-    if (typeof window === "undefined") return 0;
-    return Number(localStorage.getItem(`fincheck_renda_${workspaceId}`) ?? 0);
-  });
+  const router = useRouter();
   const [editingRenda, setEditingRenda] = useState(false);
 
   const expenses = transactions.filter((t) => t.type === "expense");
@@ -2552,7 +3066,7 @@ function InsightsView({
                 type="number" min="0" step="100" autoFocus
                 defaultValue={renda > 0 ? renda : ""}
                 placeholder="0"
-                onBlur={(e) => { const v = Number(e.target.value); setRenda(v); localStorage.setItem(`fincheck_renda_${workspaceId}`, String(v)); setEditingRenda(false); }}
+                onBlur={(e) => { const v = Number(e.target.value); onRendaChange(v); setEditingRenda(false); }}
                 onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, outline: "none", color: "#fff", fontSize: 18, fontWeight: 800, width: 140, letterSpacing: "-0.03em", padding: "4px 8px" }}
               />
@@ -2635,7 +3149,7 @@ function InsightsView({
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <p style={{ ...INS_LABEL, marginBottom: 0 }}>Top categorias</p>
             <button
-              onClick={() => { localStorage.setItem("fincheck_workspace", workspaceId); window.location.href = `/top-categories?month=${monthKey}`; }}
+              onClick={() => { localStorage.setItem("fincheck_workspace", workspaceId); router.push(`/top-categories?month=${monthKey}`); }}
               style={{ fontSize: 11, fontWeight: 600, color: G, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, opacity: 0.8 }}
             >
               Ver tudo <ArrowRight size={11} />
@@ -3887,15 +4401,17 @@ function WsCard({
 function IconBtn({
   icon,
   label,
-  onClick
+  onClick,
+  className: extraClass
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  className?: string;
 }) {
   return (
     <button
-      className="ws-icon-btn"
+      className={`ws-icon-btn${extraClass ? ` ${extraClass}` : ""}`}
       onClick={onClick}
       title={label}
       style={{

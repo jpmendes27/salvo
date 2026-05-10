@@ -5,6 +5,7 @@ export type Workspace = {
   id: string;
   name: string;
   createdBy: string;
+  monthlyIncome?: number;
   createdAt?: unknown;
   updatedAt?: unknown;
 };
@@ -86,6 +87,23 @@ export type MonthlySummary = {
   topCategoryAmount?: number;
   insights: string[];
   shareText: string;
+};
+
+export type GoalType = "reserva" | "viagem" | "divida" | "investimento" | "outro";
+
+export type Goal = {
+  id: string;
+  title: string;
+  type: GoalType;
+  targetAmount: number;
+  currentAmount: number;
+  deadline?: string;
+  monthlyContribution?: number;
+  status: "active" | "completed";
+  createdBy: string;
+  createdByName: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
 };
 
 export type Invite = {

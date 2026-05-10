@@ -1,11 +1,12 @@
 "use client";
 
-import { onAuthStateChanged, type User } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { ArrowLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { auth, db } from "@/lib/firebase";
+import { useAuthUser } from "@/app/auth-provider";
+import { db } from "@/lib/firebase";
 import { formatCurrency, monthLabel } from "@/lib/money";
 import { CATEGORY_COLORS } from "@/lib/parsers";
 import type { Transaction } from "@/lib/types";
@@ -31,23 +32,24 @@ export default function TopCategoriesPage() {
 function TopCategoriesFlow() {
   const params = useSearchParams();
   const monthKey = params.get("month") || new Date().toISOString().slice(0, 7);
-  const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
+  const { user, authLoading } = useAuthUser();
+  const router = useRouter();
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => { setUser(u); setReady(true); });
-  }, []);
+    if (!authLoading && (!user || !user.emailVerified)) router.replace("/");
+  }, [authLoading, user, router]);
 
-  if (!ready) return <Shell text="Carregando..." />;
-  if (!user || !user.emailVerified) { window.location.href = "/"; return null; }
+  if (authLoading) return <Shell text="Carregando..." />;
+  if (!user || !user.emailVerified) return null;
 
   const workspaceId = typeof window !== "undefined" ? localStorage.getItem("fincheck_workspace") ?? "" : "";
-  if (!workspaceId) { window.location.href = "/"; return null; }
+  if (!workspaceId) { router.replace("/"); return null; }
 
   return <CategoryRanking workspaceId={workspaceId} monthKey={monthKey} />;
 }
 
 function CategoryRanking({ workspaceId, monthKey }: { workspaceId: string; monthKey: string }) {
+  const router = useRouter();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [prevTransactions, setPrevTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,7 +97,7 @@ function CategoryRanking({ workspaceId, monthKey }: { workspaceId: string; month
     <div style={{ minHeight: "100vh", background: "#09090b", color: "#fff", fontFamily: "var(--font-dm-sans, sans-serif)" }}>
       {/* Header */}
       <div style={{ position: "sticky", top: 0, zIndex: 10, background: "rgba(9,9,11,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "14px 24px", display: "flex", alignItems: "center", gap: 16 }}>
-        <button onClick={() => window.history.back()} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: 0 }}>
+        <button onClick={() => router.push("/")} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: 0 }}>
           <ArrowLeft size={16} /> Voltar
         </button>
         <div style={{ flex: 1 }}>

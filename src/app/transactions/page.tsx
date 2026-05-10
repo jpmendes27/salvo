@@ -1,6 +1,6 @@
 "use client";
 
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { type User } from "firebase/auth";
 import {
   collection,
   deleteDoc,
@@ -11,9 +11,11 @@ import {
   where
 } from "firebase/firestore";
 import { ArrowLeft, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { auth, db } from "@/lib/firebase";
+import { useAuthUser } from "@/app/auth-provider";
+import { db } from "@/lib/firebase";
 import { formatCurrency, monthLabel } from "@/lib/money";
 import { CATEGORY_COLORS } from "@/lib/parsers";
 import type { Transaction } from "@/lib/types";
@@ -47,30 +49,21 @@ function Shell({ text }: { text: string }) {
 function TransactionsFlow() {
   const params = useSearchParams();
   const monthKey = params.get("month") || new Date().toISOString().slice(0, 7);
-  const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
+  const { user, authLoading } = useAuthUser();
+  const router = useRouter();
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setReady(true);
-    });
-  }, []);
+    if (!authLoading && (!user || !user.emailVerified)) router.replace("/");
+  }, [authLoading, user, router]);
 
-  if (!ready) return <Shell text="Carregando..." />;
-  if (!user || !user.emailVerified) {
-    window.location.href = "/";
-    return null;
-  }
+  if (authLoading) return <Shell text="Carregando..." />;
+  if (!user || !user.emailVerified) return null;
 
   const workspaceId = typeof window !== "undefined"
     ? localStorage.getItem("fincheck_workspace") ?? ""
     : "";
 
-  if (!workspaceId) {
-    window.location.href = "/";
-    return null;
-  }
+  if (!workspaceId) { router.replace("/"); return null; }
 
   return <TransactionList user={user} workspaceId={workspaceId} monthKey={monthKey} />;
 }
@@ -84,6 +77,7 @@ function TransactionList({
   workspaceId: string;
   monthKey: string;
 }) {
+  const router = useRouter();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [txFilter, setTxFilter] = useState<"all" | "income" | "expense">("all");
@@ -127,7 +121,7 @@ function TransactionList({
         display: "flex", alignItems: "center", gap: 16
       }}>
         <button
-          onClick={() => window.location.href = "/"}
+          onClick={() => router.push("/")}
           style={{
             display: "flex", alignItems: "center", gap: 6,
             background: "transparent", border: "none",
