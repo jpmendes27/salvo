@@ -142,7 +142,7 @@ function InviteFlow() {
 
       setDone(true);
       setTimeout(() => {
-        window.location.href = `${BASE}/?workspace=${invite.workspaceId}`;
+        window.location.href = `${BASE}/home?workspace=${invite.workspaceId}`;
       }, 1400);
     } catch (err) {
       setError(errorMessage(err));
@@ -309,7 +309,7 @@ function InviteFlow() {
                   {busy ? "Entrando…" : "Aceitar convite"}
                 </button>
                 <button
-                  onClick={() => { window.location.href = `${BASE}/`; }}
+                  onClick={() => { window.location.href = `${BASE}/login`; }}
                   style={{
                     width: "100%", padding: "12px", borderRadius: 12,
                     background: "transparent", color: "rgba(255,255,255,0.3)",
@@ -324,7 +324,7 @@ function InviteFlow() {
 
             {error && !invite && (
               <button
-                onClick={() => { window.location.href = `${BASE}/`; }}
+                onClick={() => { window.location.href = `${BASE}/login`; }}
                 style={{
                   width: "100%", padding: "14px", borderRadius: 12,
                   background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)",
