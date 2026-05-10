@@ -261,8 +261,8 @@ export const sendInviteWhatsApp = onRequest(
     const apiKey = process.env.EVOLUTION_API_KEY;
     if (!apiKey) { res.status(500).json({ error: "EVOLUTION_API_KEY not configured" }); return; }
 
-    const sender = fromName || "Fincheck Pro";
-    const message = `Olá! 👋 *${sender}* te convidou para o workspace *${workspaceName}* no *Fincheck Pro*.\n\nO Fincheck é um painel financeiro inteligente pra você acompanhar entradas, saídas e a saúde do seu dinheiro — tudo em um lugar só.\n\n✅ Aceite o convite e comece agora:\n${inviteLink}`;
+    const sender = fromName || "Alguém";
+    const message = `${sender} te adicionou no painel financeiro dele no Fincheck Pro. 💚\nAgora vocês acompanham tudo juntos — entradas, gastos e o planejamento do mês em tempo real.\n👉 ${inviteLink}`;
 
     try {
       const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
@@ -326,13 +326,13 @@ export const sendInviteEmail = onRequest(
     }
 
     const resend = new Resend(apiKey);
-    const senderName = fromName || "Fincheck Pro";
+    const senderName = fromName || "Alguém";
 
     try {
       const { data, error } = await resend.emails.send({
         from: `${senderName} via Fincheck Pro <convites@fincheck.pro>`,
         to: [to],
-        subject: `${senderName} te convidou para o Fincheck Pro`,
+        subject: `${senderName} quer gerir as finanças com você`,
         html: `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -341,16 +341,16 @@ export const sendInviteEmail = onRequest(
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;padding:40px 20px">
     <tr><td align="center">
       <table width="100%" style="max-width:520px;background:#111214;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden">
-        <tr><td style="padding:36px 36px 0">
+        <tr><td style="padding:36px 36px 32px">
           <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.28)">FINCHECK PRO</p>
-          <h1 style="margin:0 0 16px;font-size:24px;font-weight:800;color:#fff;line-height:1.3"><span style="color:#b8f55a">${senderName}</span> te convidou para o workspace <span style="color:#b8f55a">${workspaceName}</span></h1>
-          <p style="margin:0 0 28px;font-size:14px;color:rgba(255,255,255,0.5);line-height:1.75">
-            O Fincheck Pro é um painel financeiro inteligente pra você acompanhar entradas, saídas e a saúde do seu dinheiro — tudo em um lugar só.<br><br>
-            Ao aceitar o convite, você terá acesso ao workspace <strong style="color:rgba(255,255,255,0.85)">${workspaceName}</strong> como editor e poderá visualizar e lançar transações em conjunto.
+          <h1 style="margin:0 0 24px;font-size:24px;font-weight:800;color:#fff;line-height:1.3">Oi! 👋</h1>
+          <p style="margin:0 0 12px;font-size:15px;color:rgba(255,255,255,0.75);line-height:1.7">
+            <strong style="color:#fff">${senderName}</strong> te convidou para acompanhar e gerir as finanças juntos no Fincheck Pro.
           </p>
-          <a href="${inviteLink}" style="display:inline-block;background:#b8f55a;color:#09090b;font-size:14px;font-weight:800;text-decoration:none;padding:14px 32px;border-radius:10px;margin-bottom:28px;letter-spacing:-.01em">Aceitar convite →</a>
-          <p style="margin:0 0 8px;font-size:11px;color:rgba(255,255,255,0.25);line-height:1.6">Ou copie e cole este link no navegador:</p>
-          <p style="margin:0 0 36px;font-size:10.5px;color:rgba(255,255,255,0.35);word-break:break-all">${inviteLink}</p>
+          <p style="margin:0 0 28px;font-size:15px;color:rgba(255,255,255,0.55);line-height:1.7">
+            No painel de vocês dá pra ver em tempo real o que entrou, o que saiu e o que ainda está por vir — sem surpresa no fim do mês.
+          </p>
+          <a href="${inviteLink}" style="display:inline-block;background:#b8f55a;color:#09090b;font-size:14px;font-weight:800;text-decoration:none;padding:14px 32px;border-radius:10px;letter-spacing:-.01em">👉 Aceitar convite</a>
         </td></tr>
         <tr><td style="padding:18px 36px;border-top:1px solid rgba(255,255,255,0.05)">
           <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);line-height:1.7">Este link expira em 7 dias. Se você não esperava este convite, pode ignorar este email com segurança.</p>
