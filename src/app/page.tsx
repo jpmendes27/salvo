@@ -1422,7 +1422,7 @@ function WorkspaceApp({
     setError("");
     try {
       const token = crypto.randomUUID();
-      const createdByName = user.displayName || user.email?.split("@")[0] || "Alguém";
+      const createdByName = profile.displayName || user.displayName || user.email?.split("@")[0] || "Alguém";
       await setDoc(doc(db, "invites", token), {
         workspaceId: workspace.id,
         workspaceName: workspace.name,
