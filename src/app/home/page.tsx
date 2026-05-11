@@ -35,6 +35,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Crown,
   Eye,
   EyeOff,
   FileText,
@@ -412,6 +413,13 @@ function AuthenticatedApp({ user }: { user: User }) {
       workspaces={workspaces}
       activeEntry={activeEntry}
       onSelectWorkspace={setActiveWorkspaceId}
+      onRenameWorkspace={(id, name) =>
+        setWorkspaces((prev) =>
+          prev.map((e) =>
+            e.workspace.id === id ? { ...e, workspace: { ...e.workspace, name } } : e
+          )
+        )
+      }
     />
   );
 }
@@ -482,7 +490,8 @@ function WorkspaceApp({
   setProfile,
   workspaces,
   activeEntry,
-  onSelectWorkspace
+  onSelectWorkspace,
+  onRenameWorkspace
 }: {
   user: User;
   profile: Profile;
@@ -490,6 +499,7 @@ function WorkspaceApp({
   workspaces: WorkspaceWithMember[];
   activeEntry: WorkspaceWithMember;
   onSelectWorkspace: (workspaceId: string) => void;
+  onRenameWorkspace: (id: string, name: string) => void;
 }) {
   const router = useRouter();
   const [monthKey, setMonthKey] = useState(currentMonthKey());
@@ -512,6 +522,21 @@ function WorkspaceApp({
   >([]);
   const [editingRendaMob, setEditingRendaMob] = useState(false);
   const [emBrevePos, setEmBrevePos] = useState<{ bottom: number; centerX: number } | null>(null);
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const [renameWsOpen, setRenameWsOpen] = useState(false);
+  const [renameWsValue, setRenameWsValue] = useState("");
+  const avatarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!avatarOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) {
+        setAvatarOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [avatarOpen]);
 
   const workspace = activeEntry.workspace;
   const member = activeEntry.member;
@@ -1031,25 +1056,123 @@ function WorkspaceApp({
               <ChevronRight size={14} />
             </button>
           </div>
-          <IconBtn
-            className="ws-top-settings"
-            icon={<Settings size={16} />}
-            label="Configurações"
-            onClick={() => setSettingsOpen(true)}
-          />
-          <IconBtn
-            className="ws-top-logout"
-            icon={<LogOut size={16} />}
-            label="Sair"
-            onClick={() => signOut(auth)}
-          />
-          <button
-            className="mob-avatar-btn"
-            onClick={() => setSettingsOpen(true)}
-            title="Menu"
-          >
-            {(profile.displayName || "U").charAt(0).toUpperCase()}
-          </button>
+          {/* Avatar menu */}
+          <div ref={avatarRef} style={{ position: "relative" }}>
+            <button
+              onClick={() => setAvatarOpen((o) => !o)}
+              title={profile.displayName || "Menu"}
+              style={{
+                width: 34, height: 34, borderRadius: "50%",
+                background: G, border: "2px solid rgba(184,245,90,0.3)",
+                cursor: "pointer", display: "flex", alignItems: "center",
+                justifyContent: "center", fontSize: 13, fontWeight: 700,
+                color: "#050505", transition: "opacity .15s", flexShrink: 0
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = ".82")}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+            >
+              {(profile.displayName || "U").charAt(0).toUpperCase()}
+            </button>
+
+            {avatarOpen && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 10px)", right: 0,
+                background: "#0e0f11", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 16, width: 248, zIndex: 200,
+                boxShadow: "0 20px 60px rgba(0,0,0,0.65)",
+                overflow: "hidden"
+              }}>
+                {/* User info */}
+                <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: G, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#050505", flexShrink: 0 }}>
+                    {(profile.displayName || "U").charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {profile.displayName || user.email?.split("@")[0]}
+                    </div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {user.email}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Body items */}
+                <div style={{ padding: "6px" }}>
+                  {[
+                    {
+                      icon: <Pencil size={15} color="rgba(255,255,255,0.45)" />,
+                      label: "Renomear conta",
+                      sub: workspace.name,
+                      onClick: () => { setRenameWsValue(workspace.name); setAvatarOpen(false); setRenameWsOpen(true); }
+                    },
+                    {
+                      icon: <Crown size={15} color="rgba(255,255,255,0.45)" />,
+                      label: "Meu plano",
+                      badge: "PRO",
+                      onClick: () => setAvatarOpen(false)
+                    },
+                    {
+                      icon: <Settings size={15} color="rgba(255,255,255,0.45)" />,
+                      label: "Configurações",
+                      onClick: () => { setAvatarOpen(false); setSettingsOpen(true); }
+                    }
+                  ].map(({ icon, label, sub, badge, onClick }) => (
+                    <button
+                      key={label}
+                      onClick={onClick}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 10, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", transition: "background .15s" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      {icon}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>{label}</div>
+                        {sub && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>}
+                      </div>
+                      {badge && (
+                        <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(184,245,90,0.12)", color: G, border: `1px solid rgba(184,245,90,0.2)`, padding: "2px 7px", borderRadius: 6, letterSpacing: "0.04em", flexShrink: 0 }}>
+                          {badge}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+
+                  <a
+                    href="https://wa.me/5521999999999"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setAvatarOpen(false)}
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 10, background: "transparent", textDecoration: "none", transition: "background .15s" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <WhatsAppIcon />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>Falar com suporte</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>Abre no WhatsApp</div>
+                    </div>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M7 17L17 7M17 7H7M17 7v10"/>
+                    </svg>
+                  </a>
+                </div>
+
+                {/* Footer — logout */}
+                <div style={{ padding: "6px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                  <button
+                    onClick={() => { setAvatarOpen(false); signOut(auth); }}
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 10, background: "transparent", border: "none", cursor: "pointer", transition: "background .15s" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,80,80,0.08)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <LogOut size={15} color="#ff8080" />
+                    <span style={{ fontSize: 13, color: "#ff8080" }}>Sair</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -1802,6 +1925,59 @@ function WorkspaceApp({
             );
           }}
         />
+      )}
+
+      {/* Rename workspace modal */}
+      {renameWsOpen && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          onClick={(e) => e.target === e.currentTarget && setRenameWsOpen(false)}
+        >
+          <div style={{ background: "#0e0f11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: 24, width: "100%", maxWidth: 340, boxShadow: "0 40px 100px rgba(0,0,0,0.6)" }}>
+            <p style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 6 }}>Renomear conta</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 20, lineHeight: 1.5 }}>
+              Esse nome aparece no header e nos convites que você enviar.
+            </p>
+            <input
+              autoFocus
+              maxLength={40}
+              value={renameWsValue}
+              onChange={(e) => setRenameWsValue(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && renameWsValue.trim() && (async () => {
+                const name = renameWsValue.trim();
+                await updateDoc(doc(db, "workspaces", workspace.id), { name, updatedAt: serverTimestamp() });
+                onRenameWorkspace(workspace.id, name);
+                setRenameWsOpen(false);
+              })()}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px", fontSize: 14, color: "#fff", fontFamily: "inherit", outline: "none", transition: "border-color .15s", marginBottom: 16 }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = G)}
+              onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)")}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setRenameWsOpen(false)}
+                style={{ flex: 1, padding: "10px", borderRadius: 10, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontFamily: "inherit", transition: "background .15s" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  const name = renameWsValue.trim();
+                  if (!name) return;
+                  await updateDoc(doc(db, "workspaces", workspace.id), { name, updatedAt: serverTimestamp() });
+                  onRenameWorkspace(workspace.id, name);
+                  setRenameWsOpen(false);
+                }}
+                disabled={!renameWsValue.trim()}
+                style={{ flex: 1, padding: "10px", borderRadius: 10, background: G, border: "none", color: "#050505", cursor: renameWsValue.trim() ? "pointer" : "default", fontSize: 13, fontWeight: 700, fontFamily: "inherit", opacity: renameWsValue.trim() ? 1 : 0.4, transition: "opacity .15s" }}
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
