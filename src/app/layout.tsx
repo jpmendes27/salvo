@@ -5,9 +5,12 @@ import { AuthProvider } from "./auth-provider";
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
 
 export const metadata: Metadata = {
-  title: "Fincheck Pro",
+  title: "Fincheck Pro · Controle financeiro",
   description: "Gestao financeira mensal, compartilhavel e simples.",
-  manifest: "/manifest.json"
+  manifest: "/manifest.json",
+  icons: {
+    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8f564'/><text x='50%25' y='72%25' font-family='sans-serif' font-weight='700' font-size='20' fill='%23111410' text-anchor='middle'>F</text></svg>"
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
