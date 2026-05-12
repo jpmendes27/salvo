@@ -64,7 +64,7 @@ import { buildMonthlyPlanSummary } from "@/lib/planning";
 import { buildMonthlySummary } from "@/lib/summary";
 import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction, TransactionType, Workspace } from "@/lib/types";
 import { defaultCategories, demoTransactions } from "@/lib/demo";
-import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, fileToBase64, guessCategory, parseCSV, parseOFX, type ParsedTransaction } from "@/lib/parsers";
+import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, fileToBase64, guessCategory, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { extractPDFText } from "@/lib/pdf-extract";
 import { track } from "@/lib/analytics";
@@ -711,9 +711,36 @@ function WorkspaceApp({
       try {
         if (ext === "csv" || mime.includes("csv")) {
           const text = await file.text();
-          parseCSV(text, file.name).forEach((t) =>
-            rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
-          );
+          let csvTxs: ParsedTransaction[] = [];
+          try { csvTxs = parseCSV(text, file.name); } catch { /* fallback pra IA */ }
+          if (csvTxs.length >= 3) {
+            csvTxs.forEach((t) => rows.push({ ...t, _id: crypto.randomUUID(), selected: true }));
+          } else {
+            const resp = await fetch(PARSE_FUNCTION_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ textData: text, mimeType: "text/plain", filename: file.name })
+            });
+            if (!resp.ok) {
+              const errJson = await resp.json().catch(() => ({}));
+              throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+            }
+            const data = await resp.json();
+            const csvLabel: string = data.sourceLabel || sourceLabelFromFilename(file.name);
+            (data.transactions ?? []).forEach((t: ParsedTransaction) => {
+              if (Math.abs(t.amount ?? 0) === 0) return;
+              if (isStopDescription(t.description ?? "")) return;
+              const type = t.type ?? (t.amount < 0 ? "expense" : "income");
+              rows.push({
+                ...t, type,
+                amount: Math.abs(t.amount ?? 0),
+                category: categorizeTransaction(t.description ?? "", type),
+                sourceLabel: csvLabel,
+                _id: crypto.randomUUID(),
+                selected: true
+              });
+            });
+          }
         } else if (ext === "ofx" || ext === "qfx" || mime.includes("ofx")) {
           const text = await file.text();
           parseOFX(text, file.name).forEach((t) =>

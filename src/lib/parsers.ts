@@ -290,7 +290,7 @@ function parseBRNumber(raw: string): number {
   return negative ? -num : num;
 }
 
-function sourceLabelFromFilename(filename: string): string {
+export function sourceLabelFromFilename(filename: string): string {
   const base = filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").trim();
   const lower = base.toLowerCase();
   if (lower.includes("nubank")) return "Nubank";
