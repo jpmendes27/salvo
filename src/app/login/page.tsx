@@ -131,6 +131,7 @@ function FInput({
   right?: ReactNode;
 }) {
   const [f, setF] = useState(false);
+  const isPassword = type === "password" || (type === "text" && placeholder === "Senha");
   return (
     <div style={{ position: "relative" }}>
       <input
@@ -141,7 +142,10 @@ function FInput({
         onFocus={() => setF(true)}
         onBlur={() => setF(false)}
         required
-        minLength={type === "password" ? 6 : undefined}
+        inputMode={isPassword ? "numeric" : undefined}
+        pattern={isPassword ? "[0-9]{8}" : undefined}
+        minLength={isPassword ? 8 : undefined}
+        maxLength={isPassword ? 8 : undefined}
         style={{
           width: "100%",
           padding: right ? "13px 44px 13px 16px" : "13px 16px",
@@ -467,7 +471,7 @@ function AuthScreen() {
                     type={show ? "text" : "password"}
                     placeholder="Senha"
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => setPassword(event.target.value.replace(/\D/g, ""))}
                     right={
                       <button
                         type="button"
@@ -480,7 +484,7 @@ function AuthScreen() {
                   />
                   {mode === "signup" && (
                     <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.28)", marginTop: 8, lineHeight: 1.5 }}>
-                      Use no mínimo 6 caracteres com letras e números.
+                      Crie uma senha de 8 dígitos numéricos.
                     </p>
                   )}
                 </div>
@@ -688,7 +692,7 @@ function errorMessage(err: unknown) {
     case "auth/email-already-in-use":
       return "Não foi possível criar conta com este e-mail.";
     case "auth/weak-password":
-      return "Senha fraca. Use pelo menos 6 caracteres.";
+      return "Senha fraca. Use pelo menos 8 dígitos numéricos.";
     case "auth/invalid-email":
       return "E-mail inválido.";
     case "auth/too-many-requests":
