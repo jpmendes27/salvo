@@ -16,9 +16,19 @@ import { useEffect, useRef, useState } from "react";
 import { auth, db } from "@/lib/firebase";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { track } from "@/lib/analytics";
+import { maskBRL, parseBRL } from "@/lib/money";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const G = "#b8f55a";
+
+function maskPhone(value: string): string {
+  const d = value.replace(/\D/g, "").slice(0, 11);
+  if (!d) return "";
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
 
 export default function OnboardingPage() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -68,8 +78,9 @@ function OnboardingFlow({ user }: { user: User }) {
     setError("");
     try {
       const displayName = name.trim() || user.displayName || user.email?.split("@")[0] || "Você";
-      const incomeVal = Number(income.replace(/\./g, "").replace(",", ".")) || 0;
-      const phoneTrimmed = phone.replace(/\D/g, "");
+      const incomeVal = parseBRL(income);
+      const digits = phone.replace(/\D/g, "");
+      const phoneTrimmed = digits && !digits.startsWith("55") ? `55${digits}` : digits;
 
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
@@ -197,9 +208,9 @@ function OnboardingFlow({ user }: { user: User }) {
               className="ob-input"
               type="text"
               inputMode="numeric"
-              placeholder="Ex: 5.000,00"
+              placeholder="R$ 0,00"
               value={income}
-              onChange={(e) => setIncome(e.target.value)}
+              onChange={(e) => setIncome(maskBRL(e.target.value))}
               onKeyDown={(e) => e.key === "Enter" && setStep(2)}
               style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
             />
@@ -241,9 +252,9 @@ function OnboardingFlow({ user }: { user: User }) {
               className="ob-input"
               type="tel"
               inputMode="tel"
-              placeholder="Ex: (21) 99999-9999"
+              placeholder="(21) 99999-9999"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => setPhone(maskPhone(e.target.value))}
               onKeyDown={(e) => e.key === "Enter" && setStep(3)}
               style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
             />

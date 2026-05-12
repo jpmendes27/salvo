@@ -59,7 +59,7 @@ import { auth, db, googleProvider } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { useAuthUser } from "@/app/auth-provider";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
-import { currentMonthKey, formatCurrency, monthLabel } from "@/lib/money";
+import { currentMonthKey, formatCurrency, maskBRL, parseBRL, monthLabel } from "@/lib/money";
 import { buildMonthlyPlanSummary } from "@/lib/planning";
 import { buildMonthlySummary } from "@/lib/summary";
 import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction, TransactionType, Workspace } from "@/lib/types";
@@ -524,6 +524,7 @@ function WorkspaceApp({
     { sourceLabel: string; monthKey: string; amount: number; include: boolean }[]
   >([]);
   const [editingRendaMob, setEditingRendaMob] = useState(false);
+  const [rendaMobText, setRendaMobText] = useState("");
   const [emBrevePos, setEmBrevePos] = useState<{ bottom: number; centerX: number } | null>(null);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [renameWsOpen, setRenameWsOpen] = useState(false);
@@ -1677,18 +1678,19 @@ function WorkspaceApp({
         <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>Renda mensal</p>
-            <button onClick={() => setEditingRendaMob(true)} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}><Pencil size={13} /></button>
+            <button onClick={() => { setRendaMobText(monthlyIncome > 0 ? maskBRL(String(monthlyIncome * 100)) : ""); setEditingRendaMob(true); }} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}><Pencil size={13} /></button>
           </div>
           {editingRendaMob ? (
-            <input type="number" min="0" step="100" autoFocus
-              defaultValue={monthlyIncome > 0 ? monthlyIncome : ""}
-              placeholder="0"
-              onBlur={(e) => { const v = Number(e.target.value); handleRendaChange(v); setEditingRendaMob(false); }}
+            <input type="text" inputMode="numeric" autoFocus
+              value={rendaMobText}
+              placeholder="R$ 0,00"
+              onChange={(e) => setRendaMobText(maskBRL(e.target.value))}
+              onBlur={() => { handleRendaChange(parseBRL(rendaMobText)); setEditingRendaMob(false); }}
               onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
               style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, outline: "none", color: "#fff", fontSize: 18, fontWeight: 800, width: "100%", padding: "6px 10px", marginBottom: 10 }}
             />
           ) : (
-            <p onClick={() => setEditingRendaMob(true)} style={{ fontSize: 18, fontWeight: 800, color: monthlyIncome > 0 ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", cursor: "pointer", marginBottom: 10 }}>
+            <p onClick={() => { setRendaMobText(monthlyIncome > 0 ? maskBRL(String(monthlyIncome * 100)) : ""); setEditingRendaMob(true); }} style={{ fontSize: 18, fontWeight: 800, color: monthlyIncome > 0 ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", cursor: "pointer", marginBottom: 10 }}>
               {monthlyIncome > 0 ? formatCurrency(monthlyIncome) : "Declarar renda"}
             </p>
           )}
@@ -2636,6 +2638,7 @@ function InsightsView({
 }) {
   const router = useRouter();
   const [editingRenda, setEditingRenda] = useState(false);
+  const [rendaText, setRendaText] = useState("");
 
   const expenses = transactions.filter((t) => t.type === "expense");
   const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
@@ -2777,23 +2780,24 @@ function InsightsView({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {editingRenda ? (
               <input
-                type="number" min="0" step="100" autoFocus
-                defaultValue={renda > 0 ? renda : ""}
-                placeholder="0"
-                onBlur={(e) => { const v = Number(e.target.value); onRendaChange(v); setEditingRenda(false); }}
+                type="text" inputMode="numeric" autoFocus
+                value={rendaText}
+                placeholder="R$ 0,00"
+                onChange={(e) => setRendaText(maskBRL(e.target.value))}
+                onBlur={() => { onRendaChange(parseBRL(rendaText)); setEditingRenda(false); }}
                 onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, outline: "none", color: "#fff", fontSize: 18, fontWeight: 800, width: 140, letterSpacing: "-0.03em", padding: "4px 8px" }}
               />
             ) : (
               <span
-                onClick={() => setEditingRenda(true)}
+                onClick={() => { setRendaText(renda > 0 ? maskBRL(String(renda * 100)) : ""); setEditingRenda(true); }}
                 style={{ fontSize: 20, fontWeight: 800, color: renda > 0 ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", cursor: "pointer" }}
               >
                 {renda > 0 ? formatCurrency(renda) : "Declarar renda"}
               </span>
             )}
             {!editingRenda && (
-              <button onClick={() => setEditingRenda(true)} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}>
+              <button onClick={() => { setRendaText(renda > 0 ? maskBRL(String(renda * 100)) : ""); setEditingRenda(true); }} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}>
                 <Pencil size={13} />
               </button>
             )}

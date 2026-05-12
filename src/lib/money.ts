@@ -1,3 +1,14 @@
+export function maskBRL(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+  const num = parseInt(digits, 10) / 100;
+  return num.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+export function parseBRL(formatted: string): number {
+  return Number(formatted.replace(/[R$\s.]/g, "").replace(",", ".")) || 0;
+}
+
 export function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
