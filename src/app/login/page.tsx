@@ -663,8 +663,27 @@ function FincheckLoader() {
 }
 
 function errorMessage(err: unknown) {
-  if (err instanceof Error) return err.message;
-  return "Algo saiu do eixo. Tente de novo.";
+  const code = (err as { code?: string })?.code ?? "";
+  switch (code) {
+    case "auth/invalid-credential":
+    case "auth/wrong-password":
+    case "auth/user-not-found":
+    case "auth/invalid-login-credentials":
+      return "E-mail ou senha incorretos.";
+    case "auth/email-already-in-use":
+      return "Não foi possível criar conta com este e-mail.";
+    case "auth/weak-password":
+      return "Senha fraca. Use pelo menos 6 caracteres.";
+    case "auth/invalid-email":
+      return "E-mail inválido.";
+    case "auth/too-many-requests":
+      return "Muitas tentativas. Aguarde alguns minutos e tente de novo.";
+    case "auth/popup-closed-by-user":
+    case "auth/cancelled-popup-request":
+      return "";
+    default:
+      return "Algo saiu do eixo. Tente de novo.";
+  }
 }
 
 export default function LoginPage() {
