@@ -21,6 +21,7 @@ import {
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { auth, db, googleProvider } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { track } from "@/lib/analytics";
 
 const G = "#b8f55a";
 const G_10 = "rgba(184,245,90,0.10)";
@@ -290,7 +291,9 @@ function AuthScreen() {
     setError("");
     setBusy(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
+      track(isNew ? "sign_up" : "login", { method: "google" });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -309,9 +312,11 @@ function AuthScreen() {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         await sendEmailVerification(credential.user);
         window.localStorage.setItem("fincheck:pendingName", email.split("@")[0] || "Voce");
+        track("sign_up", { method: "email" });
         setMessage("Conta criada. Confirme seu e-mail para liberar seu workspace.");
       } else {
         await signInWithEmailAndPassword(auth, email, password);
+        track("login", { method: "email" });
       }
     } catch (err) {
       setError(errorMessage(err));

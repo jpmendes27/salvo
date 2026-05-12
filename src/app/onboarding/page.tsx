@@ -15,6 +15,7 @@ import { ArrowRight, ChevronLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { auth, db } from "@/lib/firebase";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
+import { track } from "@/lib/analytics";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const G = "#b8f55a";
@@ -111,6 +112,7 @@ function OnboardingFlow({ user }: { user: User }) {
         updatedAt: serverTimestamp()
       });
 
+      track("onboarding_complete", { usage, has_income: incomeVal > 0 });
       window.localStorage.removeItem("fincheck:pendingName");
       window.location.replace(`${BASE}/home`);
     } catch (err) {

@@ -67,6 +67,7 @@ import { defaultCategories, demoTransactions } from "@/lib/demo";
 import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, fileToBase64, guessCategory, parseCSV, parseOFX, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { extractPDFText } from "@/lib/pdf-extract";
+import { track } from "@/lib/analytics";
 
 type Profile = {
   uid: string;
@@ -698,6 +699,8 @@ function WorkspaceApp({
 
   async function handleFiles(files: File[]) {
     setImportState({ phase: "parsing" });
+    const ext = files[0]?.name.split(".").pop()?.toLowerCase() ?? "unknown";
+    track("file_import", { file_type: ext, file_count: files.length });
     const rows: ParsedWithMeta[] = [];
 
     for (const file of files) {
