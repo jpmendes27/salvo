@@ -52,8 +52,15 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.status == "active"
         && isOwner(request.resource.data.workspaceId);
-      allow update: if verified()
-        && isOwner(resource.data.workspaceId);
+      allow update: if verified() && (
+        isOwner(resource.data.workspaceId)
+        || (
+          resource.data.status == "active"
+          && resource.data.expiresAt > request.time
+          && request.resource.data.status == "accepted"
+          && request.resource.data.acceptedBy == request.auth.uid
+        )
+      );
       allow delete: if verified()
         && isOwner(resource.data.workspaceId);
     }

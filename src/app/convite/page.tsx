@@ -14,13 +14,10 @@ import {
   collection,
   doc,
   getDoc,
-  getDocs,
-  query,
   serverTimestamp,
   setDoc,
   Timestamp,
-  updateDoc,
-  where
+  updateDoc
 } from "firebase/firestore";
 import { Eye, Calendar, TrendingUp, Check } from "lucide-react";
 import { FormEvent, Suspense, useEffect, useState } from "react";
@@ -118,15 +115,9 @@ function InviteFlow() {
     try {
       const displayName = user.displayName || user.email?.split("@")[0] || "Pessoa convidada";
 
-      // Unicidade: checa se email já é membro ativo
-      const membersSnap = await getDocs(
-        query(
-          collection(db, "workspaces", invite.workspaceId, "members"),
-          where("email", "==", user.email),
-          where("status", "==", "active")
-        )
-      );
-      if (!membersSnap.empty) {
+      // Unicidade: checa se o usuário já é membro ativo (por UID)
+      const myMemberSnap = await getDoc(doc(db, "workspaces", invite.workspaceId, "members", user.uid));
+      if (myMemberSnap.exists() && myMemberSnap.data()?.status === "active") {
         setError("Você já tem acesso a esta conta. Acesse o app normalmente.");
         setBusy(false);
         return;

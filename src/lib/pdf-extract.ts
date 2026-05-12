@@ -5,7 +5,7 @@ async function getPdfjs() {
   if (!_pdfjs) {
     _pdfjs = await import("pdfjs-dist");
     // Use unpkg CDN for the worker — avoids bundler complications with Turbopack
-    _pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${_pdfjs.version}/build/pdf.worker.min.mjs`;
+    _pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${_pdfjs.version}/build/pdf.worker.min.js`;
   }
   return _pdfjs;
 }
@@ -23,7 +23,7 @@ export async function extractPDFText(file: File): Promise<string> {
 
     // Group items by rounded y-coordinate to reconstruct visual rows
     const rowMap = new Map<number, Array<{ x: number; text: string }>>();
-    for (const item of content.items) {
+    for (const item of (content.items ?? [])) {
       if (!("str" in item) || !item.str.trim()) continue;
       const y = Math.round(item.transform[5]);
       const x = item.transform[4];
