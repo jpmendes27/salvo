@@ -206,6 +206,7 @@ function Logo() {
 
 function AuthScreen() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [passwordStep, setPasswordStep] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -305,8 +306,13 @@ function AuthScreen() {
     event.preventDefault();
     setError("");
     setMessage("");
-    setBusy(true);
 
+    if (mode === "signup" && !passwordStep) {
+      setPasswordStep(true);
+      return;
+    }
+
+    setBusy(true);
     try {
       if (mode === "signup") {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
@@ -455,21 +461,30 @@ function AuthScreen() {
           <form onSubmit={handleEmail}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
               <FInput type="email" placeholder="seu@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-              <FInput
-                type={show ? "text" : "password"}
-                placeholder="Senha"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                right={
-                  <button
-                    type="button"
-                    onClick={() => setShow(!show)}
-                    style={{ position: "absolute", right: 13, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", padding: 0, color: "rgba(255,255,255,0.26)", display: "flex", alignItems: "center" }}
-                  >
-                    {show ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                }
-              />
+              {(mode === "signin" || passwordStep) && (
+                <div style={{ animation: mode === "signup" && passwordStep ? "fadeUp .25s ease both" : "none" }}>
+                  <FInput
+                    type={show ? "text" : "password"}
+                    placeholder="Senha"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    right={
+                      <button
+                        type="button"
+                        onClick={() => setShow(!show)}
+                        style={{ position: "absolute", right: 13, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", padding: 0, color: "rgba(255,255,255,0.26)", display: "flex", alignItems: "center" }}
+                      >
+                        {show ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    }
+                  />
+                  {mode === "signup" && (
+                    <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.28)", marginTop: 8, lineHeight: 1.5 }}>
+                      Use no mínimo 6 caracteres com letras e números.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <button
@@ -483,7 +498,7 @@ function AuthScreen() {
                 <div style={{ width: 17, height: 17, border: "2.5px solid rgba(0,0,0,0.35)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
               ) : (
                 <>
-                  <span>{mode === "signup" ? "Criar conta" : "Entrar com e-mail"}</span>
+                  <span>{mode === "signup" && !passwordStep ? "Avançar" : mode === "signup" ? "Criar conta" : "Entrar com e-mail"}</span>
                   <ArrowRight size={15} />
                 </>
               )}
@@ -493,7 +508,7 @@ function AuthScreen() {
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
             <button
               type="button"
-              onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+              onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setPasswordStep(false); setPassword(""); setError(""); setMessage(""); }}
               style={{ background: "none", border: "none", color: "rgba(255,255,255,0.33)", fontSize: 12.5, cursor: "pointer", padding: 0, letterSpacing: "-0.01em", transition: "color .2s" }}
               onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
               onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.33)"; }}

@@ -49,15 +49,18 @@ function OnboardingFlow({ user }: { user: User }) {
     user.displayName || window.localStorage.getItem("fincheck:pendingName") || ""
   );
   const [income, setIncome] = useState("");
+  const [phone, setPhone] = useState("");
   const [usage, setUsage] = useState<"solo" | "shared">("solo");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
   const incomeRef = useRef<HTMLInputElement>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (step === 0) nameRef.current?.focus();
     if (step === 1) incomeRef.current?.focus();
+    if (step === 2) phoneRef.current?.focus();
   }, [step]);
 
   async function finish() {
@@ -66,11 +69,13 @@ function OnboardingFlow({ user }: { user: User }) {
     try {
       const displayName = name.trim() || user.displayName || user.email?.split("@")[0] || "Você";
       const incomeVal = Number(income.replace(/\./g, "").replace(",", ".")) || 0;
+      const phoneTrimmed = phone.replace(/\D/g, "");
 
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
         displayName,
         email: user.email || "",
+        ...(phoneTrimmed ? { phone: phoneTrimmed } : {}),
         hasCreatedRealMonth: false,
         acceptedTermsVersion: TERMS_VERSION,
         acceptedPrivacyVersion: PRIVACY_VERSION,
@@ -141,7 +146,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {/* Progress */}
         <div style={{ display: "flex", gap: 5, marginBottom: 32 }}>
-          {[0, 1, 2].map((i) => (
+          {[0, 1, 2, 3].map((i) => (
             <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= step ? G : "rgba(255,255,255,0.1)", transition: "background .3s" }} />
           ))}
         </div>
@@ -149,7 +154,7 @@ function OnboardingFlow({ user }: { user: User }) {
         {/* Step content */}
         {step === 0 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 1 de 3</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 1 de 4</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Como quer ser<br />chamado?
             </h1>
@@ -179,7 +184,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {step === 1 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 3</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 4</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Qual é sua<br />renda mensal?
             </h1>
@@ -223,7 +228,51 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {step === 2 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 3 de 3</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 3 de 4</p>
+            <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
+              Qual é seu<br />WhatsApp?
+            </h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              Podemos te enviar alertas e resumos financeiros por lá. Pode pular se preferir.
+            </p>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Celular (com DDD)</p>
+            <input
+              ref={phoneRef}
+              className="ob-input"
+              type="tel"
+              inputMode="tel"
+              placeholder="Ex: (21) 99999-9999"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && setStep(3)}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setStep(1)}
+                style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                onClick={() => setStep(3)}
+                style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                Continuar <ArrowRight size={15} />
+              </button>
+            </div>
+            <p
+              onClick={() => setStep(3)}
+              style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", cursor: "pointer", textAlign: "center", marginTop: 14 }}
+            >
+              Pular por agora
+            </p>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 4 de 4</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Como vai usar<br />o Fincheck Pro?
             </h1>
@@ -259,7 +308,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button
-                onClick={() => setStep(1)}
+                onClick={() => setStep(2)}
                 style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}
               >
                 <ChevronLeft size={16} />
