@@ -14,8 +14,13 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   serverTimestamp,
-  setDoc
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where
 } from "firebase/firestore";
 import { Eye, Calendar, TrendingUp, Check } from "lucide-react";
 import { FormEvent, Suspense, useEffect, useState } from "react";
@@ -81,8 +86,17 @@ function InviteFlow() {
           return;
         }
         const data = { id: inviteSnap.id, ...inviteSnap.data() } as Invite;
+        if (data.status === "accepted") {
+          setError("Este convite já foi aceito.");
+          return;
+        }
         if (data.status !== "active") {
-          setError("Este convite já foi usado ou foi cancelado.");
+          setError("Este convite foi cancelado.");
+          return;
+        }
+        const expiresAt = data.expiresAt instanceof Timestamp ? data.expiresAt.toDate() : null;
+        if (expiresAt && expiresAt < new Date()) {
+          setError("Este convite expirou. Peça um novo link ao dono da conta.");
           return;
         }
         setInvite(data);
@@ -103,6 +117,20 @@ function InviteFlow() {
     setBusy(true);
     try {
       const displayName = user.displayName || user.email?.split("@")[0] || "Pessoa convidada";
+
+      // Unicidade: checa se email já é membro ativo
+      const membersSnap = await getDocs(
+        query(
+          collection(db, "workspaces", invite.workspaceId, "members"),
+          where("email", "==", user.email),
+          where("status", "==", "active")
+        )
+      );
+      if (!membersSnap.empty) {
+        setError("Você já tem acesso a esta conta. Acesse o app normalmente.");
+        setBusy(false);
+        return;
+      }
 
       if (needsLegal) {
         if (!accepted) {
@@ -138,6 +166,13 @@ function InviteFlow() {
         email: user.email || "",
         inviteId: invite.id,
         joinedAt: serverTimestamp()
+      });
+
+      await updateDoc(doc(db, "invites", invite.id), {
+        status: "accepted",
+        acceptedAt: serverTimestamp(),
+        acceptedBy: user.uid,
+        acceptedByEmail: user.email || ""
       });
 
       setDone(true);

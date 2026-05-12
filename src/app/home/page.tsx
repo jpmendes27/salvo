@@ -879,7 +879,7 @@ function WorkspaceApp({
         createdByName,
         status: "active",
         createdAt: serverTimestamp(),
-        expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
+        expiresAt: Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000))
       });
       const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
       setInviteLink(`${window.location.origin}${basePath}/convite?token=${token}`);

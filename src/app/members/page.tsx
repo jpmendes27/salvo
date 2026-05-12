@@ -124,7 +124,7 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
       createdByName,
       status: "active",
       createdAt: serverTimestamp(),
-      expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
+      expiresAt: Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000))
     });
     const link = `${window.location.origin}${BASE}/convite?token=${token}`;
     setInviteLink(link);
