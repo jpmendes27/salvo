@@ -313,34 +313,41 @@ export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
     l.split(delimiter).map((c) => c.trim().replace(/^["']|["']$/g, ""))
   );
 
-  const normalize = (s: string) =>
+  const norm = (s: string) =>
     s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
-  const header = rows[0].map(normalize);
+  const header = rows[0].map(norm);
 
-  const dateCol = header.findIndex(
-    (h) => h === "data" || h.includes("data lan") || h === "date"
+  const dateCol = header.findIndex((h) =>
+    h === "data" || h === "date" ||
+    h.includes("data lan") || h.includes("data mov") ||
+    h.includes("data transac") || h.includes("data pagto") ||
+    h.includes("data compra") || h.includes("data vencto")
   );
-  const descCol = header.findIndex(
-    (h) =>
-      h.includes("historico") ||
-      h.includes("descricao") ||
-      h.includes("lancamento") ||
-      h === "description" ||
-      h === "memo" ||
-      h === "estabelecimento" ||
-      h === "nome"
-  );
-  const valueCol = header.findIndex(
-    (h) =>
-      h === "valor" ||
-      h === "value" ||
-      h === "amount" ||
-      h.includes("debito") ||
-      h.includes("credito") ||
-      h.includes("quantia")
+  const descCol = header.findIndex((h) =>
+    h.includes("historico") || h.includes("descricao") ||
+    h.includes("lancamento") || h.includes("detalhes") ||
+    h.includes("estabelecimento") || h.includes("titulo") ||
+    h === "description" || h === "memo" || h === "nome"
   );
 
-  if (dateCol === -1 || valueCol === -1) return [];
+  // Coluna única de valor (Nubank, Inter, etc.)
+  const valueCol = header.findIndex((h) =>
+    h === "valor" || h === "value" || h === "amount" || h.includes("quantia")
+  );
+
+  // Colunas separadas de crédito e débito (Itaú, Bradesco, Santander, etc.)
+  const creditCol = header.findIndex((h) =>
+    (h.includes("credito") || h.includes("entrada") || h.includes("credit")) &&
+    !h.includes("debito")
+  );
+  const debitCol = header.findIndex((h) =>
+    (h.includes("debito") || h.includes("saida") || h.includes("debit")) &&
+    !h.includes("credito")
+  );
+  const hasSeparateCols = creditCol !== -1 && debitCol !== -1;
+
+  if (dateCol === -1) throw new Error(`Coluna de data não encontrada. Colunas detectadas: ${rows[0].join(", ")}`);
+  if (valueCol === -1 && !hasSeparateCols) throw new Error(`Coluna de valor não encontrada. Colunas detectadas: ${rows[0].join(", ")}`);
 
   const result: ParsedTransaction[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -349,19 +356,36 @@ export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
 
     const rawDate = (row[dateCol] || "").trim();
     const rawDesc = descCol >= 0 ? (row[descCol] || "").trim() : "Sem descricao";
-    const rawValue = (row[valueCol] || "").trim();
-
     const date = parseDate(rawDate);
     if (!date) continue;
 
-    const amount = parseBRNumber(rawValue);
-    if (isNaN(amount) || amount === 0) continue;
+    let amount: number;
+    let type: "income" | "expense";
 
-    const type = amount < 0 ? "expense" : "income";
+    if (hasSeparateCols) {
+      const credit = parseBRNumber((row[creditCol] || "").trim());
+      const debit = parseBRNumber((row[debitCol] || "").trim());
+      if (!isNaN(credit) && credit > 0) {
+        amount = credit;
+        type = "income";
+      } else if (!isNaN(debit) && debit > 0) {
+        amount = debit;
+        type = "expense";
+      } else {
+        continue;
+      }
+    } else {
+      const rawValue = (row[valueCol] || "").trim();
+      amount = parseBRNumber(rawValue);
+      if (isNaN(amount) || amount === 0) continue;
+      type = amount < 0 ? "expense" : "income";
+      amount = Math.abs(amount);
+    }
+
     result.push({
       type,
       description: rawDesc,
-      amount: Math.abs(amount),
+      amount,
       date,
       monthKey: monthKeyFromDate(date),
       category: categorizeTransaction(rawDesc, type),
