@@ -557,7 +557,8 @@ function WorkspaceApp({
     await updateDoc(doc(db, "workspaces", workspace.id), { monthlyIncome: v });
   };
 
-  const showDemo = !profile.hasCreatedRealMonth && transactions.length === 0;
+  const showDemo = false;
+  const isEmpty = transactions.length === 0;
   const visibleTx = showDemo ? demoTransactions : transactions;
   const sources = useMemo(() => {
     const labels = [...new Set(transactions.map((t) => t.sourceLabel).filter(Boolean))] as string[];
@@ -1195,7 +1196,7 @@ function WorkspaceApp({
 
       <div className="ws-main-content ws-desktop-layout" style={D.content}>
         {/* Demo banner */}
-        {showDemo && (
+        {isEmpty && (
           <div
             style={{
               background: "rgba(184,245,90,0.07)",
@@ -1211,10 +1212,10 @@ function WorkspaceApp({
           >
             <div>
               <span style={{ fontWeight: 700, color: G, fontSize: 13 }}>
-                Visualização demo
+                Veja para onde vai cada real
               </span>
               <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", marginTop: 3 }}>
-                Importe seu extrato ou adicione um lançamento para ver seus dados reais.
+                Importe o extrato do seu banco — PDF, CSV ou OFX — e receba um diagnóstico financeiro em segundos.
               </p>
             </div>
             <span
@@ -1229,7 +1230,7 @@ function WorkspaceApp({
                 flexShrink: 0
               }}
             >
-              DEMO
+              COMEÇAR
             </span>
           </div>
         )}
