@@ -413,6 +413,7 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
           workspaceName={workspace.name}
           inviteLink={inviteLink}
           senderName={profile?.displayName || user.displayName || user.email?.split("@")[0] || "Alguém"}
+          members={members}
           onClose={() => setInviteModal(null)}
         />
       )}
@@ -427,12 +428,14 @@ function InviteModal({
   workspaceName,
   inviteLink,
   senderName,
+  members,
   onClose
 }: {
   type: "whatsapp" | "email";
   workspaceName: string;
   inviteLink: string;
   senderName: string;
+  members: Member[];
   onClose: () => void;
 }) {
   const isWa = type === "whatsapp";
@@ -473,6 +476,10 @@ function InviteModal({
       } finally { setSending(false); }
     } else {
       if (!emailAddr.trim()) { setErr("Digite o email do convidado."); return; }
+      if (members.some(m => m.email === emailAddr.trim() && m.status === "active")) {
+        setErr("Este e-mail já tem acesso à conta.");
+        return;
+      }
       setSending(true);
       try {
         const resp = await fetch(SEND_EMAIL_FUNCTION_URL, {
