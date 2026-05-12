@@ -719,7 +719,7 @@ function WorkspaceApp({
             const resp = await fetch(PARSE_FUNCTION_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ textData: text, mimeType: "text/plain", filename: file.name })
+              body: JSON.stringify({ textData: text, mimeType: "text/csv", filename: file.name })
             });
             if (!resp.ok) {
               const errJson = await resp.json().catch(() => ({}));

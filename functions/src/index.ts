@@ -8,7 +8,7 @@ function buildSystemPrompt(): string {
 
 Você é um extrator especializado de transações financeiras de extratos bancários brasileiros.
 
-Dado um arquivo (PDF ou imagem), extraia TODAS as transações financeiras visíveis e retorne SOMENTE um JSON válido:
+Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras visíveis e retorne SOMENTE um JSON válido:
 
 {
   "sourceLabel": "string",
@@ -149,7 +149,7 @@ export const parseBankStatement = onRequest(
       mimeType.startsWith("image/") &&
       ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mimeType);
     const isPDF = mimeType === "application/pdf";
-    const isText = mimeType === "text/plain";
+    const isText = mimeType === "text/plain" || mimeType === "text/csv";
 
     if (!isImage && !isPDF && !isText) {
       res.status(400).json({ error: "Unsupported mimeType: " + mimeType });
@@ -163,7 +163,7 @@ export const parseBankStatement = onRequest(
         content = [
           {
             type: "text",
-            text: `Arquivo: ${filename || "extrato.txt"}\n\nExtraia todas as transações financeiras deste texto de extrato/fatura bancária:\n\n${(textData || "").slice(0, 120000)}`
+            text: `Arquivo: ${filename || "extrato.txt"}\n\nExtraia todas as transações financeiras deste extrato/fatura bancária. O conteúdo pode ser texto de PDF, CSV ou OFX — adapte a leitura ao formato encontrado:\n\n${(textData || "").slice(0, 120000)}`
           }
         ];
       } else if (isImage) {
