@@ -280,11 +280,14 @@ function makeDedupKey(date: string, description: string, amount: number): string
 }
 
 function parseBRNumber(raw: string): number {
-  const cleaned = raw.replace(/\s/g, "");
-  if (/^\-?[\d.]+,\d{2}$/.test(cleaned)) {
-    return parseFloat(cleaned.replace(/\./g, "").replace(",", "."));
-  }
-  return parseFloat(cleaned.replace(",", "."));
+  const negative = raw.trim().startsWith("-");
+  // Strip tudo que não é dígito, ponto ou vírgula (lida com "R$Â ", NBSP, etc.)
+  const digits = raw.replace(/[^0-9,.]/g, "");
+  if (!digits) return NaN;
+  const num = /^[\d.]+,\d{1,2}$/.test(digits)
+    ? parseFloat(digits.replace(/\./g, "").replace(",", "."))
+    : parseFloat(digits.replace(",", "."));
+  return negative ? -num : num;
 }
 
 function sourceLabelFromFilename(filename: string): string {
@@ -323,12 +326,15 @@ export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
     h.includes("data transac") || h.includes("data pagto") ||
     h.includes("data compra") || h.includes("data vencto")
   );
+  // Aceita também headers com encoding quebrado (ex: "DescriÃ§Ã£o" da NOH)
   const descCol = header.findIndex((h) =>
-    h.includes("historico") || h.includes("descricao") ||
+    h.includes("historico") || h.includes("descricao") || h.includes("descri") ||
     h.includes("lancamento") || h.includes("detalhes") ||
     h.includes("estabelecimento") || h.includes("titulo") ||
     h === "description" || h === "memo" || h === "nome"
   );
+  // Coluna de tipo textual: "Entrada" / "Saída" (NOH, outros)
+  const tipoCol = header.findIndex((h) => h === "tipo" || h === "type" || h === "natureza");
 
   // Coluna única de valor (Nubank, Inter, etc.)
   const valueCol = header.findIndex((h) =>
@@ -378,7 +384,13 @@ export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
       const rawValue = (row[valueCol] || "").trim();
       amount = parseBRNumber(rawValue);
       if (isNaN(amount) || amount === 0) continue;
-      type = amount < 0 ? "expense" : "income";
+      if (tipoCol >= 0 && amount > 0) {
+        // Usa coluna "Tipo" para desambiguar quando valor é sempre positivo
+        const rawTipo = (row[tipoCol] || "").toLowerCase();
+        type = rawTipo.includes("sa") ? "expense" : "income"; // "saída"/"saida"
+      } else {
+        type = amount < 0 ? "expense" : "income";
+      }
       amount = Math.abs(amount);
     }
 
