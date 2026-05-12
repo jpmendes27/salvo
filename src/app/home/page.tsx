@@ -391,7 +391,8 @@ function AuthenticatedApp({ user }: { user: User }) {
   }
 
   if (!profile?.acceptedTermsVersion) {
-    return <LegalGate onAccept={acceptLegal} />;
+    window.location.replace(`${BASE}/onboarding`);
+    return <FincheckLoader />;
   }
 
   if (!workspaces.length) {
@@ -516,6 +517,7 @@ function WorkspaceApp({
   const [planOpen, setPlanOpen] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
   const [inviteModal, setInviteModal] = useState<"whatsapp" | "email" | null>(null);
+  const [wsMembers, setWsMembers] = useState<Member[]>([]);
   const [view, setView] = useState<"lancamentos" | "diagnostico">("diagnostico");
   const [reconcilePrompt, setReconcilePrompt] = useState<
     { sourceLabel: string; monthKey: string; amount: number; include: boolean }[]
@@ -851,6 +853,17 @@ function WorkspaceApp({
     });
   }
 
+  useEffect(() => {
+    getDocs(collection(db, "workspaces", workspace.id, "members")).then((snap) => {
+      setWsMembers(
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as Member))
+          .filter((m) => m.status === "active")
+          .sort((a, b) => (a.role === "owner" ? -1 : b.role === "owner" ? 1 : 0))
+      );
+    });
+  }, [workspace.id]);
+
   async function createInvite() {
     setError("");
     try {
@@ -1101,6 +1114,11 @@ function WorkspaceApp({
                 <div style={{ padding: "6px" }}>
                   {[
                     {
+                      icon: <Users size={15} color="rgba(255,255,255,0.45)" />,
+                      label: "Pessoas",
+                      onClick: () => { setAvatarOpen(false); window.location.href = `${BASE}/members?workspace=${workspace.id}`; }
+                    },
+                    {
                       icon: <Pencil size={15} color="rgba(255,255,255,0.45)" />,
                       label: "Renomear conta",
                       sub: workspace.name,
@@ -1111,11 +1129,6 @@ function WorkspaceApp({
                       label: "Meu plano",
                       badge: "PRO",
                       onClick: () => setAvatarOpen(false)
-                    },
-                    {
-                      icon: <Settings size={15} color="rgba(255,255,255,0.45)" />,
-                      label: "Configurações",
-                      onClick: () => { setAvatarOpen(false); setSettingsOpen(true); }
                     }
                   ].map(({ icon, label, sub, badge, onClick }) => (
                     <button
@@ -1139,7 +1152,7 @@ function WorkspaceApp({
                   ))}
 
                   <a
-                    href="https://wa.me/5521999999999"
+                    href="https://wa.me/5521966939829"
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => setAvatarOpen(false)}
@@ -1365,6 +1378,53 @@ function WorkspaceApp({
                 />
               )}
             </WsCard>
+
+            {/* Card de convite — coluna principal */}
+            {isOwner && (
+              <WsCard>
+                <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>Gerencie as finanças com mais alguém</h3>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", lineHeight: 1.6, marginBottom: 14 }}>
+                  Convide uma pessoa para acompanhar entradas, gastos e o planejamento do mês — em tempo real.
+                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                  <div style={{ display: "flex" }}>
+                    {wsMembers.slice(0, 3).map((m, i) => {
+                      const initial = (m.displayName || m.email || "?")[0].toUpperCase();
+                      const isMe = m.uid === user.uid;
+                      return (
+                        <div key={m.uid} style={{ width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, border: "2px solid #09090b", marginLeft: i > 0 ? -8 : 0, background: isMe ? G : "rgba(184,245,90,0.12)", color: isMe ? "#050505" : G, flexShrink: 0 }}>
+                          {initial}
+                        </div>
+                      );
+                    })}
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", border: "1px dashed rgba(255,255,255,0.2)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", marginLeft: wsMembers.length > 0 ? -8 : 0, flexShrink: 0 }}>
+                      <span style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", lineHeight: 1 }}>+</span>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)" }}>
+                    {wsMembers.length <= 1
+                      ? "Só você por aqui ainda"
+                      : wsMembers.length === 2
+                        ? `Você e ${wsMembers.find(m => m.uid !== user.uid)?.displayName?.split(" ")[0] || "outro"} já gerenciam juntos`
+                        : `Você e mais ${wsMembers.length - 1} pessoas já gerenciam juntos`}
+                  </p>
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <button
+                    onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("whatsapp"); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "#fff", background: "rgba(37,211,102,0.12)", border: "1px solid rgba(37,211,102,0.22)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", justifyContent: "center" }}
+                  >
+                    <WhatsAppIcon /> Convidar pelo WhatsApp
+                  </button>
+                  <button
+                    onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("email"); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", justifyContent: "center" }}
+                  >
+                    <GmailIcon /> Convidar por e-mail
+                  </button>
+                </div>
+              </WsCard>
+            )}
           </div>
 
           {/* Right sidebar */}
@@ -1442,40 +1502,6 @@ function WorkspaceApp({
                 <Copy size={13} /> Copiar
               </button>
             </WsCard>
-
-            {/* Invite card */}
-            {isOwner && (
-              <WsCard>
-                <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
-                  Convidar membro
-                </h3>
-                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", lineHeight: 1.6, marginBottom: 12 }}>
-                  Compartilhe acesso ao workspace como editor.
-                </p>
-                <div style={{ display: "grid", gap: 8 }}>
-                  <button
-                    onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("whatsapp"); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "#fff", background: "rgba(37,211,102,0.12)", border: "1px solid rgba(37,211,102,0.22)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", justifyContent: "center" }}
-                  >
-                    <WhatsAppIcon /> Enviar por WhatsApp
-                  </button>
-                  <button
-                    onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("email"); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", justifyContent: "center" }}
-                  >
-                    <GmailIcon /> Enviar por Email
-                  </button>
-                  {inviteLink && (
-                    <button
-                      onClick={() => navigator.clipboard.writeText(inviteLink)}
-                      style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: "rgba(255,255,255,0.3)", background: "transparent", border: "none", cursor: "pointer", justifyContent: "center", padding: "4px 0" }}
-                    >
-                      <Copy size={11} /> Copiar link
-                    </button>
-                  )}
-                </div>
-              </WsCard>
-            )}
 
             {/* Projeção link */}
             <button
@@ -1610,22 +1636,39 @@ function WorkspaceApp({
           </div>
         </div>
 
-        {/* 2. Diagnóstico geral */}
-        {mobExpenses.length > 0 && (
-          <div style={{ border: `1px solid rgba(${mobScoreRgb},0.12)`, borderLeft: `3px solid ${mobScoreColor}`, borderRadius: 12, background: `rgba(${mobScoreRgb},0.05)`, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.65)`, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Diagnóstico geral</p>
-              <p style={{ fontSize: 17, fontWeight: 800, color: mobScoreColor, marginBottom: 6, lineHeight: 1.2 }}>{mobScoreLabel}</p>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.5, maxWidth: 180 }}>{mobComprometimento}% da renda comprometida.</p>
+        {/* 2. Diagnóstico do mês */}
+        {mobExpenses.length > 0 && (() => {
+          const mobNet = mobTotalEntradas - mobTotalGasto;
+          const mobNarrativa = (mobScore ?? 0) >= 6
+            ? `Seu mês fechou ${mobNet >= 0 ? "positivo" : "no negativo"} em ${formatCurrency(Math.abs(mobNet))}. Você comprometeu ${mobComprometimento}% das suas entradas.`
+            : `Você teve ${formatCurrency(mobTotalGasto)} em gastos, comprometendo ${mobComprometimento}% da renda declarada.`;
+          const mobTopCat = mobByCategory[0];
+          const mobBullet1 = mobTopCat ? `${mobTopCat[0]} foi sua maior categoria, com ${formatCurrency(mobTopCat[1])}` : null;
+          const mobBullet2 = mobExpenseChange !== null
+            ? `Gastos ${mobExpenseChange < 0 ? "caíram" : "subiram"} ${Math.abs(mobExpenseChange)}% vs ${monthLabel(prevMonthKey).toLowerCase()}`
+            : null;
+          return (
+            <div style={{ border: `1px solid rgba(${mobScoreRgb},0.12)`, borderLeft: `3px solid ${mobScoreColor}`, borderRadius: 12, background: `rgba(${mobScoreRgb},0.05)`, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.65)`, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Diagnóstico do mês</p>
+                <p style={{ fontSize: 17, fontWeight: 800, color: mobScoreColor, marginBottom: 6, lineHeight: 1.2 }}>{mobScoreLabel}</p>
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.5 }}>{mobNarrativa}</p>
+                {(mobBullet1 || mobBullet2) && (
+                  <div style={{ marginTop: 7, display: "grid", gap: 3 }}>
+                    {mobBullet1 && <p style={{ fontSize: 10.5, color: `rgba(${mobScoreRgb},0.5)` }}>↗ {mobBullet1}</p>}
+                    {mobBullet2 && <p style={{ fontSize: 10.5, color: `rgba(${mobScoreRgb},0.5)` }}>{mobExpenseChange! < 0 ? "↘" : "↗"} {mobBullet2}</p>}
+                  </div>
+                )}
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <p style={{ fontSize: 36, fontWeight: 900, color: mobScoreColor, lineHeight: 1, letterSpacing: "-0.03em" }}>
+                  {mobScore !== null ? mobScore.toFixed(1).replace(".", ",") : "—"}
+                </p>
+                <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.5)`, marginTop: 2 }}>/ nota</p>
+              </div>
             </div>
-            <div style={{ textAlign: "right", flexShrink: 0 }}>
-              <p style={{ fontSize: 36, fontWeight: 900, color: mobScoreColor, lineHeight: 1, letterSpacing: "-0.03em" }}>
-                {mobScore !== null ? mobScore.toFixed(1).replace(".", ",") : "—"}
-              </p>
-              <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.5)`, marginTop: 2 }}>/ nota</p>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* 3. Renda mensal */}
         <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
@@ -1762,19 +1805,40 @@ function WorkspaceApp({
 
         {/* 9. Convidar membro */}
         {isOwner && (
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
-            <div style={{ padding: "16px 16px 10px" }}>
-              <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Convidar membro</p>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", lineHeight: 1.5 }}>Compartilhe acesso ao workspace como editor</p>
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
+            <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>Gerencie as finanças com mais alguém</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", lineHeight: 1.5, marginBottom: 14 }}>Convide uma pessoa para acompanhar entradas, gastos e o planejamento do mês — em tempo real.</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <div style={{ display: "flex" }}>
+                {wsMembers.slice(0, 3).map((m, i) => {
+                  const initial = (m.displayName || m.email || "?")[0].toUpperCase();
+                  const isMe = m.uid === user.uid;
+                  return (
+                    <div key={m.uid} style={{ width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, border: "2px solid #09090b", marginLeft: i > 0 ? -8 : 0, background: isMe ? G : "rgba(184,245,90,0.12)", color: isMe ? "#050505" : G, flexShrink: 0 }}>
+                      {initial}
+                    </div>
+                  );
+                })}
+                <div style={{ width: 28, height: 28, borderRadius: "50%", border: "1px dashed rgba(255,255,255,0.2)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", marginLeft: wsMembers.length > 0 ? -8 : 0, flexShrink: 0 }}>
+                  <span style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", lineHeight: 1 }}>+</span>
+                </div>
+              </div>
+              <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.38)" }}>
+                {wsMembers.length <= 1
+                  ? "Só você por aqui ainda"
+                  : wsMembers.length === 2
+                    ? `Você e ${wsMembers.find(m => m.uid !== user.uid)?.displayName?.split(" ")[0] || "outro"} já gerenciam juntos`
+                    : `Você e mais ${wsMembers.length - 1} pessoas já gerenciam juntos`}
+              </p>
             </div>
-            <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("whatsapp"); }}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px", borderRadius: 12, background: "rgba(37,211,102,0.10)", border: "1px solid rgba(37,211,102,0.18)", color: "#4dcc8f", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                <WhatsAppIcon /> Enviar por WhatsApp
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px", borderRadius: 10, background: "rgba(37,211,102,0.10)", border: "1px solid rgba(37,211,102,0.18)", color: "#4dcc8f", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                <WhatsAppIcon /> Convidar pelo WhatsApp
               </button>
               <button onClick={async () => { if (!inviteLink) await createInvite(); setInviteModal("email"); }}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px", borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                <GmailIcon /> Enviar por Email
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px", borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                <GmailIcon /> Convidar por e-mail
               </button>
             </div>
           </div>
@@ -1910,7 +1974,6 @@ function WorkspaceApp({
         />
       )}
 
-      {/* Settings drawer */}
       {settingsOpen && (
         <SettingsModal
           workspace={workspace}
@@ -2642,8 +2705,52 @@ function InsightsView({
   const INS_LABEL: CSSProperties = { fontSize: 11, color: "rgba(255,255,255,0.32)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10, fontWeight: 700 };
   const scoreRgb = scoreColor === G ? "184,245,90" : scoreColor === "#facc15" ? "250,204,21" : "255,128,128";
 
+  const expenseChange = prevTotalGasto > 0 ? Math.round(((totalGasto - prevTotalGasto) / prevTotalGasto) * 100) : null;
+  const topCat = byCategory[0] ?? null;
+  const net = totalEntradas - totalGasto;
+  const narrativa = (score ?? 0) >= 6
+    ? `Seu mês fechou ${net >= 0 ? "positivo" : "no negativo"} em ${formatCurrency(Math.abs(net))}. Você comprometeu ${comprometimento}% das suas entradas.`
+    : `Você teve ${formatCurrency(totalGasto)} em gastos neste período, comprometendo ${comprometimento}% da renda declarada.`;
+  const bullet1 = topCat ? `${topCat[0]} foi sua maior categoria de gastos, com ${formatCurrency(topCat[1])}` : null;
+  const bullet2 = expenseChange !== null
+    ? `Seus gastos ${expenseChange < 0 ? "caíram" : "aumentaram"} ${Math.abs(expenseChange)}% em relação ao mês anterior`
+    : null;
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {/* Diagnóstico do mês — primeiro card */}
+      <div className="ins-card" style={{ border: `1px solid rgba(${scoreRgb},0.18)`, background: `rgba(${scoreRgb},0.04)`, position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: -60, right: -60, width: 220, height: 220, borderRadius: "50%", background: `rgba(${scoreRgb},0.10)`, filter: "blur(55px)", pointerEvents: "none" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 24, position: "relative" }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 10.5, color: `rgba(${scoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10 }}>
+              Diagnóstico do mês
+            </p>
+            <p style={{ fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: "-0.03em", marginBottom: 10, lineHeight: 1.1 }}>
+              {scoreLabel}
+            </p>
+            <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65, marginBottom: bullet1 || bullet2 ? 10 : 0 }}>
+              {narrativa}
+            </p>
+            {(bullet1 || bullet2) && (
+              <div style={{ display: "grid", gap: 5 }}>
+                {bullet1 && (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${scoreRgb},0.55)` }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}>↗</span>{bullet1}
+                  </div>
+                )}
+                {bullet2 && (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${scoreRgb},0.55)` }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}>{expenseChange! < 0 ? "↘" : "↗"}</span>{bullet2}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <InsightScoreRing score={score} color={scoreColor} size={90} />
+        </div>
+      </div>
+
       {/* Métricas rápidas */}
       <div className="ins-metrics">
         {([
@@ -2696,25 +2803,6 @@ function InsightsView({
           <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
             <div style={{ height: "100%", borderRadius: 3, width: `${Math.min(100, comprometimento)}%`, background: comprometimento > 90 ? "#ff8080" : comprometimento > 75 ? "#facc15" : G, transition: "width .5s cubic-bezier(.4,0,.2,1), background .4s" }} />
           </div>
-        </div>
-      </div>
-
-      {/* Diagnóstico hero */}
-      <div className="ins-card" style={{ border: `1px solid rgba(${scoreRgb},0.18)`, background: `rgba(${scoreRgb},0.04)`, position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", top: -60, right: -60, width: 220, height: 220, borderRadius: "50%", background: `rgba(${scoreRgb},0.10)`, filter: "blur(55px)", pointerEvents: "none" }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 24, position: "relative" }}>
-          <div style={{ flex: 1 }}>
-            <p style={{ fontSize: 10.5, color: `rgba(${scoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10 }}>
-              Diagnóstico Geral
-            </p>
-            <p style={{ fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: "-0.03em", marginBottom: 10, lineHeight: 1.1 }}>
-              {scoreLabel}
-            </p>
-            <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65 }}>
-              Você teve {formatCurrency(totalGasto)} em gastos neste período, comprometendo {comprometimento}% da renda declarada.
-            </p>
-          </div>
-          <InsightScoreRing score={score} color={scoreColor} size={90} />
         </div>
       </div>
 
@@ -3819,8 +3907,6 @@ function ReconcileModal({
     </div>
   );
 }
-
-// ─── Settings modal ───────────────────────────────────────────────────────────
 
 function SettingsModal({
   workspace,

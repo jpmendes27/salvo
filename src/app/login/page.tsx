@@ -19,7 +19,8 @@ import {
   Users
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
-import { auth, googleProvider } from "@/lib/firebase";
+import { auth, db, googleProvider } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
 const G = "#b8f55a";
 const G_10 = "rgba(184,245,90,0.10)";
@@ -345,7 +346,6 @@ function AuthScreen() {
         fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
         color: "#fff",
         display: "flex",
-        flexDirection: "column",
         position: "relative",
         overflow: "hidden"
       }}
@@ -356,248 +356,167 @@ function AuthScreen() {
         ::placeholder{color:rgba(255,255,255,0.22)!important}
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes slideFromBottom{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
         @media(max-width:768px){
           .auth-left{display:none!important}
-          .auth-divider{display:none!important}
-          .auth-right{width:100%!important;padding:32px 24px!important}
-          .auth-nav{padding:14px 24px!important;justify-content:center!important}
-          .auth-nav-links{display:none!important}
-          .auth-nav-spacer{display:none!important}
+          .auth-right{width:100%!important;padding:32px 24px!important;border-left:none!important}
         }
       `}</style>
 
       <div style={{ position: "fixed", top: "-18%", left: "-5%", width: 900, height: 780, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse at 35% 45%, rgba(184,245,90,0.12) 0%, rgba(120,200,50,0.05) 38%, transparent 68%)", filter: "blur(52px)" }} />
       <div style={{ position: "fixed", bottom: "-12%", right: "8%", width: 640, height: 520, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse, rgba(150,220,60,0.07) 0%, transparent 62%)", filter: "blur(64px)" }} />
-      <div style={{ position: "fixed", top: "38%", left: "42%", width: 420, height: 420, pointerEvents: "none", zIndex: 0, background: "radial-gradient(circle, rgba(184,245,90,0.04) 0%, transparent 70%)", filter: "blur(90px)" }} />
       <canvas ref={canvasRef} style={{ position: "fixed", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0 }} />
       <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, backgroundImage: `linear-gradient(rgba(184,245,90,0.016) 1px,transparent 1px), linear-gradient(90deg,rgba(184,245,90,0.016) 1px,transparent 1px)`, backgroundSize: "72px 72px" }} />
 
-      <nav className="auth-nav" style={{ position: "relative", zIndex: 10, padding: "21px 52px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-        <Logo />
-        <div className="auth-nav-links" style={{ display: "flex", gap: 32 }}>
-          {["Como funciona", "Preços"].map((it) => (
-            <a
-              key={it}
-              href="#"
-              style={{ color: "rgba(255,255,255,0.36)", fontSize: 13.5, textDecoration: "none", transition: "color .2s", letterSpacing: "-0.01em" }}
-              onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.82)"; }}
-              onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.36)"; }}
-            >
-              {it}
-            </a>
-          ))}
+      {/* Left panel */}
+      <div className="auth-left" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "48px 56px", position: "relative", zIndex: 1, animation: "fadeUp .75s ease both" }}>
+        <div style={{ marginBottom: 52 }}><Logo /></div>
+
+        <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.28)", marginBottom: 16 }}>
+          Controle financeiro
+        </p>
+
+        <h1 style={{ fontFamily: "'Inter Tight', 'Inter', system-ui, sans-serif", fontSize: "clamp(36px, 4.5vw, 58px)", fontWeight: 700, lineHeight: 1.05, letterSpacing: "-0.03em", marginBottom: 18, color: "#fff" }}>
+          Seu extrato virou<br />
+          <span style={{ color: G }}>painel em segundos.</span>
+        </h1>
+
+        <p style={{ fontSize: 15, color: "rgba(255,255,255,0.40)", lineHeight: 1.75, maxWidth: 400, marginBottom: 48 }}>
+          Importe o PDF do banco, veja para onde seu dinheiro foi e planeje o próximo mês — sem planilha, sem surpresa no fechamento.
+        </p>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ display: "flex" }}>
+            {[
+              { src: `${BASE}/banks/nubank.png`, alt: "Nubank" },
+              { src: `${BASE}/banks/itau.png`, alt: "Itaú" },
+              { src: `${BASE}/banks/bradesco.png`, alt: "Bradesco" },
+              { src: `${BASE}/banks/picpay.jpg`, alt: "PicPay" }
+            ].map((bank, i) => (
+              <div key={i} style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid #050505", overflow: "hidden", marginLeft: i === 0 ? 0 : -8, flexShrink: 0 }}>
+                <img src={bank.src} alt={bank.alt} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>
+            Funciona com <strong style={{ color: "rgba(255,255,255,0.65)", fontWeight: 600 }}>Nubank, Itaú, Bradesco, PicPay</strong> e mais
+          </p>
         </div>
-        <div className="auth-nav-spacer" style={{ width: 100 }} />
-      </nav>
+      </div>
 
-      <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", width: "100%" }}>
-        <div className="auth-left" style={{ width: "50%", flexShrink: 0, display: "flex", flexDirection: "column", justifyContent: "center", padding: "40px 48px", animation: "fadeUp .75s ease both" }}>
-          <h1 style={{ fontFamily: "'Inter Tight', 'Inter', system-ui, sans-serif", fontSize: "clamp(54px, 6.8vw, 82px)", fontWeight: 400, lineHeight: 0.96, letterSpacing: "-0.03em", marginBottom: 24, color: "#fff" }}>
-            Você no controle
-            <br />
-            da sua{" "}
-            <em style={{ fontStyle: "normal", color: G, textShadow: "0 0 48px rgba(184,245,90,0.30)" }}>
-              vida financeira.
-            </em>
-          </h1>
-
-          <p style={{ fontSize: 15, color: "rgba(255,255,255,0.40)", lineHeight: 1.75, maxWidth: 400, marginBottom: 34, fontWeight: 400 }}>
-            Receitas, gastos e metas do mês — num workspace compartilhado
-            com quem você quiser. Sem planilha, sem surpresa no fechamento.
+      {/* Right panel */}
+      <div className="auth-right" style={{ width: 420, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 40px", background: "rgba(255,255,255,0.018)", borderLeft: "0.5px solid rgba(255,255,255,0.07)", position: "relative", zIndex: 1, animation: "fadeUp .75s .18s ease both" }}>
+        <div style={{ width: "100%" }}>
+          <h2 style={{ fontFamily: "'Inter Tight', 'Inter', system-ui, sans-serif", fontSize: 22, fontWeight: 600, letterSpacing: "-0.025em", marginBottom: 6, color: "#fff", textAlign: "center" }}>
+            Entrar ou criar conta
+          </h2>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", textAlign: "center", marginBottom: 28 }}>
+            Comece em menos de 1 minuto
           </p>
 
-          <div style={{ marginBottom: 52 }} />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={handleGoogle}
+            style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", color: "#111", fontSize: 14, fontWeight: 700, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 16, transition: "opacity .2s,transform .15s", letterSpacing: "-0.01em" }}
+            onMouseEnter={(event) => { event.currentTarget.style.opacity = ".91"; event.currentTarget.style.transform = "scale(1.01)"; }}
+            onMouseLeave={(event) => { event.currentTarget.style.opacity = "1"; event.currentTarget.style.transform = "scale(1)"; }}
+          >
+            <svg width={17} height={17} viewBox="0 0 18 18">
+              <path d="M17.64 9.2a10.34 10.34 0 0 0-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92A8.78 8.78 0 0 0 17.64 9.2z" fill="#4285F4" />
+              <path d="M9 18a8.6 8.6 0 0 0 5.96-2.18l-2.92-2.26a5.43 5.43 0 0 1-8.07-2.85H.96v2.33A9 9 0 0 0 9 18z" fill="#34A853" />
+              <path d="M3.97 10.71A5.41 5.41 0 0 1 3.69 9c0-.59.1-1.17.28-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.04l3.01-2.33z" fill="#FBBC05" />
+              <path d="M9 3.58a4.86 4.86 0 0 1 3.44 1.35l2.58-2.58A8.64 8.64 0 0 0 9 0 9 9 0 0 0 .96 4.96l3.01 2.33A5.36 5.36 0 0 1 9 3.58z" fill="#EA4335" />
+            </svg>
+            Continuar com Google
+          </button>
 
-          <div style={{ position: "relative" }}>
-            <div style={{ position: "absolute", bottom: "-18%", left: "50%", transform: "translateX(-50%)", width: "85%", height: 180, background: "radial-gradient(ellipse, rgba(184,245,90,0.28) 0%, rgba(184,245,90,0.10) 40%, transparent 70%)", filter: "blur(36px)", pointerEvents: "none", zIndex: 0 }} />
-            <GlassCard accent style={{ background: "rgba(255,255,255,0.025)", position: "relative", zIndex: 1 }}>
-              <div style={{ padding: "13px 20px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {["#FF5F57", "#FFBD2E", "#28CA41"].map((c) => (
-                    <div key={c} style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />
-                  ))}
-                </div>
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.24)", letterSpacing: "0.02em" }}>
-                  Minhas finanças · Maio
-                </span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: G }}>+18.4%</span>
-              </div>
-
-              <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Saldo projetado</p>
-                    <p style={{ fontSize: 30, fontWeight: 900, letterSpacing: "-0.05em", color: "#fff", lineHeight: 1 }}>R$ 12.840</p>
-                    <p style={{ fontSize: 11.5, color: G, marginTop: 5, fontWeight: 500 }}>R$ 2.140 livres até o fechamento</p>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Economia</p>
-                    <p style={{ fontSize: 20, fontWeight: 800, color: G, letterSpacing: "-0.04em" }}>R$ 940</p>
-                  </div>
-                </div>
-
-                <BarChart />
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                  <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)", padding: "13px 14px" }}>
-                    <p style={{ fontSize: 9.5, color: "rgba(255,255,255,0.28)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Membros</p>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <Users size={12} color={G} />
-                      <p style={{ fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.04em" }}>2</p>
-                    </div>
-                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.26)", marginTop: 4 }}>joão + jenniffer</p>
-                  </div>
-
-                  <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)", padding: "13px 14px" }}>
-                    <p style={{ fontSize: 9.5, color: "rgba(255,255,255,0.28)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Gastos</p>
-                    <p style={{ fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.04em" }}>R$ 6.760</p>
-                    <p style={{ fontSize: 10, color: "rgba(255,100,100,0.72)", marginTop: 4 }}>74% do limite</p>
-                  </div>
-
-                  <div style={{ background: "linear-gradient(140deg,rgba(184,245,90,0.10),rgba(184,245,90,0.03))", borderRadius: 12, border: "1px solid rgba(184,245,90,0.16)", padding: "13px 14px", display: "flex", flexDirection: "column", gap: 8, animation: "slideFromBottom .7s .5s ease both", opacity: 0 }}>
-                    <p style={{ fontSize: 9.5, color: "rgba(184,245,90,0.55)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Meta</p>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-                      <div style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                        <Donut pct={68} size={56} />
-                        <p style={{ position: "absolute", fontSize: 13, fontWeight: 900, color: "#fff", letterSpacing: "-0.04em", lineHeight: 1 }}>68%</p>
-                      </div>
-                      <p style={{ fontSize: 10, color: G, fontWeight: 600, letterSpacing: "0.03em" }}>viagem</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                  {[
-                    { dot: G, label: "Mercado", val: "-R$ 284", pos: false },
-                    { dot: "#4EA8FF", label: "Freela", val: "+R$ 1.200", pos: true },
-                    { dot: "#FFB520", label: "Aluguel", val: "-R$ 2.100", pos: false }
-                  ].map(({ dot, label, val, pos }) => (
-                    <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flexShrink: 0 }} />
-                        <span style={{ fontSize: 12.5, color: "rgba(255,255,255,0.52)" }}>{label}</span>
-                      </div>
-                      <span style={{ fontSize: 12.5, fontWeight: 700, color: pos ? G : "rgba(255,100,100,0.82)" }}>{val}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </GlassCard>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.20)" }}>ou</span>
+            <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
           </div>
-        </div>
 
-        <div className="auth-right" style={{ width: "50%", flexShrink: 0, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "40px 48px", animation: "fadeUp .75s .18s ease both" }}>
-          <GlassCard style={{ padding: "36px 30px", background: "rgba(255,255,255,0.025)", width: "100%", maxWidth: 420 }}>
-            <h2 style={{ fontFamily: "'Inter Tight', 'Inter', system-ui, sans-serif", fontSize: 22, fontWeight: 600, letterSpacing: "-0.025em", marginBottom: 26, lineHeight: 1.1, color: "#fff", textAlign: "center" }}>
-              Entre ou crie uma conta
-            </h2>
+          {error && (
+            <div style={{ background: "rgba(255,80,80,0.12)", border: "1px solid rgba(255,80,80,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#ff8080", lineHeight: 1.5 }}>
+              {error}
+            </div>
+          )}
+          {message && (
+            <div style={{ background: `${G_10}`, border: `1px solid ${G_20}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: G, lineHeight: 1.5 }}>
+              {message}
+            </div>
+          )}
+
+          <form onSubmit={handleEmail}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+              <FInput type="email" placeholder="seu@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+              <FInput
+                type={show ? "text" : "password"}
+                placeholder="Senha"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                right={
+                  <button
+                    type="button"
+                    onClick={() => setShow(!show)}
+                    style={{ position: "absolute", right: 13, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", padding: 0, color: "rgba(255,255,255,0.26)", display: "flex", alignItems: "center" }}
+                  >
+                    {show ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                }
+              />
+            </div>
 
             <button
-              type="button"
+              type="submit"
               disabled={busy}
-              onClick={handleGoogle}
-              style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", color: "#111", fontSize: 14, fontWeight: 700, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 15, transition: "opacity .2s,transform .15s", letterSpacing: "-0.01em" }}
-              onMouseEnter={(event) => { event.currentTarget.style.opacity = ".91"; event.currentTarget.style.transform = "scale(1.01)"; }}
-              onMouseLeave={(event) => { event.currentTarget.style.opacity = "1"; event.currentTarget.style.transform = "scale(1)"; }}
+              style={{ width: "100%", padding: "14px 0", borderRadius: 12, background: G, color: "#000", fontSize: 14.5, fontWeight: 900, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, boxShadow: `0 0 36px ${G_20}, 0 4px 20px rgba(0,0,0,0.4)`, letterSpacing: "-0.03em", marginBottom: 17, transition: "all .2s" }}
+              onMouseEnter={(event) => { event.currentTarget.style.transform = "scale(1.02)"; event.currentTarget.style.boxShadow = `0 0 52px ${G_30},0 4px 20px rgba(0,0,0,0.5)`; }}
+              onMouseLeave={(event) => { event.currentTarget.style.transform = "scale(1)"; event.currentTarget.style.boxShadow = `0 0 36px ${G_20},0 4px 20px rgba(0,0,0,0.4)`; }}
             >
-              <svg width={17} height={17} viewBox="0 0 18 18">
-                <path d="M17.64 9.2a10.34 10.34 0 0 0-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92A8.78 8.78 0 0 0 17.64 9.2z" fill="#4285F4" />
-                <path d="M9 18a8.6 8.6 0 0 0 5.96-2.18l-2.92-2.26a5.43 5.43 0 0 1-8.07-2.85H.96v2.33A9 9 0 0 0 9 18z" fill="#34A853" />
-                <path d="M3.97 10.71A5.41 5.41 0 0 1 3.69 9c0-.59.1-1.17.28-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.04l3.01-2.33z" fill="#FBBC05" />
-                <path d="M9 3.58a4.86 4.86 0 0 1 3.44 1.35l2.58-2.58A8.64 8.64 0 0 0 9 0 9 9 0 0 0 .96 4.96l3.01 2.33A5.36 5.36 0 0 1 9 3.58z" fill="#EA4335" />
-              </svg>
-              Continuar com Google
+              {busy ? (
+                <div style={{ width: 17, height: 17, border: "2.5px solid rgba(0,0,0,0.35)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+              ) : (
+                <>
+                  <span>{mode === "signup" ? "Criar conta" : "Entrar com e-mail"}</span>
+                  <ArrowRight size={15} />
+                </>
+              )}
             </button>
+          </form>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.20)" }}>ou</span>
-              <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
-            </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
+            <button
+              type="button"
+              onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+              style={{ background: "none", border: "none", color: "rgba(255,255,255,0.33)", fontSize: 12.5, cursor: "pointer", padding: 0, letterSpacing: "-0.01em", transition: "color .2s" }}
+              onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
+              onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.33)"; }}
+            >
+              {mode === "signup" ? "Já tenho conta" : "Criar conta"}
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              style={{ background: "none", border: "none", color: "rgba(255,255,255,0.33)", fontSize: 12.5, cursor: "pointer", padding: 0, letterSpacing: "-0.01em", transition: "color .2s" }}
+              onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
+              onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.33)"; }}
+            >
+              Recuperar acesso
+            </button>
+          </div>
 
-            {error && (
-              <div style={{ background: "rgba(255,80,80,0.12)", border: "1px solid rgba(255,80,80,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#ff8080", lineHeight: 1.5 }}>
-                {error}
-              </div>
-            )}
-            {message && (
-              <div style={{ background: `${G_10}`, border: `1px solid ${G_20}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: G, lineHeight: 1.5 }}>
-                {message}
-              </div>
-            )}
-
-            <form onSubmit={handleEmail}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-                <FInput type="email" placeholder="email@exemplo.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-                <FInput
-                  type={show ? "text" : "password"}
-                  placeholder="Senha"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  right={
-                    <button
-                      type="button"
-                      onClick={() => setShow(!show)}
-                      style={{ position: "absolute", right: 13, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", padding: 0, color: "rgba(255,255,255,0.26)", display: "flex", alignItems: "center" }}
-                    >
-                      {show ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  }
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={busy}
-                style={{ width: "100%", padding: "14px 0", borderRadius: 12, background: G, color: "#000", fontSize: 14.5, fontWeight: 900, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, boxShadow: `0 0 36px ${G_20}, 0 4px 20px rgba(0,0,0,0.4)`, letterSpacing: "-0.03em", marginBottom: 17, transition: "all .2s" }}
-                onMouseEnter={(event) => { event.currentTarget.style.transform = "scale(1.02)"; event.currentTarget.style.boxShadow = `0 0 52px ${G_30},0 4px 20px rgba(0,0,0,0.5)`; }}
-                onMouseLeave={(event) => { event.currentTarget.style.transform = "scale(1)"; event.currentTarget.style.boxShadow = `0 0 36px ${G_20},0 4px 20px rgba(0,0,0,0.4)`; }}
-              >
-                {busy ? (
-                  <div style={{ width: 17, height: 17, border: "2.5px solid rgba(0,0,0,0.35)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                ) : (
-                  <>
-                    <span>{mode === "signup" ? "Criar conta" : "Entrar com e-mail"}</span>
-                    <ArrowRight size={15} />
-                  </>
-                )}
-              </button>
-            </form>
-
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
-              <button
-                type="button"
-                onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.33)", fontSize: 12.5, cursor: "pointer", padding: 0, letterSpacing: "-0.01em", transition: "color .2s" }}
-                onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
-                onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.33)"; }}
-              >
-                {mode === "signup" ? "Já tenho conta" : "Criar conta"}
-              </button>
-              <button
-                type="button"
-                onClick={handleReset}
-                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.33)", fontSize: 12.5, cursor: "pointer", padding: 0, letterSpacing: "-0.01em", transition: "color .2s" }}
-                onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
-                onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.33)"; }}
-              >
-                Recuperar acesso
-              </button>
-            </div>
-
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.6, textAlign: "center" }}>
-              Ao entrar, você aceita os{" "}
-              <a href={`${BASE}/termos`} style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer" }}>
-                Termos de Uso
-              </a>{" "}
-              e a{" "}
-              <a href={`${BASE}/privacidade`} style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer" }}>
-                Política de Privacidade
-              </a>
-              .
-            </p>
-          </GlassCard>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.6, textAlign: "center" }}>
+            Ao entrar, você aceita os{" "}
+            <a href={`${BASE}/termos`} style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer" }}>
+              Termos de Uso
+            </a>{" "}
+            e a{" "}
+            <a href={`${BASE}/privacidade`} style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer" }}>
+              Política de Privacidade
+            </a>
+            .
+          </p>
         </div>
       </div>
     </div>
@@ -605,21 +524,30 @@ function AuthScreen() {
 }
 
 function VerifyEmail({ user }: { user: User }) {
+  const [termsChecked, setTermsChecked] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   async function refresh() {
+    if (!termsChecked) {
+      setError("Você precisa aceitar os Termos de Uso e a Política de Privacidade para continuar.");
+      return;
+    }
     setError("");
+    setBusy(true);
     try {
       await reload(user);
       if (auth.currentUser?.emailVerified) {
         await auth.currentUser.getIdToken(true);
-        window.location.replace(`${BASE}/home`);
+        window.location.replace(`${BASE}/onboarding`);
       } else {
         setMessage("Ainda não confirmamos seu e-mail. Confira sua caixa de entrada.");
       }
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -634,23 +562,58 @@ function VerifyEmail({ user }: { user: User }) {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#050505", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-      <div style={{ maxWidth: 420, width: "100%", padding: "0 24px" }}>
+    <div style={{ minHeight: "100vh", background: "#050505", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", fontFamily: "inherit" }}>
+      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 24, padding: "40px 36px", width: "100%", maxWidth: 400, textAlign: "center" }}>
         <div style={{ marginBottom: 28 }}><Logo /></div>
-        <h1 style={{ fontSize: "1.4rem", fontWeight: 800, color: "#fff", marginBottom: 10, letterSpacing: "-0.025em" }}>Confirme seu e-mail</h1>
-        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.9rem", lineHeight: 1.6, marginBottom: 24 }}>
-          Enviamos uma verificação para <strong style={{ color: "rgba(255,255,255,0.7)" }}>{user.email}</strong>. Depois disso você acessa seu painel.
+
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(184,245,90,0.08)", border: "1px solid rgba(184,245,90,0.18)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="4" width="20" height="16" rx="2" />
+            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+          </svg>
+        </div>
+
+        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.025em", marginBottom: 8 }}>Confirme seu e-mail</h1>
+        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", lineHeight: 1.6, marginBottom: 4 }}>
+          Enviamos um link de acesso para
         </p>
-        {message && <div style={{ background: "rgba(184,245,90,0.08)", border: `1px solid ${G_20}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: G }}>{message}</div>}
-        {error && <div style={{ background: "rgba(255,80,80,0.10)", border: "1px solid rgba(255,80,80,0.22)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#ff8080" }}>{error}</div>}
+        <p style={{ fontSize: 14, fontWeight: 600, color: G, marginBottom: 28 }}>{user.email}</p>
+
+        {/* Terms checkbox */}
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "14px", textAlign: "left", cursor: "pointer", marginBottom: 20 }}>
+          <input
+            type="checkbox"
+            checked={termsChecked}
+            onChange={(e) => { setTermsChecked(e.target.checked); setError(""); }}
+            style={{ width: 16, height: 16, accentColor: G, flexShrink: 0, marginTop: 1, cursor: "pointer" }}
+          />
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.55 }}>
+            Li e aceito os{" "}
+            <a href={`${BASE}/termos`} target="_blank" style={{ color: G, textDecoration: "none" }}>Termos de Uso</a>
+            {" "}e a{" "}
+            <a href={`${BASE}/privacidade`} target="_blank" style={{ color: G, textDecoration: "none" }}>Política de Privacidade</a>
+            {" "}do Fincheck Pro
+          </span>
+        </label>
+
+        {message && <div style={{ background: "rgba(184,245,90,0.08)", border: `1px solid ${G_20}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: G, textAlign: "left" }}>{message}</div>}
+        {error && <div style={{ background: "rgba(255,80,80,0.10)", border: "1px solid rgba(255,80,80,0.22)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#ff8080", textAlign: "left" }}>{error}</div>}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <button onClick={refresh} style={{ padding: "13px", borderRadius: 12, background: G, color: "#000", border: "none", cursor: "pointer", fontSize: "0.9rem", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            <RefreshCw size={16} /> Já confirmei
+          <button
+            onClick={refresh}
+            disabled={busy}
+            style={{ padding: "13px", borderRadius: 12, background: G, color: "#050505", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+          >
+            {busy
+              ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+              : <>Já confirmei — entrar no app <ArrowRight size={15} /></>
+            }
           </button>
-          <button onClick={resend} style={{ padding: "13px", borderRadius: 12, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", fontSize: "0.9rem", fontWeight: 600 }}>
+          <button onClick={resend} style={{ padding: "13px", borderRadius: 12, background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             Reenviar e-mail
           </button>
-          <button onClick={() => signOut(auth)} style={{ padding: "10px", borderRadius: 12, background: "transparent", color: "rgba(255,255,255,0.25)", border: "none", cursor: "pointer", fontSize: "0.85rem" }}>
+          <button onClick={() => signOut(auth)} style={{ padding: "10px", background: "transparent", color: "rgba(255,255,255,0.22)", border: "none", cursor: "pointer", fontSize: 12 }}>
             Sair
           </button>
         </div>
@@ -703,10 +666,19 @@ export default function LoginPage() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      if (u?.emailVerified) {
-        window.location.replace(`${BASE}/home`);
+    return onAuthStateChanged(auth, async (u) => {
+      if (!u) { setUser(null); return; }
+      if (!u.emailVerified) { setUser(u); return; }
+      // Email verificado: checar se já completou onboarding
+      try {
+        const snap = await getDoc(doc(db, "users", u.uid));
+        if (snap.exists() && snap.data().acceptedTermsVersion) {
+          window.location.replace(`${BASE}/home`);
+        } else {
+          window.location.replace(`${BASE}/onboarding`);
+        }
+      } catch {
+        window.location.replace(`${BASE}/onboarding`);
       }
     });
   }, []);

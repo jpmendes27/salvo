@@ -8,7 +8,20 @@
       "mcp__claude_ai_Atlassian_Rovo__getAccessibleAtlassianResources",
       "mcp__claude_ai_Atlassian_Rovo__getJiraProjectIssueTypesMetadata",
       "mcp__claude_ai_Atlassian_Rovo__getTransitionsForJiraIssue",
-      "mcp__claude_ai_Atlassian_Rovo__getConfluenceSpaces"
+      "mcp__claude_ai_Atlassian_Rovo__getConfluenceSpaces",
+      "Bash(cp /home/joao/Downloads/picpay.jpg /home/joao/Documentos/fincheck-pro/public/banks/picpay.jpg)",
+      "Bash(cp /home/joao/Downloads/nubank.png /home/joao/Documentos/fincheck-pro/public/banks/nubank.png)",
+      "Bash(cp /home/joao/Downloads/itau.png /home/joao/Documentos/fincheck-pro/public/banks/itau.png)",
+      "Bash(cp /home/joao/Downloads/bradesco.png /home/joao/Documentos/fincheck-pro/public/banks/bradesco.png)",
+      "Bash(rm /home/joao/Documentos/fincheck-pro/public/banks/*.svg && ls /home/joao/Documentos/fincheck-pro/public/banks/)",
+      "Bash(git -C /home/joao/Documentos/fincheck-pro status)",
+      "Bash(git -C /home/joao/Documentos/fincheck-pro diff --stat)",
+      "Bash(git -C /home/joao/Documentos/fincheck-pro log --oneline -3)",
+      "Bash(git commit -m ' *)"
+    ],
+    "additionalDirectories": [
+      "/home/joao/Documentos/fincheck-pro/public/banks",
+      "/home/joao/Downloads"
     ]
   }
 }
