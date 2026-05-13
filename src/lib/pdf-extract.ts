@@ -10,24 +10,39 @@ async function getPdfjs() {
   return _pdfjs;
 }
 
-export async function extractPDFText(file: File, password?: string): Promise<string> {
+export async function extractPDFText(
+  file: File,
+  password?: string,
+  candidatePasswords?: string[]
+): Promise<string> {
   const pdfjs = await getPdfjs();
   const arrayBuffer = await file.arrayBuffer();
 
-  let pdf: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>;
+  const open = (pw?: string) =>
+    pdfjs.getDocument({ data: new Uint8Array(arrayBuffer), password: pw }).promise;
+
+  let pdf: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]> | undefined;
   try {
-    pdf = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer), password }).promise;
+    pdf = await open(password);
   } catch (err: unknown) {
     const e = err as { name?: string; code?: number };
     if (e.name === "PasswordException") {
-      const msg = e.code === 2
-        ? "Senha incorreta. Digite novamente a senha do PDF:"
-        : "Este PDF está protegido por senha. Digite a senha para continuar:";
-      const pw = window.prompt(msg);
-      if (pw === null) throw new Error("Importação cancelada pelo usuário.");
-      return extractPDFText(file, pw);
+      // Try candidate passwords silently (e.g. CPF from user profile)
+      for (const candidate of (candidatePasswords ?? [])) {
+        try { pdf = await open(candidate); break; } catch { /* try next */ }
+      }
+
+      if (!pdf) {
+        const msg = e.code === 2
+          ? "Senha incorreta. Digite novamente a senha do PDF:"
+          : "Este PDF está protegido por senha. Digite a senha para continuar:";
+        const pw = window.prompt(msg);
+        if (pw === null) throw new Error("Importação cancelada pelo usuário.");
+        return extractPDFText(file, pw);
+      }
+    } else {
+      throw err;
     }
-    throw err;
   }
 
   const pageTexts: string[] = [];

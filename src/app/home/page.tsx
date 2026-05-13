@@ -73,6 +73,7 @@ type Profile = {
   uid: string;
   displayName: string;
   email: string;
+  cpf?: string;
   hasCreatedRealMonth?: boolean;
   acceptedTermsVersion?: string;
   acceptedPrivacyVersion?: string;
@@ -747,7 +748,8 @@ function WorkspaceApp({
             rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
           );
         } else if (ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf")) {
-          const pdfText = await extractPDFText(file);
+          const pdfCandidates = profile.cpf ? [profile.cpf] : [];
+          const pdfText = await extractPDFText(file, undefined, pdfCandidates);
           const { transactions: bankTxs, sourceLabel: bankLabel } = parseBankText(pdfText, { filename: file.name });
 
           if (bankTxs.length >= 3) {
