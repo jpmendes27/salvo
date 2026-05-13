@@ -748,7 +748,14 @@ function WorkspaceApp({
             rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
           );
         } else if (ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf")) {
-          const pdfCandidates = profile.cpf ? [profile.cpf] : [];
+          const pdfCandidates = profile.cpf
+            ? [
+                profile.cpf.slice(0, 3),
+                profile.cpf.slice(0, 4),
+                profile.cpf.slice(0, 6),
+                profile.cpf,
+              ]
+            : [];
           const pdfText = await extractPDFText(file, undefined, pdfCandidates);
           const { transactions: bankTxs, sourceLabel: bankLabel } = parseBankText(pdfText, { filename: file.name });
 
