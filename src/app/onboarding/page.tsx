@@ -160,9 +160,10 @@ function OnboardingFlow({ user }: { user: User }) {
 
       <div style={{ width: "100%", maxWidth: 440, animation: "fadeUp .4s ease both" }}>
         {/* Logo */}
-        <div style={{ marginBottom: 32 }}>
-          <span style={{ fontSize: 15, fontWeight: 700, color: G, letterSpacing: "-0.03em" }}>fincheck</span>
-          <span style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: "-0.03em" }}>pro</span>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 0, marginBottom: 32 }}>
+          <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: G, letterSpacing: "-0.02em", lineHeight: 1 }}>fincheck</span>
+          <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#fff", letterSpacing: "-0.02em", lineHeight: 1 }}>pro</span>
+          <sup style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.45rem", verticalAlign: "super", color: G, fontWeight: 400, marginLeft: 1 }}>®</sup>
         </div>
 
         {/* Progress */}
