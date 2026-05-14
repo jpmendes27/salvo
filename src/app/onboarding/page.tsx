@@ -8,6 +8,7 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
+  Timestamp,
   writeBatch
 } from "firebase/firestore";
 import { ArrowRight, ChevronLeft } from "lucide-react";
@@ -19,6 +20,9 @@ import { maskBRL, parseBRL } from "@/lib/money";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const G = "#b8f55a";
+const SEND_WA_FUNCTION_URL =
+  process.env.NEXT_PUBLIC_SEND_WA_URL ||
+  "https://sendinvitewhatsapp-ihalwtxjpq-uc.a.run.app";
 
 function maskCPF(value: string): string {
   const d = value.replace(/\D/g, "").slice(0, 11);
@@ -69,78 +73,137 @@ function OnboardingFlow({ user }: { user: User }) {
   const [cpf, setCpf] = useState("");
   const [phone, setPhone] = useState("");
   const [usage, setUsage] = useState<"solo" | "shared">("solo");
+  const [invitePhone, setInvitePhone] = useState("");
+  const [workspaceId, setWorkspaceId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
   const incomeRef = useRef<HTMLInputElement>(null);
   const cpfRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
+  const invitePhoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (step === 0) nameRef.current?.focus();
     if (step === 1) cpfRef.current?.focus();
     if (step === 2) phoneRef.current?.focus();
     if (step === 3) incomeRef.current?.focus();
+    if (step === 5) invitePhoneRef.current?.focus();
   }, [step]);
 
-  async function finish() {
+  async function createWorkspace(): Promise<string> {
+    if (workspaceId) return workspaceId;
+    const displayName = name.trim() || user.displayName || user.email?.split("@")[0] || "Você";
+    const incomeVal = parseBRL(income);
+    const digits = phone.replace(/\D/g, "");
+    const phoneTrimmed = digits && !digits.startsWith("55") ? `55${digits}` : digits;
+    const cpfDigits = cpf.replace(/\D/g, "");
+
+    await addDoc(collection(db, "consents"), {
+      uid: user.uid,
+      email: user.email || "",
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      text: consentText,
+      purpose: "account_and_workspace_access",
+      createdAt: serverTimestamp()
+    });
+
+    const wsRef = doc(collection(db, "workspaces"));
+    const batch = writeBatch(db);
+    batch.set(wsRef, {
+      name: "Minha vida financeira",
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...(incomeVal > 0 ? { monthlyIncome: incomeVal } : {})
+    });
+    batch.set(doc(db, "workspaces", wsRef.id, "members", user.uid), {
+      uid: user.uid,
+      role: "owner",
+      status: "active",
+      displayName,
+      email: user.email || "",
+      createdBy: user.uid,
+      joinedAt: serverTimestamp()
+    });
+    // User doc no mesmo batch: acceptedTermsVersion e workspaceIds juntos,
+    // evitando a janela onde loadProfile vê termos sem workspace e cria um novo sem renda
+    batch.set(doc(db, "users", user.uid), {
+      uid: user.uid,
+      displayName,
+      email: user.email || "",
+      ...(cpfDigits.length === 11 ? { cpf: cpfDigits } : {}),
+      ...(phoneTrimmed ? { phone: phoneTrimmed } : {}),
+      hasCreatedRealMonth: false,
+      acceptedTermsVersion: TERMS_VERSION,
+      acceptedPrivacyVersion: PRIVACY_VERSION,
+      workspaceIds: [wsRef.id],
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    await batch.commit();
+
+    setWorkspaceId(wsRef.id);
+    return wsRef.id;
+  }
+
+  async function goHome(wsId: string) {
+    track("onboarding_complete", { usage, has_income: parseBRL(income) > 0 });
+    window.localStorage.removeItem("fincheck:pendingName");
+    window.location.replace(`${BASE}/home`);
+  }
+
+  async function handleStep3Next() {
+    setBusy(true);
+    setError("");
+    try {
+      await createWorkspace();
+      setStep(4);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleFinish() {
+    setBusy(true);
+    setError("");
+    try {
+      const wsId = await createWorkspace();
+      await goHome(wsId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");
+      setBusy(false);
+    }
+  }
+
+  async function handleSendInvite() {
+    const wsId = workspaceId;
+    if (!wsId) return;
     setBusy(true);
     setError("");
     try {
       const displayName = name.trim() || user.displayName || user.email?.split("@")[0] || "Você";
-      const incomeVal = parseBRL(income);
-      const digits = phone.replace(/\D/g, "");
-      const phoneTrimmed = digits && !digits.startsWith("55") ? `55${digits}` : digits;
-      const cpfDigits = cpf.replace(/\D/g, "");
-
-      await addDoc(collection(db, "consents"), {
-        uid: user.uid,
-        email: user.email || "",
-        termsVersion: TERMS_VERSION,
-        privacyVersion: PRIVACY_VERSION,
-        text: consentText,
-        purpose: "account_and_workspace_access",
-        createdAt: serverTimestamp()
-      });
-
-      const workspaceRef = doc(collection(db, "workspaces"));
-      const batch = writeBatch(db);
-      batch.set(workspaceRef, {
-        name: "Minha vida financeira",
+      const token = crypto.randomUUID();
+      const invDigits = invitePhone.replace(/\D/g, "");
+      const invPhone = invDigits.startsWith("55") ? invDigits : `55${invDigits}`;
+      await setDoc(doc(db, "invites", token), {
+        workspaceId: wsId,
+        workspaceName: "Minha vida financeira",
         createdBy: user.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        ...(incomeVal > 0 ? { monthlyIncome: incomeVal } : {})
-      });
-      batch.set(doc(db, "workspaces", workspaceRef.id, "members", user.uid), {
-        uid: user.uid,
-        role: "owner",
+        createdByName: displayName,
         status: "active",
-        displayName,
-        email: user.email || "",
-        createdBy: user.uid,
-        joinedAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
       });
-      // User doc no mesmo batch: garante que acceptedTermsVersion e workspaceIds
-      // são escritos atomicamente — evita a janela onde a home vê termos sem workspace
-      // e aciona ensureDefaultWorkspace (que criaria um workspace novo sem renda)
-      batch.set(doc(db, "users", user.uid), {
-        uid: user.uid,
-        displayName,
-        email: user.email || "",
-        ...(cpfDigits.length === 11 ? { cpf: cpfDigits } : {}),
-        ...(phoneTrimmed ? { phone: phoneTrimmed } : {}),
-        hasCreatedRealMonth: false,
-        acceptedTermsVersion: TERMS_VERSION,
-        acceptedPrivacyVersion: PRIVACY_VERSION,
-        workspaceIds: [workspaceRef.id],
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      await batch.commit();
-
-      track("onboarding_complete", { usage, has_income: incomeVal > 0 });
-      window.localStorage.removeItem("fincheck:pendingName");
-      window.location.replace(`${BASE}/home`);
+      const link = `${window.location.origin}${BASE}/convite?token=${token}`;
+      fetch(SEND_WA_FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: invPhone, workspaceName: "Minha vida financeira", inviteLink: link, fromName: displayName })
+      }).catch(console.error);
+      await goHome(wsId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");
       setBusy(false);
@@ -168,7 +231,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {/* Progress */}
         <div style={{ display: "flex", gap: 5, marginBottom: 32 }}>
-          {[0, 1, 2, 3, 4].map((i) => (
+          {(usage === "shared" ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3, 4]).map((i) => (
             <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= step ? G : "rgba(255,255,255,0.1)", transition: "background .3s" }} />
           ))}
         </div>
@@ -310,7 +373,7 @@ function OnboardingFlow({ user }: { user: User }) {
               placeholder="R$ 0,00"
               value={income}
               onChange={(e) => setIncome(maskBRL(e.target.value))}
-              onKeyDown={(e) => e.key === "Enter" && setStep(4)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleStep3Next(); }}
               style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
             />
             <div style={{ display: "flex", gap: 8 }}>
@@ -321,14 +384,15 @@ function OnboardingFlow({ user }: { user: User }) {
                 <ChevronLeft size={16} />
               </button>
               <button
-                onClick={() => setStep(4)}
+                onClick={handleStep3Next}
+                disabled={busy}
                 style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
-                Continuar <ArrowRight size={15} />
+                {busy ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} /> : <><span>Continuar</span> <ArrowRight size={15} /></>}
               </button>
             </div>
             <p
-              onClick={() => setStep(4)}
+              onClick={handleStep3Next}
               style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", cursor: "pointer", textAlign: "center", marginTop: 14 }}
             >
               Pular por agora
@@ -338,7 +402,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {step === 4 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 5 de 5</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 5 de {usage === "shared" ? 6 : 5}</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Como vai usar<br />o Fincheck Pro?
             </h1>
@@ -380,17 +444,75 @@ function OnboardingFlow({ user }: { user: User }) {
                 <ChevronLeft size={16} />
               </button>
               <button
-                onClick={finish}
+                onClick={usage === "shared" ? () => setStep(5) : handleFinish}
                 disabled={busy}
                 style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
                 {busy ? (
                   <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+                ) : usage === "shared" ? (
+                  <>Continuar <ArrowRight size={15} /></>
                 ) : (
                   <>Entrar no painel <ArrowRight size={15} /></>
                 )}
               </button>
             </div>
+          </div>
+        )}
+
+        {step === 5 && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 6 de 6</p>
+            <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
+              Quem vai gerir<br />com você?
+            </h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              Manda o convite agora pelo WhatsApp. A pessoa recebe um link pra entrar no seu painel.
+            </p>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>WhatsApp (com DDD)</p>
+            <input
+              ref={invitePhoneRef}
+              className="ob-input"
+              type="tel"
+              inputMode="tel"
+              placeholder="(21) 99999-9999"
+              value={invitePhone}
+              onChange={(e) => setInvitePhone(maskPhone(e.target.value))}
+              onKeyDown={(e) => { if (e.key === "Enter" && invitePhone.replace(/\D/g, "").length >= 10) handleSendInvite(); }}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
+            />
+
+            {error && (
+              <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>
+                {error}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setStep(4)}
+                style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                onClick={handleSendInvite}
+                disabled={busy || invitePhone.replace(/\D/g, "").length < 10}
+                style={{ flex: 1, padding: "13px", borderRadius: 12, background: invitePhone.replace(/\D/g, "").length >= 10 ? G : "rgba(255,255,255,0.08)", border: "none", color: invitePhone.replace(/\D/g, "").length >= 10 ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: invitePhone.replace(/\D/g, "").length >= 10 ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s" }}
+              >
+                {busy ? (
+                  <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+                ) : (
+                  <>Enviar convite e entrar <ArrowRight size={15} /></>
+                )}
+              </button>
+            </div>
+            <p
+              onClick={() => goHome(workspaceId)}
+              style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", cursor: "pointer", textAlign: "center", marginTop: 14 }}
+            >
+              Pular por agora
+            </p>
           </div>
         )}
       </div>
