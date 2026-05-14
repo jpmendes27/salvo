@@ -112,6 +112,9 @@ export type Invite = {
   workspaceName: string;
   createdBy: string;
   createdByName?: string;
+  canal?: string;
+  guestPhone?: string;
+  guestEmail?: string;
   status: "active" | "revoked" | "accepted";
   expiresAt: unknown;
   createdAt?: unknown;

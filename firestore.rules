@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function verified() {
-      return signedIn() && request.auth.token.email_verified == true;
+      return signedIn();
     }
 
     function memberPath(workspaceId) {
@@ -45,8 +45,7 @@ service cloud.firestore {
     }
 
     match /invites/{inviteId} {
-      allow read: if verified()
-        && resource.data.status == "active"
+      allow read: if resource.data.status == "active"
         && resource.data.expiresAt > request.time;
       allow create: if verified()
         && request.resource.data.createdBy == request.auth.uid

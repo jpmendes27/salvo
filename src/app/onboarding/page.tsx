@@ -187,6 +187,8 @@ function OnboardingFlow({ user }: { user: User }) {
         workspaceName: "Minha vida financeira",
         createdBy: user.uid,
         createdByName: displayName,
+        canal: "whatsapp",
+        guestPhone: invPhone,
         status: "active",
         createdAt: serverTimestamp(),
         expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
