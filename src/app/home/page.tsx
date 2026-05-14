@@ -74,6 +74,7 @@ type Profile = {
   displayName: string;
   email: string;
   cpf?: string;
+  accountVerified?: boolean;
   hasCreatedRealMonth?: boolean;
   acceptedTermsVersion?: string;
   acceptedPrivacyVersion?: string;
@@ -97,12 +98,12 @@ export default function HomePage() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user || !user.emailVerified) {
+    if (!user) {
       window.location.replace(`${BASE}/login`);
     }
   }, [authLoading, user]);
 
-  if (authLoading || !user || !user.emailVerified) return <FincheckLoader />;
+  if (authLoading || !user) return <FincheckLoader />;
   return <AuthenticatedApp user={user} />;
 }
 
@@ -235,6 +236,9 @@ function AuthenticatedApp({ user }: { user: User }) {
         return;
       }
       const profile = snap.data() as Profile;
+      if (profile.accountVerified === false) {
+        window.location.replace(`${BASE}/verify`); return;
+      }
       if (profile.acceptedTermsVersion && !profile.workspaceIds?.length) {
         const displayName = user.displayName || user.email?.split("@")[0] || "Voce";
         await ensureDefaultWorkspace(user, displayName);

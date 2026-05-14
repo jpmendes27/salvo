@@ -46,14 +46,14 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
-      if (!u || !u.emailVerified) {
-        window.location.replace(`${BASE}/login`);
-        return;
-      }
+      if (!u) { window.location.replace(`${BASE}/login`); return; }
       const snap = await getDoc(doc(db, "users", u.uid));
-      if (snap.exists() && snap.data().acceptedTermsVersion) {
-        window.location.replace(`${BASE}/home`);
-        return;
+      const data = snap.data();
+      if (!snap.exists() || data?.accountVerified === false) {
+        window.location.replace(`${BASE}/verify`); return;
+      }
+      if (data?.acceptedTermsVersion) {
+        window.location.replace(`${BASE}/home`); return;
       }
       setUser(u);
     });
@@ -71,7 +71,6 @@ function OnboardingFlow({ user }: { user: User }) {
   );
   const [income, setIncome] = useState("");
   const [cpf, setCpf] = useState("");
-  const [phone, setPhone] = useState("");
   const [usage, setUsage] = useState<"solo" | "shared">("solo");
   const [invitePhone, setInvitePhone] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
@@ -80,23 +79,19 @@ function OnboardingFlow({ user }: { user: User }) {
   const nameRef = useRef<HTMLInputElement>(null);
   const incomeRef = useRef<HTMLInputElement>(null);
   const cpfRef = useRef<HTMLInputElement>(null);
-  const phoneRef = useRef<HTMLInputElement>(null);
   const invitePhoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (step === 0) nameRef.current?.focus();
     if (step === 1) cpfRef.current?.focus();
-    if (step === 2) phoneRef.current?.focus();
-    if (step === 3) incomeRef.current?.focus();
-    if (step === 5) invitePhoneRef.current?.focus();
+    if (step === 2) incomeRef.current?.focus();
+    if (step === 4) invitePhoneRef.current?.focus();
   }, [step]);
 
   async function createWorkspace(): Promise<string> {
     if (workspaceId) return workspaceId;
     const displayName = name.trim() || user.displayName || user.email?.split("@")[0] || "Você";
     const incomeVal = parseBRL(income);
-    const digits = phone.replace(/\D/g, "");
-    const phoneTrimmed = digits && !digits.startsWith("55") ? `55${digits}` : digits;
     const cpfDigits = cpf.replace(/\D/g, "");
 
     await addDoc(collection(db, "consents"), {
@@ -134,7 +129,6 @@ function OnboardingFlow({ user }: { user: User }) {
       displayName,
       email: user.email || "",
       ...(cpfDigits.length === 11 ? { cpf: cpfDigits } : {}),
-      ...(phoneTrimmed ? { phone: phoneTrimmed } : {}),
       hasCreatedRealMonth: false,
       acceptedTermsVersion: TERMS_VERSION,
       acceptedPrivacyVersion: PRIVACY_VERSION,
@@ -153,12 +147,12 @@ function OnboardingFlow({ user }: { user: User }) {
     window.location.replace(`${BASE}/home`);
   }
 
-  async function handleStep3Next() {
+  async function handleStep2Next() {
     setBusy(true);
     setError("");
     try {
       await createWorkspace();
-      setStep(4);
+      setStep(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");
     } finally {
@@ -231,7 +225,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {/* Progress */}
         <div style={{ display: "flex", gap: 5, marginBottom: 32 }}>
-          {(usage === "shared" ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3, 4]).map((i) => (
+          {(usage === "shared" ? [0, 1, 2, 3, 4] : [0, 1, 2, 3]).map((i) => (
             <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= step ? G : "rgba(255,255,255,0.1)", transition: "background .3s" }} />
           ))}
         </div>
@@ -239,7 +233,7 @@ function OnboardingFlow({ user }: { user: User }) {
         {/* Step content */}
         {step === 0 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 1 de 5</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 1 de 4</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Como quer ser<br />chamado?
             </h1>
@@ -269,7 +263,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {step === 1 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 5</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 4</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Qual é o seu<br />CPF?
             </h1>
@@ -313,51 +307,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
         {step === 2 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 3 de 5</p>
-            <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
-              Qual é seu<br />WhatsApp?
-            </h1>
-            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-              Podemos te enviar alertas e resumos financeiros por lá. Pode pular se preferir.
-            </p>
-            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Celular (com DDD)</p>
-            <input
-              ref={phoneRef}
-              className="ob-input"
-              type="tel"
-              inputMode="tel"
-              placeholder="(21) 99999-9999"
-              value={phone}
-              onChange={(e) => setPhone(maskPhone(e.target.value))}
-              onKeyDown={(e) => e.key === "Enter" && setStep(3)}
-              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => setStep(1)}
-                style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                onClick={() => setStep(3)}
-                style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-              >
-                Continuar <ArrowRight size={15} />
-              </button>
-            </div>
-            <p
-              onClick={() => setStep(3)}
-              style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", cursor: "pointer", textAlign: "center", marginTop: 14 }}
-            >
-              Pular por agora
-            </p>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 4 de 5</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 3 de {usage === "shared" ? 5 : 4}</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Qual é sua<br />renda mensal?
             </h1>
@@ -373,18 +323,18 @@ function OnboardingFlow({ user }: { user: User }) {
               placeholder="R$ 0,00"
               value={income}
               onChange={(e) => setIncome(maskBRL(e.target.value))}
-              onKeyDown={(e) => { if (e.key === "Enter") handleStep3Next(); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleStep2Next(); }}
               style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
             />
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                onClick={() => setStep(2)}
+                onClick={() => setStep(1)}
                 style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}
               >
                 <ChevronLeft size={16} />
               </button>
               <button
-                onClick={handleStep3Next}
+                onClick={handleStep2Next}
                 disabled={busy}
                 style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
@@ -392,7 +342,7 @@ function OnboardingFlow({ user }: { user: User }) {
               </button>
             </div>
             <p
-              onClick={handleStep3Next}
+              onClick={handleStep2Next}
               style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", cursor: "pointer", textAlign: "center", marginTop: 14 }}
             >
               Pular por agora
@@ -400,9 +350,9 @@ function OnboardingFlow({ user }: { user: User }) {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 3 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 5 de {usage === "shared" ? 6 : 5}</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 4 de {usage === "shared" ? 5 : 4}</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Como vai usar<br />o Fincheck Pro?
             </h1>
@@ -438,13 +388,13 @@ function OnboardingFlow({ user }: { user: User }) {
 
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button
-                onClick={() => setStep(3)}
+                onClick={() => setStep(2)}
                 style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}
               >
                 <ChevronLeft size={16} />
               </button>
               <button
-                onClick={usage === "shared" ? () => setStep(5) : handleFinish}
+                onClick={usage === "shared" ? () => setStep(4) : handleFinish}
                 disabled={busy}
                 style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
@@ -460,9 +410,9 @@ function OnboardingFlow({ user }: { user: User }) {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 4 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 6 de 6</p>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 5 de 5</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
               Quem vai gerir<br />com você?
             </h1>
@@ -490,7 +440,7 @@ function OnboardingFlow({ user }: { user: User }) {
 
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                onClick={() => setStep(4)}
+                onClick={() => setStep(3)}
                 style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}
               >
                 <ChevronLeft size={16} />

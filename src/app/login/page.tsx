@@ -3,8 +3,6 @@
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
-  reload,
-  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -20,7 +18,16 @@ import {
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { auth, db, googleProvider } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+
+function maskPhone(value: string): string {
+  const d = value.replace(/\D/g, "").slice(0, 11);
+  if (!d) return "";
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
 import { track } from "@/lib/analytics";
 
 const G = "#b8f55a";
@@ -211,7 +218,9 @@ function Logo() {
 function AuthScreen() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [passwordStep, setPasswordStep] = useState(false);
+  const [signupStep, setSignupStep] = useState(0); // 0=email 1=phone 2=password
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -311,26 +320,37 @@ function AuthScreen() {
     setError("");
     setMessage("");
 
-    if (mode === "signup" && !passwordStep) {
-      setPasswordStep(true);
+    if (mode === "signup") {
+      if (signupStep === 0) { setSignupStep(1); return; }
+      if (signupStep === 1) { setSignupStep(2); return; }
+      setBusy(true);
+      try {
+        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        const phoneDigits = phone.replace(/\D/g, "");
+        const phoneCC = phoneDigits && !phoneDigits.startsWith("55") ? `55${phoneDigits}` : phoneDigits;
+        await setDoc(doc(db, "users", credential.user.uid), {
+          uid: credential.user.uid,
+          email: credential.user.email || "",
+          ...(phoneCC ? { phone: phoneCC } : {}),
+          accountVerified: false,
+          createdAt: serverTimestamp()
+        });
+        track("sign_up", { method: "email" });
+        window.location.replace(`${BASE}/verify`);
+      } catch (err) {
+        setError(errorMessage(err));
+        setBusy(false);
+      }
       return;
     }
 
+    if (!passwordStep) { setPasswordStep(true); return; }
     setBusy(true);
     try {
-      if (mode === "signup") {
-        const credential = await createUserWithEmailAndPassword(auth, email, password);
-        await sendEmailVerification(credential.user);
-        window.localStorage.setItem("fincheck:pendingName", email.split("@")[0] || "Voce");
-        track("sign_up", { method: "email" });
-        setMessage("Conta criada. Confirme seu e-mail para liberar seu workspace.");
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-        track("login", { method: "email" });
-      }
+      await signInWithEmailAndPassword(auth, email, password);
+      track("login", { method: "email" });
     } catch (err) {
       setError(errorMessage(err));
-    } finally {
       setBusy(false);
     }
   }
@@ -464,9 +484,22 @@ function AuthScreen() {
 
           <form onSubmit={handleEmail}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-              <FInput type="email" placeholder="seu@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-              {(mode === "signin" || passwordStep) && (
-                <div style={{ animation: mode === "signup" && passwordStep ? "fadeUp .25s ease both" : "none" }}>
+              {/* Signup step 0 or signin: email */}
+              {(mode === "signin" || signupStep === 0) && (
+                <FInput type="email" placeholder="seu@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+              )}
+              {/* Signup step 1: phone */}
+              {mode === "signup" && signupStep === 1 && (
+                <div style={{ animation: "fadeUp .25s ease both" }}>
+                  <FInput type="tel" placeholder="(21) 99999-9999" value={phone} onChange={(event) => setPhone(maskPhone(event.target.value))} />
+                  <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.28)", marginTop: 8, lineHeight: 1.5 }}>
+                    Usado para enviar o código de verificação pelo WhatsApp.
+                  </p>
+                </div>
+              )}
+              {/* Signin passwordStep or signup step 2: password */}
+              {(mode === "signin" && passwordStep) || (mode === "signup" && signupStep === 2) ? (
+                <div style={{ animation: "fadeUp .25s ease both" }}>
                   <FInput
                     type={show ? "text" : "password"}
                     placeholder="Senha"
@@ -488,7 +521,7 @@ function AuthScreen() {
                     </p>
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
 
             <button
@@ -502,7 +535,7 @@ function AuthScreen() {
                 <div style={{ width: 17, height: 17, border: "2.5px solid rgba(0,0,0,0.35)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
               ) : (
                 <>
-                  <span>{mode === "signup" && !passwordStep ? "Avançar" : mode === "signup" ? "Criar conta" : "Entrar com e-mail"}</span>
+                  <span>{mode === "signup" && signupStep === 2 ? "Criar conta" : mode === "signin" && passwordStep ? "Entrar com e-mail" : "Avançar"}</span>
                   <ArrowRight size={15} />
                 </>
               )}
@@ -512,12 +545,16 @@ function AuthScreen() {
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
             <button
               type="button"
-              onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setPasswordStep(false); setPassword(""); setError(""); setMessage(""); }}
+              onClick={() => {
+                if (mode === "signup" && signupStep > 0) { setSignupStep(signupStep - 1); setError(""); return; }
+                setMode(mode === "signin" ? "signup" : "signin");
+                setPasswordStep(false); setSignupStep(0); setPassword(""); setPhone(""); setError(""); setMessage("");
+              }}
               style={{ background: "none", border: "none", color: "rgba(255,255,255,0.33)", fontSize: 12.5, cursor: "pointer", padding: 0, letterSpacing: "-0.01em", transition: "color .2s" }}
               onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
               onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.33)"; }}
             >
-              {mode === "signup" ? "Já tenho conta" : "Criar conta"}
+              {mode === "signup" && signupStep > 0 ? "← Voltar" : mode === "signup" ? "Já tenho conta" : "Criar conta"}
             </button>
             <button
               type="button"
@@ -547,104 +584,6 @@ function AuthScreen() {
   );
 }
 
-function VerifyEmail({ user }: { user: User }) {
-  const [termsChecked, setTermsChecked] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function refresh() {
-    if (!termsChecked) {
-      setError("Você precisa aceitar os Termos de Uso e a Política de Privacidade para continuar.");
-      return;
-    }
-    setError("");
-    setBusy(true);
-    try {
-      await reload(user);
-      if (auth.currentUser?.emailVerified) {
-        await auth.currentUser.getIdToken(true);
-        window.location.replace(`${BASE}/onboarding`);
-      } else {
-        setMessage("Ainda não confirmamos seu e-mail. Confira sua caixa de entrada.");
-      }
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function resend() {
-    setError("");
-    try {
-      await sendEmailVerification(user);
-      setMessage("Reenviamos a verificação.");
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#050505", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", fontFamily: "inherit" }}>
-      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 24, padding: "40px 36px", width: "100%", maxWidth: 400, textAlign: "center" }}>
-        <div style={{ marginBottom: 28 }}><Logo /></div>
-
-        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(184,245,90,0.08)", border: "1px solid rgba(184,245,90,0.18)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-          </svg>
-        </div>
-
-        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.025em", marginBottom: 8 }}>Confirme seu e-mail</h1>
-        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", lineHeight: 1.6, marginBottom: 4 }}>
-          Enviamos um link de acesso para
-        </p>
-        <p style={{ fontSize: 14, fontWeight: 600, color: G, marginBottom: 28 }}>{user.email}</p>
-
-        {/* Terms checkbox */}
-        <label style={{ display: "flex", alignItems: "flex-start", gap: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "14px", textAlign: "left", cursor: "pointer", marginBottom: 20 }}>
-          <input
-            type="checkbox"
-            checked={termsChecked}
-            onChange={(e) => { setTermsChecked(e.target.checked); setError(""); }}
-            style={{ width: 16, height: 16, accentColor: G, flexShrink: 0, marginTop: 1, cursor: "pointer" }}
-          />
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.55 }}>
-            Li e aceito os{" "}
-            <a href={`${BASE}/termos`} target="_blank" style={{ color: G, textDecoration: "none" }}>Termos de Uso</a>
-            {" "}e a{" "}
-            <a href={`${BASE}/privacidade`} target="_blank" style={{ color: G, textDecoration: "none" }}>Política de Privacidade</a>
-            {" "}do Fincheck Pro
-          </span>
-        </label>
-
-        {message && <div style={{ background: "rgba(184,245,90,0.08)", border: `1px solid ${G_20}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: G, textAlign: "left" }}>{message}</div>}
-        {error && <div style={{ background: "rgba(255,80,80,0.10)", border: "1px solid rgba(255,80,80,0.22)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#ff8080", textAlign: "left" }}>{error}</div>}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <button
-            onClick={refresh}
-            disabled={busy}
-            style={{ padding: "13px", borderRadius: 12, background: G, color: "#050505", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-          >
-            {busy
-              ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-              : <>Já confirmei — entrar no app <ArrowRight size={15} /></>
-            }
-          </button>
-          <button onClick={resend} style={{ padding: "13px", borderRadius: 12, background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-            Reenviar e-mail
-          </button>
-          <button onClick={() => signOut(auth)} style={{ padding: "10px", background: "transparent", color: "rgba(255,255,255,0.22)", border: "none", cursor: "pointer", fontSize: 12 }}>
-            Sair
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function FincheckLoader() {
   const RINGS = [160, 118, 82, 48] as const;
@@ -706,28 +645,29 @@ function errorMessage(err: unknown) {
 }
 
 export default function LoginPage() {
-  const [user, setUser] = useState<User | null | undefined>(undefined);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
-      if (!u) { setUser(null); return; }
-      if (!u.emailVerified) { setUser(u); return; }
-      // Email verificado: checar se já completou onboarding
+      if (!u) { setReady(true); return; }
       try {
         const snap = await getDoc(doc(db, "users", u.uid));
-        if (snap.exists() && snap.data().acceptedTermsVersion) {
+        const data = snap.data();
+        const notVerified =
+          (snap.exists() && data?.accountVerified === false) ||
+          (!snap.exists() && !u.emailVerified);
+        if (notVerified) { window.location.replace(`${BASE}/verify`); return; }
+        if (data?.acceptedTermsVersion) {
           window.location.replace(`${BASE}/home`);
         } else {
           window.location.replace(`${BASE}/onboarding`);
         }
       } catch {
-        window.location.replace(`${BASE}/onboarding`);
+        setReady(true);
       }
     });
   }, []);
 
-  if (user === undefined) return <FincheckLoader />;
-  if (!user) return <AuthScreen />;
-  if (!user.emailVerified) return <VerifyEmail user={user} />;
-  return <FincheckLoader />;
+  if (!ready) return <FincheckLoader />;
+  return <AuthScreen />;
 }

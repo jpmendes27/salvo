@@ -1,6 +1,10 @@
 import { onRequest } from "firebase-functions/v2/https";
 import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
+import * as admin from "firebase-admin";
+
+if (!admin.apps.length) admin.initializeApp();
+const adminDb = admin.firestore();
 
 function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -377,5 +381,143 @@ export const sendInviteEmail = onRequest(
       res.set("Access-Control-Allow-Origin", "*");
       res.status(500).json({ error: msg });
     }
+  }
+);
+
+export const sendVerificationCode = onRequest(
+  {
+    cors: true,
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
+
+    const { uid, email, phone, channel } = req.body as {
+      uid?: string; email?: string; phone?: string; channel?: "whatsapp" | "email";
+    };
+    if (!uid || !email || !channel) {
+      res.status(400).json({ error: "Missing uid, email or channel" });
+      return;
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
+
+    await adminDb.doc(`emailVerifications/${uid}`).set({
+      code,
+      email,
+      phone: phone || "",
+      channel,
+      expiresAt,
+      used: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    try {
+      if (channel === "whatsapp" && phone) {
+        const apiKey = process.env.EVOLUTION_API_KEY;
+        if (!apiKey) throw new Error("EVOLUTION_API_KEY not configured");
+        const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: apiKey },
+          body: JSON.stringify({
+            number: phone,
+            options: { delay: 500 },
+            textMessage: { text: `Seu código de verificação do Fincheck Pro: *${code}*\n\nEle expira em 10 minutos. Não compartilhe com ninguém.` }
+          })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+      } else {
+        const apiKey = process.env.RESEND_API_KEY;
+        if (!apiKey) throw new Error("RESEND_API_KEY not configured");
+        const resend = new Resend(apiKey);
+        const { error } = await resend.emails.send({
+          from: "Fincheck Pro <noreply@fincheck.pro>",
+          to: [email],
+          subject: `${code} é o seu código de verificação`,
+          html: `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#09090b;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;padding:40px 20px">
+    <tr><td align="center">
+      <table width="100%" style="max-width:480px;background:#111214;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden">
+        <tr><td style="padding:36px 36px 32px;text-align:center">
+          <p style="margin:0 0 28px;font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.28)">FINCHECK PRO</p>
+          <p style="margin:0 0 16px;font-size:15px;color:rgba(255,255,255,0.6);line-height:1.6">Seu código de verificação</p>
+          <div style="background:rgba(184,245,90,0.08);border:1px solid rgba(184,245,90,0.2);border-radius:12px;padding:24px;margin:0 0 24px;display:inline-block">
+            <span style="font-size:36px;font-weight:800;letter-spacing:0.25em;color:#b8f55a;font-family:'Courier New',monospace">${code}</span>
+          </div>
+          <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.35);line-height:1.6">Expira em 10 minutos. Não compartilhe com ninguém.</p>
+        </td></tr>
+        <tr><td style="padding:16px 36px;border-top:1px solid rgba(255,255,255,0.05)">
+          <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2)">Se você não solicitou este código, ignore este email.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+        });
+        if (error) throw new Error(error.message);
+      }
+      res.json({ success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("sendVerificationCode error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
+
+export const verifyCode = onRequest(
+  {
+    cors: true,
+    secrets: [],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
+
+    const { uid, code } = req.body as { uid?: string; code?: string };
+    if (!uid || !code) { res.status(400).json({ error: "Missing uid or code" }); return; }
+
+    const snap = await adminDb.doc(`emailVerifications/${uid}`).get();
+    if (!snap.exists) { res.status(404).json({ error: "Código não encontrado" }); return; }
+
+    const data = snap.data()!;
+    if (data.used) { res.status(400).json({ error: "Código já utilizado" }); return; }
+    if ((data.expiresAt as admin.firestore.Timestamp).toDate() < new Date()) {
+      res.status(400).json({ error: "Código expirado. Solicite um novo." }); return;
+    }
+    if (data.code !== code) { res.status(400).json({ error: "Código inválido" }); return; }
+
+    await adminDb.doc(`emailVerifications/${uid}`).update({ used: true });
+    await adminDb.doc(`users/${uid}`).set(
+      { accountVerified: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+
+    res.json({ success: true });
   }
 );
