@@ -8,7 +8,6 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
-  updateDoc,
   writeBatch
 } from "firebase/firestore";
 import { ArrowRight, ChevronLeft } from "lucide-react";
@@ -94,18 +93,6 @@ function OnboardingFlow({ user }: { user: User }) {
       const phoneTrimmed = digits && !digits.startsWith("55") ? `55${digits}` : digits;
       const cpfDigits = cpf.replace(/\D/g, "");
 
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        displayName,
-        email: user.email || "",
-        ...(cpfDigits.length === 11 ? { cpf: cpfDigits } : {}),
-        ...(phoneTrimmed ? { phone: phoneTrimmed } : {}),
-        hasCreatedRealMonth: false,
-        acceptedTermsVersion: TERMS_VERSION,
-        acceptedPrivacyVersion: PRIVACY_VERSION,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-
       await addDoc(collection(db, "consents"), {
         uid: user.uid,
         email: user.email || "",
@@ -134,12 +121,22 @@ function OnboardingFlow({ user }: { user: User }) {
         createdBy: user.uid,
         joinedAt: serverTimestamp()
       });
-      await batch.commit();
-
-      await updateDoc(doc(db, "users", user.uid), {
+      // User doc no mesmo batch: garante que acceptedTermsVersion e workspaceIds
+      // são escritos atomicamente — evita a janela onde a home vê termos sem workspace
+      // e aciona ensureDefaultWorkspace (que criaria um workspace novo sem renda)
+      batch.set(doc(db, "users", user.uid), {
+        uid: user.uid,
+        displayName,
+        email: user.email || "",
+        ...(cpfDigits.length === 11 ? { cpf: cpfDigits } : {}),
+        ...(phoneTrimmed ? { phone: phoneTrimmed } : {}),
+        hasCreatedRealMonth: false,
+        acceptedTermsVersion: TERMS_VERSION,
+        acceptedPrivacyVersion: PRIVACY_VERSION,
         workspaceIds: [workspaceRef.id],
         updatedAt: serverTimestamp()
-      });
+      }, { merge: true });
+      await batch.commit();
 
       track("onboarding_complete", { usage, has_income: incomeVal > 0 });
       window.localStorage.removeItem("fincheck:pendingName");
