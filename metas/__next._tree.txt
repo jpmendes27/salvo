@@ -1,2 +1,2 @@
 :HL["/fincheck-pro/_next/static/chunks/16n0h~jop737g.css","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"metas","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"-1VFVEUmjDNW0VMcb0Kox"}
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"metas","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"LMGagbi0iiWF6cx0Aup3O"}
