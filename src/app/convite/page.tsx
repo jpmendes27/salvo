@@ -2,7 +2,6 @@
 
 import {
   createUserWithEmailAndPassword,
-  fetchSignInMethodsForEmail,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -15,7 +14,6 @@ import {
   doc,
   getDoc,
   serverTimestamp,
-  setDoc,
   Timestamp,
   updateDoc,
   writeBatch
@@ -167,6 +165,7 @@ function InviteFlow() {
   const [invite, setInvite] = useState<Invite | null>(null);
   const [inviteError, setInviteError] = useState("");
   const [inviteLoading, setInviteLoading] = useState(true);
+  const [showFlow, setShowFlow] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => setUser(u));
@@ -198,7 +197,61 @@ function InviteFlow() {
   if (!invite) return <InviteShell />;
 
   if (user) return <ExistingUserAccept user={user} invite={invite} />;
-  return <UnifiedInviteFlow invite={invite} />;
+  if (showFlow) return <InviteAcceptFlow invite={invite} />;
+  return <InviteLanding invite={invite} onAccept={() => setShowFlow(true)} />;
+}
+
+// ─── Landing ──────────────────────────────────────────────────────────────────
+
+function InviteLanding({ invite, onAccept }: { invite: Invite; onAccept: () => void }) {
+  const inviterName = invite.createdByName || "Alguém";
+
+  return (
+    <main style={{ minHeight: "100vh", background: "#050505", color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "inherit" }}>
+      <style>{`@keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <div style={{ width: "100%", maxWidth: 400, animation: "fadeUp .4s ease both" }}>
+        <div style={{ marginBottom: 36 }}><Logo /></div>
+
+        <div style={{ position: "relative", display: "inline-block", marginBottom: 20 }}>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(184,245,90,0.12)", border: "1.5px solid rgba(184,245,90,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.4rem", fontWeight: 700, color: G }}>
+            {inviterName.charAt(0).toUpperCase()}
+          </div>
+          <div style={{ position: "absolute", bottom: -2, right: -2, width: 20, height: 20, borderRadius: "50%", background: G, border: "2px solid #050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: "#050505", fontSize: "0.7rem", fontWeight: 900 }}>+</span>
+          </div>
+        </div>
+
+        <h1 style={{ margin: "0 0 10px", fontSize: "1.5rem", fontWeight: 800, color: "#fff", lineHeight: 1.25, letterSpacing: "-0.025em" }}>
+          {inviterName} quer gerir as finanças com você
+        </h1>
+        <p style={{ margin: "0 0 28px", color: "rgba(255,255,255,0.5)", fontSize: "0.9rem", lineHeight: 1.6 }}>
+          Acompanhem juntos o que entra, o que sai e o que ainda está por vir — sem surpresa no fim do mês.
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 32 }}>
+          {[
+            { icon: Eye, text: "Visão unificada de todas as finanças" },
+            { icon: Calendar, text: "Planejamento mês a mês em tempo real" },
+            { icon: TrendingUp, text: "Acompanhe tendências de gastos e economia" }
+          ].map(({ icon: Icon, text }) => (
+            <div key={text} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: "rgba(184,245,90,0.08)", border: "1px solid rgba(184,245,90,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon size={15} color={G} />
+              </div>
+              <span style={{ color: "rgba(255,255,255,0.65)", fontSize: "0.875rem" }}>{text}</span>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={onAccept}
+          style={{ width: "100%", padding: "14px", borderRadius: 12, background: G, color: "#050505", border: "none", cursor: "pointer", fontSize: "0.95rem", fontWeight: 800, letterSpacing: "-0.01em", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          Aceitar convite <ArrowRight size={16} />
+        </button>
+      </div>
+    </main>
+  );
 }
 
 // ─── Existing user accept ─────────────────────────────────────────────────────
@@ -316,20 +369,21 @@ function ExistingUserAccept({ user, invite }: { user: User; invite: Invite }) {
   );
 }
 
-// ─── Unified flow (unauthenticated users) ────────────────────────────────────
+// ─── Invite accept flow (CPF gate → login or registration) ───────────────────
 
-type InviteStep = "email" | "login" | "phone" | "verify" | "name" | "cpf" | "password";
-const NEW_USER_STEPS: InviteStep[] = ["phone", "verify", "name", "cpf", "password"];
+type InviteStep = "cpf" | "login" | "whatsapp" | "verify" | "name" | "password";
+const NEW_USER_STEPS: InviteStep[] = ["whatsapp", "verify", "name", "password"];
 
-function UnifiedInviteFlow({ invite }: { invite: Invite }) {
-  const [step, setStep] = useState<InviteStep>("email");
+function InviteAcceptFlow({ invite }: { invite: Invite }) {
+  const [step, setStep] = useState<InviteStep>("cpf");
 
+  const [cpf, setCpf] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [nome, setNome] = useState("");
-  const [cpf, setCpf] = useState("");
   const [senha, setSenha] = useState("");
   const [senhaConfirm, setSenhaConfirm] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
 
   const [tempKey] = useState(() => crypto.randomUUID());
@@ -343,25 +397,25 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
 
-  const emailRef = useRef<HTMLInputElement>(null);
+  const cpfRef = useRef<HTMLInputElement>(null);
+  const loginEmailRef = useRef<HTMLInputElement>(null);
   const loginPasswordRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
-  const cpfRef = useRef<HTMLInputElement>(null);
   const senhaRef = useRef<HTMLInputElement>(null);
   const senhaConfirmRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let t: ReturnType<typeof setTimeout>;
-    if (step === "email") t = setTimeout(() => emailRef.current?.focus(), 50);
-    else if (step === "login") t = setTimeout(() => loginPasswordRef.current?.focus(), 50);
-    else if (step === "phone") t = setTimeout(() => phoneRef.current?.focus(), 50);
+    if (step === "cpf") t = setTimeout(() => cpfRef.current?.focus(), 50);
+    else if (step === "login") t = setTimeout(() => loginEmailRef.current?.focus(), 50);
+    else if (step === "whatsapp") t = setTimeout(() => phoneRef.current?.focus(), 50);
     else if (step === "verify" && codeSent) t = setTimeout(() => codeRef.current?.focus(), 50);
     else if (step === "name") t = setTimeout(() => nomeRef.current?.focus(), 50);
-    else if (step === "cpf") t = setTimeout(() => cpfRef.current?.focus(), 50);
     else if (step === "password") t = setTimeout(() => senhaRef.current?.focus(), 50);
-    return () => clearTimeout(t as ReturnType<typeof setTimeout>);
+    return () => clearTimeout(t!);
   }, [step, codeSent]);
 
   useEffect(() => {
@@ -370,15 +424,17 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
     return () => clearTimeout(t);
   }, [countdown]);
 
-  async function handleEmailContinue() {
-    if (!email.includes("@")) { setError("Digite um e-mail válido."); return; }
+  const cpfDigits = cpf.replace(/\D/g, "");
+
+  async function handleCpfCheck() {
+    if (cpfDigits.length !== 11) { setError("Informe seu CPF completo."); return; }
     setError("");
     setBusy(true);
     try {
-      const methods = await fetchSignInMethodsForEmail(auth, email);
-      setStep(methods && methods.length > 0 ? "login" : "phone");
+      const snap = await getDoc(doc(db, "cpfIndex", cpfDigits));
+      setStep(snap.exists() ? "login" : "whatsapp");
     } catch {
-      setStep("phone");
+      setStep("whatsapp");
     } finally {
       setBusy(false);
     }
@@ -389,8 +445,8 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
     setError("");
     setBusy(true);
     try {
-      await signInWithEmailAndPassword(auth, email, loginPassword);
-      // onAuthStateChanged in InviteFlow updates user → ExistingUserAccept
+      await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      // onAuthStateChanged no InviteFlow captura e mostra ExistingUserAccept
     } catch (err) {
       setError(errMsg(err));
       setBusy(false);
@@ -456,19 +512,6 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
     }
   }
 
-  async function handleCpfNext() {
-    const cpfDigits = cpf.replace(/\D/g, "");
-    if (cpfDigits.length !== 11) { setError("Informe seu CPF completo."); return; }
-    setError("");
-    setBusy(true);
-    try {
-      const snap = await getDoc(doc(db, "cpfIndex", cpfDigits));
-      if (snap.exists()) { setError("Este CPF já está cadastrado."); setBusy(false); return; }
-    } catch { /* ignore and proceed */ }
-    setBusy(false);
-    setStep("password");
-  }
-
   async function handleFinalSubmit() {
     if (senha.length < 8) { setError("A senha precisa ter ao menos 8 caracteres."); return; }
     if (senha !== senhaConfirm) { setError("As senhas não coincidem."); return; }
@@ -481,7 +524,6 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
       const displayName = nome.trim() || email.split("@")[0];
       const phoneDigits = phone.replace(/\D/g, "");
       const phoneCC = phoneDigits.startsWith("55") ? phoneDigits : `55${phoneDigits}`;
-      const cpfDigits = cpf.replace(/\D/g, "");
 
       const batch = writeBatch(db);
 
@@ -490,7 +532,7 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
         displayName,
         email: user.email || "",
         phone: phoneCC,
-        ...(cpfDigits.length === 11 ? { cpf: cpfDigits } : {}),
+        cpf: cpfDigits,
         accountVerified: true,
         hasCreatedRealMonth: false,
         acceptedTermsVersion: TERMS_VERSION,
@@ -518,9 +560,7 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
         acceptedByEmail: user.email || ""
       });
 
-      if (cpfDigits.length === 11) {
-        batch.set(doc(db, "cpfIndex", cpfDigits), { uid: user.uid });
-      }
+      batch.set(doc(db, "cpfIndex", cpfDigits), { uid: user.uid });
 
       await batch.commit();
 
@@ -548,10 +588,9 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
 
   if (done) return <InviteSuccess />;
 
-  const inviterName = invite.createdByName || "Alguém";
   const newStepIndex = NEW_USER_STEPS.indexOf(step);
-  const cpfDigits = cpf.replace(/\D/g, "");
   const canSubmit = !busy && senha.length >= 8 && senha === senhaConfirm;
+  const Spinner = () => <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />;
 
   return (
     <main style={{ minHeight: "100vh", background: "#050505", color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "inherit" }}>
@@ -566,76 +605,53 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
       <div style={{ width: "100%", maxWidth: 420, animation: "fadeUp .4s ease both" }}>
         <div style={{ marginBottom: 32 }}><Logo /></div>
 
-        {/* ── Email step ── */}
-        {step === "email" && (
+        {/* Progress bar — apenas nos steps de novo usuário */}
+        {newStepIndex >= 0 && (
+          <div style={{ display: "flex", gap: 5, marginBottom: 32 }}>
+            {NEW_USER_STEPS.map((s, i) => (
+              <div key={s} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= newStepIndex ? G : "rgba(255,255,255,0.1)", transition: "background .3s" }} />
+            ))}
+          </div>
+        )}
+
+        {/* ── CPF (gate) ── */}
+        {step === "cpf" && (
           <div>
-            <div style={{ position: "relative", display: "inline-block", marginBottom: 20 }}>
-              <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(184,245,90,0.12)", border: "1.5px solid rgba(184,245,90,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.4rem", fontWeight: 700, color: G }}>
-                {inviterName.charAt(0).toUpperCase()}
-              </div>
-              <div style={{ position: "absolute", bottom: -2, right: -2, width: 20, height: 20, borderRadius: "50%", background: G, border: "2px solid #050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <span style={{ color: "#050505", fontSize: "0.7rem", fontWeight: 900 }}>+</span>
-              </div>
-            </div>
-
-            <h1 style={{ margin: "0 0 10px", fontSize: "1.5rem", fontWeight: 800, color: "#fff", lineHeight: 1.25, letterSpacing: "-0.025em" }}>
-              {inviterName} quer gerir as finanças com você
-            </h1>
-            <p style={{ margin: "0 0 24px", color: "rgba(255,255,255,0.5)", fontSize: "0.9rem", lineHeight: 1.6 }}>
-              Acompanhem juntos o que entra, o que sai e o que ainda está por vir — sem surpresa no fim do mês.
+            <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Qual é o seu CPF?</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              Usamos para identificar se você já tem uma conta no Fincheck Pro.
             </p>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 28 }}>
-              {[
-                { icon: Eye, text: "Visão unificada de todas as finanças" },
-                { icon: Calendar, text: "Planejamento mês a mês em tempo real" },
-                { icon: TrendingUp, text: "Acompanhe tendências de gastos e economia" }
-              ].map(({ icon: Icon, text }) => (
-                <div key={text} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: "rgba(184,245,90,0.08)", border: "1px solid rgba(184,245,90,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Icon size={15} color={G} />
-                  </div>
-                  <span style={{ color: "rgba(255,255,255,0.65)", fontSize: "0.875rem" }}>{text}</span>
-                </div>
-              ))}
-            </div>
-
-            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Qual é o seu e-mail?</p>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>CPF</p>
             <input
-              ref={emailRef}
+              ref={cpfRef}
               className="inv-input"
-              type="email"
-              placeholder="seu@email.com"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && !busy && handleEmailContinue()}
+              type="text"
+              inputMode="numeric"
+              placeholder="000.000.000-00"
+              value={cpf}
+              onChange={e => setCpf(maskCPF(e.target.value))}
+              onKeyDown={e => e.key === "Enter" && cpfDigits.length === 11 && handleCpfCheck()}
               style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 16, boxSizing: "border-box" }}
             />
-
             {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
-
             <button
-              onClick={handleEmailContinue}
-              disabled={busy}
-              style={{ width: "100%", padding: "14px", borderRadius: 12, background: G, color: "#050505", border: "none", cursor: busy ? "default" : "pointer", fontSize: "0.95rem", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              onClick={handleCpfCheck}
+              disabled={busy || cpfDigits.length !== 11}
+              style={{ width: "100%", padding: "13px", borderRadius: 12, background: cpfDigits.length === 11 && !busy ? G : "rgba(255,255,255,0.08)", border: "none", color: cpfDigits.length === 11 && !busy ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: cpfDigits.length === 11 && !busy ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
             >
-              {busy
-                ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                : <>Continuar <ArrowRight size={16} /></>}
+              {busy ? <Spinner /> : <>Continuar <ArrowRight size={15} /></>}
             </button>
           </div>
         )}
 
-        {/* ── Login step (existing account detected) ── */}
+        {/* ── Login (conta existente detectada pelo CPF) ── */}
         {step === "login" && (
           <div>
             <h1 style={{ margin: "0 0 8px", fontSize: "1.45rem", fontWeight: 800, color: "#fff", lineHeight: 1.25, letterSpacing: "-0.025em" }}>
               Bem-vindo de volta!
             </h1>
             <p style={{ margin: "0 0 24px", color: "rgba(255,255,255,0.5)", fontSize: "0.9rem", lineHeight: 1.6 }}>
-              Identificamos uma conta com o e-mail{" "}
-              <span style={{ color: "rgba(255,255,255,0.85)" }}>{email}</span>.{" "}
-              Entre para aceitar o convite de {inviterName}.
+              Identificamos uma conta com esse CPF. Entre para aceitar o convite de {invite.createdByName || "quem te convidou"}.
             </p>
 
             <button
@@ -654,11 +670,21 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
 
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
-              <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 12 }}>ou com senha</span>
+              <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 12 }}>ou com e-mail e senha</span>
               <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
             </div>
 
             <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input
+                ref={loginEmailRef}
+                className="inv-input"
+                type="email"
+                placeholder="E-mail"
+                value={loginEmail}
+                onChange={e => setLoginEmail(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && loginPasswordRef.current?.focus()}
+                style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", boxSizing: "border-box" }}
+              />
               <input
                 ref={loginPasswordRef}
                 className="inv-input"
@@ -670,306 +696,260 @@ function UnifiedInviteFlow({ invite }: { invite: Invite }) {
               />
               <button
                 type="submit"
-                disabled={busy || !loginPassword}
-                style={{ width: "100%", padding: "13px", borderRadius: 12, background: loginPassword && !busy ? G : "rgba(255,255,255,0.08)", color: loginPassword && !busy ? "#050505" : "rgba(255,255,255,0.3)", border: "none", cursor: loginPassword && !busy ? "pointer" : "default", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                disabled={busy || !loginEmail || !loginPassword}
+                style={{ width: "100%", padding: "13px", borderRadius: 12, background: loginEmail && loginPassword && !busy ? G : "rgba(255,255,255,0.08)", color: loginEmail && loginPassword && !busy ? "#050505" : "rgba(255,255,255,0.3)", border: "none", cursor: loginEmail && loginPassword && !busy ? "pointer" : "default", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
-                {busy
-                  ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                  : <>Entrar <ArrowRight size={15} /></>}
+                {busy ? <Spinner /> : <>Entrar <ArrowRight size={15} /></>}
               </button>
             </form>
 
             {error && <p style={{ fontSize: 13, color: "#ff8080", marginTop: 12 }}>{error}</p>}
 
             <button
-              onClick={() => { setStep("email"); setError(""); setLoginPassword(""); setEmail(""); }}
+              onClick={() => { setStep("cpf"); setError(""); setLoginEmail(""); setLoginPassword(""); }}
               style={{ marginTop: 20, background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}
             >
-              <ChevronLeft size={14} /> Não sou eu
+              <ChevronLeft size={14} /> Voltar
             </button>
           </div>
         )}
 
-        {/* ── New user steps ── */}
-        {newStepIndex >= 0 && (
-          <>
-            <div style={{ display: "flex", gap: 5, marginBottom: 32 }}>
-              {NEW_USER_STEPS.map((s, i) => (
-                <div key={s} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= newStepIndex ? G : "rgba(255,255,255,0.1)", transition: "background .3s" }} />
-              ))}
+        {/* ── WhatsApp + e-mail (novo usuário, passo 1) ── */}
+        {step === "whatsapp" && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 1 de 4</p>
+            <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Qual é o seu contato?</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              E-mail e WhatsApp para confirmar que é você.
+            </p>
+
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>WhatsApp (com DDD)</p>
+            <input
+              ref={phoneRef}
+              className="inv-input"
+              type="tel"
+              inputMode="tel"
+              placeholder="(21) 99999-9999"
+              value={phone}
+              onChange={e => setPhone(maskPhone(e.target.value))}
+              onKeyDown={e => e.key === "Enter" && emailRef.current?.focus()}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 12, boxSizing: "border-box" }}
+            />
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>E-mail</p>
+            <input
+              ref={emailRef}
+              className="inv-input"
+              type="email"
+              placeholder="seu@email.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && email.includes("@") && phone.replace(/\D/g, "").length >= 10) {
+                  setError(""); setStep("verify");
+                }
+              }}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 24, boxSizing: "border-box" }}
+            />
+
+            {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setStep("cpf"); setError(""); }} style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}>
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                onClick={() => {
+                  if (phone.replace(/\D/g, "").length < 10) { setError("Digite um WhatsApp válido com DDD."); return; }
+                  if (!email.includes("@")) { setError("Digite um e-mail válido."); return; }
+                  setError(""); setStep("verify");
+                }}
+                style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                Continuar <ArrowRight size={15} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Verify — seleção de canal ── */}
+        {step === "verify" && !codeSent && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 4</p>
+            <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Como quer receber o código?</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              Confirmamos que é você antes de criar a conta.
+            </p>
+
+            <button
+              className="inv-ch-btn"
+              onClick={() => !busy && sendCode("whatsapp")}
+              disabled={busy}
+              style={{ width: "100%", background: "rgba(184,245,90,0.06)", border: `1px solid ${G}`, borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", marginBottom: 10, textAlign: "left" }}
+            >
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(184,245,90,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {busy && channel === "whatsapp"
+                  ? <div style={{ width: 18, height: 18, border: "2px solid rgba(184,245,90,0.3)", borderTopColor: G, borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+                  : <MessageCircle size={20} color={G} />}
+              </div>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 2 }}>Receber pelo WhatsApp</p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{maskPhoneDisplay(phone)}</p>
+              </div>
+              <div style={{ marginLeft: "auto", background: G, color: "#050505", fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.05em" }}>RECOMENDADO</div>
+            </button>
+
+            <button
+              className="inv-ch-btn"
+              onClick={() => !busy && sendCode("email")}
+              disabled={busy}
+              style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", textAlign: "left" }}
+            >
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {busy && channel === "email"
+                  ? <div style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,0.2)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+                  : <Mail size={20} color="rgba(255,255,255,0.5)" />}
+              </div>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.75)", marginBottom: 2 }}>Receber por e-mail</p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{maskEmailDisplay(email)}</p>
+              </div>
+            </button>
+
+            {error && <p style={{ fontSize: 13, color: "#ff8080", marginTop: 14 }}>{error}</p>}
+
+            <button onClick={() => { setStep("whatsapp"); setError(""); }} style={{ marginTop: 20, background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+              <ChevronLeft size={14} /> Voltar
+            </button>
+          </div>
+        )}
+
+        {/* ── Verify — código ── */}
+        {step === "verify" && codeSent && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 4</p>
+            <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Digite o código</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              Código de 6 dígitos enviado para{" "}
+              <span style={{ color: "rgba(255,255,255,0.7)" }}>
+                {channel === "whatsapp" ? maskPhoneDisplay(phone) : maskEmailDisplay(email)}
+              </span>
+            </p>
+
+            <input
+              ref={codeRef}
+              className="inv-input"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="000000"
+              value={code}
+              onChange={e => {
+                const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                setCode(v);
+                if (v.length === 6) setTimeout(() => handleVerifyCode(), 0);
+              }}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "16px", fontSize: 28, fontWeight: 800, color: "#fff", marginBottom: 20, textAlign: "center", letterSpacing: "0.25em" }}
+            />
+
+            {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
+
+            <button
+              onClick={handleVerifyCode}
+              disabled={busy || code.length !== 6}
+              style={{ width: "100%", padding: "14px", borderRadius: 12, background: code.length === 6 ? G : "rgba(255,255,255,0.08)", border: "none", color: code.length === 6 ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: code.length === 6 ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s", marginBottom: 16 }}
+            >
+              {busy ? <Spinner /> : <>Verificar <ArrowRight size={15} /></>}
+            </button>
+
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", textAlign: "center" }}>
+              {countdown > 0
+                ? `Reenviar em ${countdown}s`
+                : <span onClick={() => { setCodeSent(false); setCode(""); setError(""); setChannel(null); }} style={{ cursor: "pointer", color: "rgba(255,255,255,0.5)", textDecoration: "underline" }}>Reenviar código</span>}
+            </p>
+          </div>
+        )}
+
+        {/* ── Nome (passo 3) ── */}
+        {step === "name" && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 3 de 4</p>
+            <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Como quer ser chamado?</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              Aparece no painel compartilhado com {invite.createdByName || "o dono da conta"}.
+            </p>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Seu nome</p>
+            <input
+              ref={nomeRef}
+              className="inv-input"
+              type="text"
+              placeholder="Ex: Ana"
+              value={nome}
+              onChange={e => setNome(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && nome.trim() && setStep("password")}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 24 }}
+            />
+            <button
+              onClick={() => nome.trim() && setStep("password")}
+              disabled={!nome.trim()}
+              style={{ width: "100%", padding: "13px", borderRadius: 12, background: nome.trim() ? G : "rgba(255,255,255,0.08)", border: "none", color: nome.trim() ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: nome.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s" }}
+            >
+              Continuar <ArrowRight size={15} />
+            </button>
+          </div>
+        )}
+
+        {/* ── Senha (passo 4) ── */}
+        {step === "password" && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 4 de 4</p>
+            <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Crie uma senha</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
+              Mínimo de 8 caracteres com letras e números.
+            </p>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Senha</p>
+            <input
+              ref={senhaRef}
+              className="inv-input"
+              type="password"
+              placeholder="Mínimo 8 caracteres"
+              value={senha}
+              onChange={e => setSenha(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && senhaConfirmRef.current?.focus()}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 12 }}
+            />
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Confirmar senha</p>
+            <input
+              ref={senhaConfirmRef}
+              className="inv-input"
+              type="password"
+              placeholder="Repita a senha"
+              value={senhaConfirm}
+              onChange={e => setSenhaConfirm(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && canSubmit && handleFinalSubmit()}
+              style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 24 }}
+            />
+
+            {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setStep("name"); setError(""); }} style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}>
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                onClick={handleFinalSubmit}
+                disabled={!canSubmit}
+                style={{ flex: 1, padding: "13px", borderRadius: 12, background: canSubmit ? G : "rgba(255,255,255,0.08)", border: "none", color: canSubmit ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: canSubmit ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s" }}
+              >
+                {busy ? <Spinner /> : <>Criar conta e entrar <ArrowRight size={15} /></>}
+              </button>
             </div>
 
-            {/* phone */}
-            {step === "phone" && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 1 de 5</p>
-                <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Qual é o seu WhatsApp?</h1>
-                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-                  Precisamos confirmar que é você antes de criar a conta.
-                </p>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>WhatsApp (com DDD)</p>
-                <input
-                  ref={phoneRef}
-                  className="inv-input"
-                  type="tel"
-                  inputMode="tel"
-                  placeholder="(21) 99999-9999"
-                  value={phone}
-                  onChange={e => setPhone(maskPhone(e.target.value))}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" && phone.replace(/\D/g, "").length >= 10) {
-                      setError("");
-                      setStep("verify");
-                    }
-                  }}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 24 }}
-                />
-
-                {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => { setStep("email"); setError(""); }} style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}>
-                    <ChevronLeft size={16} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (phone.replace(/\D/g, "").length < 10) { setError("Digite um número de WhatsApp válido com DDD."); return; }
-                      setError("");
-                      setStep("verify");
-                    }}
-                    style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                  >
-                    Continuar <ArrowRight size={15} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* verify — channel selector */}
-            {step === "verify" && !codeSent && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 5</p>
-                <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Como quer receber o código?</h1>
-                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-                  Confirmamos que é você antes de criar a conta.
-                </p>
-
-                <button
-                  className="inv-ch-btn"
-                  onClick={() => !busy && sendCode("whatsapp")}
-                  disabled={busy}
-                  style={{ width: "100%", background: "rgba(184,245,90,0.06)", border: `1px solid ${G}`, borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", marginBottom: 10, textAlign: "left" }}
-                >
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(184,245,90,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {busy && channel === "whatsapp"
-                      ? <div style={{ width: 18, height: 18, border: "2px solid rgba(184,245,90,0.3)", borderTopColor: G, borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                      : <MessageCircle size={20} color={G} />}
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 2 }}>Receber pelo WhatsApp</p>
-                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{maskPhoneDisplay(phone)}</p>
-                  </div>
-                  <div style={{ marginLeft: "auto", background: G, color: "#050505", fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.05em" }}>RECOMENDADO</div>
-                </button>
-
-                <button
-                  className="inv-ch-btn"
-                  onClick={() => !busy && sendCode("email")}
-                  disabled={busy}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", textAlign: "left" }}
-                >
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {busy && channel === "email"
-                      ? <div style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,0.2)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                      : <Mail size={20} color="rgba(255,255,255,0.5)" />}
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.75)", marginBottom: 2 }}>Receber por e-mail</p>
-                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{maskEmailDisplay(email)}</p>
-                  </div>
-                </button>
-
-                {error && <p style={{ fontSize: 13, color: "#ff8080", marginTop: 14 }}>{error}</p>}
-
-                <button onClick={() => { setStep("phone"); setError(""); }} style={{ marginTop: 20, background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
-                  <ChevronLeft size={14} /> Voltar
-                </button>
-              </div>
-            )}
-
-            {/* verify — code input */}
-            {step === "verify" && codeSent && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 2 de 5</p>
-                <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Digite o código</h1>
-                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-                  Código de 6 dígitos enviado para{" "}
-                  <span style={{ color: "rgba(255,255,255,0.7)" }}>
-                    {channel === "whatsapp" ? maskPhoneDisplay(phone) : maskEmailDisplay(email)}
-                  </span>
-                </p>
-
-                <input
-                  ref={codeRef}
-                  className="inv-input"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="000000"
-                  value={code}
-                  onChange={e => {
-                    const v = e.target.value.replace(/\D/g, "").slice(0, 6);
-                    setCode(v);
-                    if (v.length === 6) setTimeout(() => handleVerifyCode(), 0);
-                  }}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "16px", fontSize: 28, fontWeight: 800, color: "#fff", marginBottom: 20, textAlign: "center", letterSpacing: "0.25em" }}
-                />
-
-                {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
-
-                <button
-                  onClick={handleVerifyCode}
-                  disabled={busy || code.length !== 6}
-                  style={{ width: "100%", padding: "14px", borderRadius: 12, background: code.length === 6 ? G : "rgba(255,255,255,0.08)", border: "none", color: code.length === 6 ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: code.length === 6 ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s", marginBottom: 16 }}
-                >
-                  {busy
-                    ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                    : <>Verificar <ArrowRight size={15} /></>}
-                </button>
-
-                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", textAlign: "center" }}>
-                  {countdown > 0
-                    ? `Reenviar em ${countdown}s`
-                    : <span onClick={() => { setCodeSent(false); setCode(""); setError(""); setChannel(null); }} style={{ cursor: "pointer", color: "rgba(255,255,255,0.5)", textDecoration: "underline" }}>Reenviar código</span>}
-                </p>
-              </div>
-            )}
-
-            {/* name */}
-            {step === "name" && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 3 de 5</p>
-                <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Como quer ser chamado?</h1>
-                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-                  Aparece no painel compartilhado com {invite.createdByName || "o dono da conta"}.
-                </p>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Seu nome</p>
-                <input
-                  ref={nomeRef}
-                  className="inv-input"
-                  type="text"
-                  placeholder="Ex: Ana"
-                  value={nome}
-                  onChange={e => setNome(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && nome.trim() && setStep("cpf")}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 24 }}
-                />
-                <button
-                  onClick={() => nome.trim() && setStep("cpf")}
-                  disabled={!nome.trim()}
-                  style={{ width: "100%", padding: "13px", borderRadius: 12, background: nome.trim() ? G : "rgba(255,255,255,0.08)", border: "none", color: nome.trim() ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: nome.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s" }}
-                >
-                  Continuar <ArrowRight size={15} />
-                </button>
-              </div>
-            )}
-
-            {/* cpf */}
-            {step === "cpf" && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 4 de 5</p>
-                <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Qual é o seu CPF?</h1>
-                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-                  Usado para desbloquear automaticamente extratos bancários protegidos por senha.
-                </p>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>CPF</p>
-                <input
-                  ref={cpfRef}
-                  className="inv-input"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="000.000.000-00"
-                  value={cpf}
-                  onChange={e => setCpf(maskCPF(e.target.value))}
-                  onKeyDown={e => e.key === "Enter" && cpfDigits.length === 11 && handleCpfNext()}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 16 }}
-                />
-
-                {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => { setStep("name"); setError(""); }} style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}>
-                    <ChevronLeft size={16} />
-                  </button>
-                  <button
-                    onClick={handleCpfNext}
-                    disabled={busy || cpfDigits.length !== 11}
-                    style={{ flex: 1, padding: "13px", borderRadius: 12, background: cpfDigits.length === 11 && !busy ? G : "rgba(255,255,255,0.08)", border: "none", color: cpfDigits.length === 11 && !busy ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: cpfDigits.length === 11 && !busy ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                  >
-                    {busy
-                      ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                      : <>Continuar <ArrowRight size={15} /></>}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* password */}
-            {step === "password" && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 5 de 5</p>
-                <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Crie uma senha</h1>
-                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-                  Mínimo de 8 caracteres com letras e números.
-                </p>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Senha</p>
-                <input
-                  ref={senhaRef}
-                  className="inv-input"
-                  type="password"
-                  placeholder="Mínimo 8 caracteres"
-                  value={senha}
-                  onChange={e => setSenha(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && senhaConfirmRef.current?.focus()}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 12 }}
-                />
-                <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>Confirmar senha</p>
-                <input
-                  ref={senhaConfirmRef}
-                  className="inv-input"
-                  type="password"
-                  placeholder="Repita a senha"
-                  value={senhaConfirm}
-                  onChange={e => setSenhaConfirm(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && canSubmit && handleFinalSubmit()}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 24 }}
-                />
-
-                {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => { setStep("cpf"); setError(""); }} style={{ padding: "12px 16px", borderRadius: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center" }}>
-                    <ChevronLeft size={16} />
-                  </button>
-                  <button
-                    onClick={handleFinalSubmit}
-                    disabled={!canSubmit}
-                    style={{ flex: 1, padding: "13px", borderRadius: 12, background: canSubmit ? G : "rgba(255,255,255,0.08)", border: "none", color: canSubmit ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: canSubmit ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s" }}
-                  >
-                    {busy
-                      ? <div style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                      : <>Criar conta e entrar <ArrowRight size={15} /></>}
-                  </button>
-                </div>
-
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", textAlign: "center", marginTop: 16, lineHeight: 1.5 }}>
-                  Ao criar a conta, você aceita os{" "}
-                  <a href={`${BASE}/termos`} style={{ color: G, textDecoration: "none" }}>Termos</a>{" "}e a{" "}
-                  <a href={`${BASE}/privacidade`} style={{ color: G, textDecoration: "none" }}>Política de Privacidade</a>.
-                </p>
-              </div>
-            )}
-          </>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", textAlign: "center", marginTop: 16, lineHeight: 1.5 }}>
+              Ao criar a conta, você aceita os{" "}
+              <a href={`${BASE}/termos`} style={{ color: G, textDecoration: "none" }}>Termos</a>{" "}e a{" "}
+              <a href={`${BASE}/privacidade`} style={{ color: G, textDecoration: "none" }}>Política de Privacidade</a>.
+            </p>
+          </div>
         )}
       </div>
     </main>
