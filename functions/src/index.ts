@@ -1,10 +1,29 @@
 import { onRequest } from "firebase-functions/v2/https";
 import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
-import * as admin from "firebase-admin";
+import crypto from "crypto";
 
-if (!admin.apps.length) admin.initializeApp();
-const adminDb = admin.firestore();
+// ─── HMAC helpers for stateless verification (no Firestore needed) ────────────
+
+function signVerifToken(uid: string, expiry: number, code: string, secret: string): string {
+  const payload = Buffer.from(`${uid}|${expiry}`).toString("base64url");
+  const mac = crypto.createHmac("sha256", secret).update(`${payload}|${code}`).digest("hex");
+  return `${payload}.${mac}`;
+}
+
+function checkVerifToken(token: string, uid: string, enteredCode: string, secret: string): boolean {
+  try {
+    const [payload, mac] = token.split(".");
+    const decoded = Buffer.from(payload, "base64url").toString();
+    const [storedUid, expiryStr] = decoded.split("|");
+    if (storedUid !== uid) return false;
+    if (Date.now() > parseInt(expiryStr)) return false;
+    const expected = crypto.createHmac("sha256", secret).update(`${payload}|${enteredCode}`).digest("hex");
+    return crypto.timingSafeEqual(Buffer.from(mac, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false;
+  }
+}
 
 function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -387,7 +406,7 @@ export const sendInviteEmail = onRequest(
 export const sendVerificationCode = onRequest(
   {
     cors: true,
-    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY"],
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "VERIFICATION_HMAC_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB"
@@ -411,17 +430,9 @@ export const sendVerificationCode = onRequest(
     }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
-
-    await adminDb.doc(`emailVerifications/${uid}`).set({
-      code,
-      email,
-      phone: phone || "",
-      channel,
-      expiresAt,
-      used: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    const expiry = Date.now() + 10 * 60 * 1000;
+    const hmacKey = process.env.VERIFICATION_HMAC_KEY || "";
+    const verificationToken = signVerifToken(uid, expiry, code, hmacKey);
 
     try {
       if (channel === "whatsapp" && phone) {
@@ -472,7 +483,7 @@ export const sendVerificationCode = onRequest(
         });
         if (error) throw new Error(error.message);
       }
-      res.json({ success: true });
+      res.json({ success: true, verificationToken });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("sendVerificationCode error:", msg);
@@ -484,7 +495,7 @@ export const sendVerificationCode = onRequest(
 export const verifyCode = onRequest(
   {
     cors: true,
-    secrets: [],
+    secrets: ["VERIFICATION_HMAC_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB"
@@ -499,24 +510,12 @@ export const verifyCode = onRequest(
     }
     if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
 
-    const { uid, code } = req.body as { uid?: string; code?: string };
-    if (!uid || !code) { res.status(400).json({ error: "Missing uid or code" }); return; }
+    const { uid, code, token } = req.body as { uid?: string; code?: string; token?: string };
+    if (!uid || !code || !token) { res.status(400).json({ error: "Missing uid, code or token" }); return; }
 
-    const snap = await adminDb.doc(`emailVerifications/${uid}`).get();
-    if (!snap.exists) { res.status(404).json({ error: "Código não encontrado" }); return; }
-
-    const data = snap.data()!;
-    if (data.used) { res.status(400).json({ error: "Código já utilizado" }); return; }
-    if ((data.expiresAt as admin.firestore.Timestamp).toDate() < new Date()) {
-      res.status(400).json({ error: "Código expirado. Solicite um novo." }); return;
-    }
-    if (data.code !== code) { res.status(400).json({ error: "Código inválido" }); return; }
-
-    await adminDb.doc(`emailVerifications/${uid}`).update({ used: true });
-    await adminDb.doc(`users/${uid}`).set(
-      { accountVerified: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
-      { merge: true }
-    );
+    const hmacKey = process.env.VERIFICATION_HMAC_KEY || "";
+    const valid = checkVerifToken(token, uid, code, hmacKey);
+    if (!valid) { res.status(400).json({ error: "Código inválido ou expirado" }); return; }
 
     res.json({ success: true });
   }

@@ -441,6 +441,7 @@ function NewUserFlow({ invite }: { invite: Invite }) {
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
   const [countdown, setCountdown] = useState(0);
+  const [verificationToken, setVerificationToken] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -484,6 +485,8 @@ function NewUserFlow({ invite }: { invite: Invite }) {
         const j = await resp.json().catch(() => ({}));
         throw new Error(j.error || "Erro ao enviar código");
       }
+      const j = await resp.json();
+      setVerificationToken(j.verificationToken || "");
       setCodeSent(true);
       setCountdown(60);
     } catch (err) {
@@ -502,7 +505,7 @@ function NewUserFlow({ invite }: { invite: Invite }) {
       const resp = await fetch(VERIFY_CODE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: tempKey, code })
+        body: JSON.stringify({ uid: tempKey, code, token: verificationToken })
       });
       const j = await resp.json();
       if (!resp.ok) throw new Error(j.error || "Código inválido");

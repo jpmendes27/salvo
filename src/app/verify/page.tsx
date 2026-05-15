@@ -58,6 +58,7 @@ function VerifyFlow({ user, phone }: { user: User; phone: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(0);
+  const [verificationToken, setVerificationToken] = useState("");
   const codeRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -84,6 +85,8 @@ function VerifyFlow({ user, phone }: { user: User; phone: string }) {
         const j = await resp.json().catch(() => ({}));
         throw new Error(j.error || "Erro ao enviar código");
       }
+      const j = await resp.json();
+      setVerificationToken(j.verificationToken || "");
       setCodeSent(true);
       setCountdown(60);
     } catch (err) {
@@ -102,10 +105,12 @@ function VerifyFlow({ user, phone }: { user: User; phone: string }) {
       const resp = await fetch(VERIFY_CODE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: user.uid, code })
+        body: JSON.stringify({ uid: user.uid, code, token: verificationToken })
       });
       const j = await resp.json();
       if (!resp.ok) throw new Error(j.error || "Código inválido");
+      const { setDoc, serverTimestamp } = await import("firebase/firestore");
+      await setDoc(doc(db, "users", user.uid), { accountVerified: true, updatedAt: serverTimestamp() }, { merge: true });
       window.location.replace(`${BASE}/onboarding`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Código inválido");

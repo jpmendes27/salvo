@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -40,10 +7,29 @@ exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = ex
 const https_1 = require("firebase-functions/v2/https");
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const resend_1 = require("resend");
-const admin = __importStar(require("firebase-admin"));
-if (!admin.apps.length)
-    admin.initializeApp();
-const adminDb = admin.firestore();
+const crypto_1 = __importDefault(require("crypto"));
+// ─── HMAC helpers for stateless verification (no Firestore needed) ────────────
+function signVerifToken(uid, expiry, code, secret) {
+    const payload = Buffer.from(`${uid}|${expiry}`).toString("base64url");
+    const mac = crypto_1.default.createHmac("sha256", secret).update(`${payload}|${code}`).digest("hex");
+    return `${payload}.${mac}`;
+}
+function checkVerifToken(token, uid, enteredCode, secret) {
+    try {
+        const [payload, mac] = token.split(".");
+        const decoded = Buffer.from(payload, "base64url").toString();
+        const [storedUid, expiryStr] = decoded.split("|");
+        if (storedUid !== uid)
+            return false;
+        if (Date.now() > parseInt(expiryStr))
+            return false;
+        const expected = crypto_1.default.createHmac("sha256", secret).update(`${payload}|${enteredCode}`).digest("hex");
+        return crypto_1.default.timingSafeEqual(Buffer.from(mac, "hex"), Buffer.from(expected, "hex"));
+    }
+    catch {
+        return false;
+    }
+}
 function buildSystemPrompt() {
     const today = new Date().toISOString().slice(0, 10);
     return `Hoje é ${today}. Use esta data como referência para inferir o ano quando as datas do documento não tiverem ano explícito (ex: "06 MAI" → use o ano corrente ou o mais próximo cronologicamente).
@@ -361,7 +347,7 @@ exports.sendInviteEmail = (0, https_1.onRequest)({
 });
 exports.sendVerificationCode = (0, https_1.onRequest)({
     cors: true,
-    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY"],
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "VERIFICATION_HMAC_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB"
@@ -383,16 +369,9 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
         return;
     }
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
-    await adminDb.doc(`emailVerifications/${uid}`).set({
-        code,
-        email,
-        phone: phone || "",
-        channel,
-        expiresAt,
-        used: false,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    const expiry = Date.now() + 10 * 60 * 1000;
+    const hmacKey = process.env.VERIFICATION_HMAC_KEY || "";
+    const verificationToken = signVerifToken(uid, expiry, code, hmacKey);
     try {
         if (channel === "whatsapp" && phone) {
             const apiKey = process.env.EVOLUTION_API_KEY;
@@ -447,7 +426,7 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
             if (error)
                 throw new Error(error.message);
         }
-        res.json({ success: true });
+        res.json({ success: true, verificationToken });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -457,7 +436,7 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
 });
 exports.verifyCode = (0, https_1.onRequest)({
     cors: true,
-    secrets: [],
+    secrets: ["VERIFICATION_HMAC_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB"
@@ -473,31 +452,17 @@ exports.verifyCode = (0, https_1.onRequest)({
         res.status(405).json({ error: "Method Not Allowed" });
         return;
     }
-    const { uid, code } = req.body;
-    if (!uid || !code) {
-        res.status(400).json({ error: "Missing uid or code" });
+    const { uid, code, token } = req.body;
+    if (!uid || !code || !token) {
+        res.status(400).json({ error: "Missing uid, code or token" });
         return;
     }
-    const snap = await adminDb.doc(`emailVerifications/${uid}`).get();
-    if (!snap.exists) {
-        res.status(404).json({ error: "Código não encontrado" });
+    const hmacKey = process.env.VERIFICATION_HMAC_KEY || "";
+    const valid = checkVerifToken(token, uid, code, hmacKey);
+    if (!valid) {
+        res.status(400).json({ error: "Código inválido ou expirado" });
         return;
     }
-    const data = snap.data();
-    if (data.used) {
-        res.status(400).json({ error: "Código já utilizado" });
-        return;
-    }
-    if (data.expiresAt.toDate() < new Date()) {
-        res.status(400).json({ error: "Código expirado. Solicite um novo." });
-        return;
-    }
-    if (data.code !== code) {
-        res.status(400).json({ error: "Código inválido" });
-        return;
-    }
-    await adminDb.doc(`emailVerifications/${uid}`).update({ used: true });
-    await adminDb.doc(`users/${uid}`).set({ accountVerified: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     res.json({ success: true });
 });
 //# sourceMappingURL=index.js.map
