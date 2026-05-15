@@ -353,7 +353,7 @@ export const sendInviteEmail = onRequest(
 
     try {
       const { data, error } = await resend.emails.send({
-        from: `${senderName} via Fincheck Pro <convites@fincheck.pro>`,
+        from: `${senderName} via Fincheck Pro <onboarding@resend.dev>`,
         to: [to],
         subject: `${senderName} quer gerir as finanças com você`,
         html: `
@@ -453,7 +453,7 @@ export const sendVerificationCode = onRequest(
         if (!apiKey) throw new Error("RESEND_API_KEY not configured");
         const resend = new Resend(apiKey);
         const { error } = await resend.emails.send({
-          from: "Fincheck Pro <noreply@fincheck.pro>",
+          from: "Fincheck Pro <onboarding@resend.dev>",
           to: [email],
           subject: `${code} é o seu código de verificação`,
           html: `
