@@ -585,7 +585,6 @@ function NewUserFlow({ invite }: { invite: Invite }) {
 
   if (done) return <InviteSuccess />;
 
-  const canGoNext0 = email.includes("@") && phone.replace(/\D/g, "").length >= 10;
   const canSubmit = !busy && senha.length >= 8 && senha === senhaConfirm;
 
   return (
@@ -637,16 +636,20 @@ function NewUserFlow({ invite }: { invite: Invite }) {
               placeholder="(21) 99999-9999"
               value={phone}
               onChange={e => setPhone(maskPhone(e.target.value))}
-              onKeyDown={e => e.key === "Enter" && canGoNext0 && setStep(1)}
+              onKeyDown={e => { if (e.key === "Enter" && email.includes("@") && phone.replace(/\D/g, "").length >= 10) setStep(1); }}
               style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", marginBottom: 24 }}
             />
 
             {error && <div style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" }}>{error}</div>}
 
             <button
-              onClick={() => { setError(""); setStep(1); }}
-              disabled={!canGoNext0}
-              style={{ width: "100%", padding: "13px", borderRadius: 12, background: canGoNext0 ? G : "rgba(255,255,255,0.08)", border: "none", color: canGoNext0 ? "#050505" : "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 700, cursor: canGoNext0 ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s" }}
+              onClick={() => {
+                if (!email.includes("@")) { setError("Digite um e-mail válido."); return; }
+                if (phone.replace(/\D/g, "").length < 10) { setError("Digite um número de WhatsApp válido com DDD."); return; }
+                setError("");
+                setStep(1);
+              }}
+              style={{ width: "100%", padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all .15s" }}
             >
               Continuar <ArrowRight size={15} />
             </button>
