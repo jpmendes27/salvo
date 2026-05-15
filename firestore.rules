@@ -44,6 +44,13 @@ service cloud.firestore {
       allow delete: if verified() && request.auth.uid == userId;
     }
 
+    match /cpfIndex/{cpf} {
+      allow read: if verified();
+      allow create: if verified() && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+      allow delete: if verified() && resource.data.uid == request.auth.uid;
+    }
+
     match /consents/{consentId} {
       allow create: if verified() && request.resource.data.uid == request.auth.uid;
       allow read: if verified() && resource.data.uid == request.auth.uid;

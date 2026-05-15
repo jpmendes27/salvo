@@ -123,6 +123,9 @@ function OnboardingFlow({ user }: { user: User }) {
       createdBy: user.uid,
       joinedAt: serverTimestamp()
     });
+    if (cpfDigits.length === 11) {
+      batch.set(doc(db, "cpfIndex", cpfDigits), { uid: user.uid });
+    }
     // User doc no mesmo batch: acceptedTermsVersion e workspaceIds juntos,
     // evitando a janela onde loadProfile vê termos sem workspace e cria um novo sem renda
     batch.set(doc(db, "users", user.uid), {
@@ -146,6 +149,26 @@ function OnboardingFlow({ user }: { user: User }) {
     track("onboarding_complete", { usage, has_income: parseBRL(income) > 0 });
     window.localStorage.removeItem("fincheck:pendingName");
     window.location.replace(`${BASE}/home`);
+  }
+
+  async function handleStep1Next() {
+    const cpfDigits = cpf.replace(/\D/g, "");
+    if (cpfDigits.length !== 11) {
+      setError("Informe seu CPF completo.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const snap = await getDoc(doc(db, "cpfIndex", cpfDigits));
+      if (snap.exists()) {
+        setError("Este CPF já está cadastrado.");
+        setBusy(false);
+        return;
+      }
+    } catch { /* ignore and proceed */ }
+    setBusy(false);
+    setStep(2);
   }
 
   async function handleStep2Next() {
@@ -282,9 +305,10 @@ function OnboardingFlow({ user }: { user: User }) {
               placeholder="000.000.000-00"
               value={cpf}
               onChange={(e) => setCpf(maskCPF(e.target.value))}
-              onKeyDown={(e) => e.key === "Enter" && setStep(2)}
+              onKeyDown={(e) => e.key === "Enter" && !busy && handleStep1Next()}
               style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", marginBottom: 24, transition: "border-color .15s, background .15s" }}
             />
+            {error && <p style={{ fontSize: 12, color: "#ff8080", marginBottom: 12, marginTop: -16 }}>{error}</p>}
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={() => setStep(0)}
@@ -293,18 +317,13 @@ function OnboardingFlow({ user }: { user: User }) {
                 <ChevronLeft size={16} />
               </button>
               <button
-                onClick={() => setStep(2)}
-                style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                onClick={() => !busy && handleStep1Next()}
+                disabled={busy}
+                style={{ flex: 1, padding: "13px", borderRadius: 12, background: G, border: "none", color: "#050505", fontSize: 14, fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
                 Continuar <ArrowRight size={15} />
               </button>
             </div>
-            <p
-              onClick={() => setStep(2)}
-              style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", cursor: "pointer", textAlign: "center", marginTop: 14 }}
-            >
-              Pular por agora
-            </p>
           </div>
         )}
 

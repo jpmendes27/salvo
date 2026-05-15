@@ -528,13 +528,22 @@ function NewUserFlow({ invite }: { invite: Invite }) {
     setError("");
     setBusy(true);
     try {
+      const cpfDigits = cpf.replace(/\D/g, "");
+      if (cpfDigits.length === 11) {
+        const cpfSnap = await getDoc(doc(db, "cpfIndex", cpfDigits));
+        if (cpfSnap.exists()) {
+          setError("Este CPF já está cadastrado.");
+          setBusy(false);
+          return;
+        }
+      }
+
       const credential = await createUserWithEmailAndPassword(auth, email, senha);
       const { user } = credential;
 
       const displayName = nome.trim() || email.split("@")[0];
       const phoneDigits = phone.replace(/\D/g, "");
       const phoneCC = phoneDigits.startsWith("55") ? phoneDigits : `55${phoneDigits}`;
-      const cpfDigits = cpf.replace(/\D/g, "");
 
       const batch = writeBatch(db);
 
@@ -570,6 +579,9 @@ function NewUserFlow({ invite }: { invite: Invite }) {
         acceptedBy: user.uid,
         acceptedByEmail: user.email || ""
       });
+      if (cpfDigits.length === 11) {
+        batch.set(doc(db, "cpfIndex", cpfDigits), { uid: user.uid });
+      }
 
       await batch.commit();
 
