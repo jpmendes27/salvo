@@ -1,91 +1,60 @@
 ---
-name: warm-up
-description: |
-  Preparação geral do projeto - contexto completo do Sistema Onion.
-  Revisa README, estrutura de documentação e meta especificações.
-model: sonnet
-category: general
-tags: [warmup, context, preparation, overview]
-version: "3.0.0"
-updated: "2025-12-02"
+description: Carrega o contexto completo do Fincheck Pro para uma sessão nova de trabalho.
 ---
 
-# 🔥 Warm-up Geral do Projeto
+Você está iniciando uma sessão de trabalho no **Fincheck Pro**. Siga os passos abaixo para carregar o contexto completo antes de responder qualquer coisa.
 
-Preparação completa do contexto geral do Sistema Onion para sessões de trabalho.
+## 1. Leia as memórias do projeto
 
-## 🎯 Objetivo
+Leia o arquivo `/home/joao/.claude/projects/-home-joao-Documentos-fincheck-pro/memory/MEMORY.md` e todos os arquivos de memória referenciados nele.
 
-Estabelecer contexto completo do projeto incluindo:
-- Visão geral do Sistema Onion
-- Estrutura completa de documentação
-- Meta especificações (constituição do sistema)
-- Mapeamento de recursos disponíveis
+## 2. Leia os arquivos críticos de estado atual
 
-## 📋 Checklist de Preparação
+Leia os seguintes arquivos para entender o estado atual do código:
 
-### 1. README Principal
-- ✅ Revisar `README.md` na raiz do projeto
-- ✅ Entender estrutura do Sistema Onion v3.0
-- ✅ Identificar comandos e agentes principais
-- ✅ Mapear integrações disponíveis (ClickUp, Asana, Linear)
+- `firestore.rules` — regras de segurança do Firestore (permissões, estrutura de coleções)
+- `src/app/convite/page.tsx` — fluxo de aceite de convite (CPF gate → login ou cadastro)
+- `src/app/onboarding/page.tsx` — fluxo de criação de conta
+- `src/app/home/page.tsx` — página principal após login
+- `functions/src/index.ts` — Cloud Functions (verificação HMAC, envio de código)
 
-### 2. Estrutura de Documentação
-- ✅ Listar arquivos em `docs/` e manter no contexto
-- ✅ Revisar `docs/INDEX.md` (índice central)
-- ✅ Mapear estrutura:
-  - `docs/onion/` - Sistema Onion (12 arquivos)
-  - `docs/knowledge-base/` - Knowledge Bases (16 arquivos)
-  - `docs/meta-specs/` - Meta Especificações
-  - `docs/analysis/` - Análises
-  - `docs/plans/` - Planos de execução
+## 3. Entenda a stack
 
-### 3. Meta Especificações
-- ✅ Revisar `docs/meta-specs/index.md`
-- ✅ Memorizar hierarquia: Meta Specs (L0) → Domain Specs (L1) → Feature Specs (L2) → Task Specs (L3)
-- ✅ Entender arquivos planejados:
-  - `architecture.md` - Padrões arquiteturais
-  - `code-standards.md` - Padrões de código
-  - `agents.md` - Padrões para agentes
-  - `commands.md` - Padrões para comandos
-  - `integrations.md` - Padrões para integrações
-- ✅ Conhecer processo de validação via `@metaspec-gate-keeper`
+- **Frontend:** Next.js 14, App Router, `output: "export"` (estático), `basePath: /fincheck-pro`
+- **Hospedagem:** GitHub Pages (produção) + Firebase Hosting (demo)
+- **Backend:** Firebase Auth + Firestore (client SDK) + Cloud Functions v2
+- **Deploy:** push na `main` → GitHub Actions → GitHub Pages automaticamente
 
-### 4. Recursos Principais
-- ✅ Comando `/onion` - ponto de entrada inteligente
-- ✅ Agente `@onion` - orquestrador master
-- ✅ Task Manager Abstraction (ClickUp, Asana, Linear)
-- ✅ Framework EXTRACT para reuniões
+## 4. Entenda as decisões arquiteturais recentes
 
-## 🔍 Contexto a Manter
+- **Verificação de identidade:** HMAC stateless nas Cloud Functions (`sendVerificationCode` / `verifyCode`) — sem Firestore nas functions
+- **Unicidade de conta:** CPF como chave única via coleção `cpfIndex/{cpfDigits}` — não e-mail
+- **Campo `accountVerified`:** campo customizado no Firestore `users/{uid}` (não `emailVerified` do Firebase Auth) — usuários convidados nunca têm `emailVerified: true`
+- **Re-link de conta Google:** `memberEmails[]` no workspace permite que login Google com mesmo e-mail reconecte automaticamente a membros existentes
+- **Fluxo de convite:** Landing → CPF (gate) → se CPF existe: login (Google ou e-mail/senha) → se CPF novo: WhatsApp + e-mail → verificação → nome → senha
 
-### Documentação Essencial
-- `README.md` - Visão geral completa
-- `docs/INDEX.md` - Hub de navegação
-- `docs/onion/commands-guide.md` - Todos os comandos
-- `docs/onion/agents-reference.md` - Todos os agentes
-- `docs/meta-specs/index.md` - Meta especificações
+## 5. Entenda a estrutura de workspaces
 
-### Estrutura de Comandos
-- 73 comandos em 8 categorias
-- 45 agentes especializados em 9 categorias
-- Knowledge Bases estruturadas para IA
+- Workspace tem `members/{uid}` com `role: "owner" | "editor"` e `status: "active" | "left"`
+- Editors podem ver "Pessoas", renomear workspace, criar/editar transações
+- Apenas owners podem excluir membros, excluir workspace, convidar
 
-## 💡 Quando Usar Este Warm-up
+## 6. Output esperado
 
-- ✅ Primeira vez no projeto
-- ✅ Retorno após período ausente
-- ✅ Mudança de contexto de trabalho
-- ✅ Necessidade de visão geral completa
+Após ler tudo, responda com um briefing no seguinte formato:
 
-## 🔗 Próximos Passos
+---
 
-Após este warm-up geral, use warm-ups específicos:
-- `/product/warm-up` - Para trabalho de produto
-- `/engineer/warm-up` - Para trabalho de engenharia
+**Fincheck Pro — pronto para trabalhar**
 
-## ⚠️ Notas
+**Stack:** (resumo em uma linha)
 
-- Este warm-up fornece contexto geral, não técnico profundo
-- Para trabalho específico, use warm-ups de categoria
-- Mantenha lista de arquivos `docs/` no contexto para referência rápida
+**Último trabalho:** (o que foi feito na sessão anterior, com base nas memórias)
+
+**Estado atual:** (o que está funcionando, o que está pendente)
+
+**Arquivos mais relevantes agora:** (lista dos arquivos que provavelmente serão tocados)
+
+---
+
+Depois do briefing, pergunte: "No que vamos trabalhar hoje?"
