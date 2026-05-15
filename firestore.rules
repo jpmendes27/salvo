@@ -68,7 +68,7 @@ service cloud.firestore {
       allow read: if isMember(workspaceId);
       allow create: if verified()
         && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isOwner(workspaceId);
+      allow update: if isMember(workspaceId);
       allow delete: if isOwner(workspaceId)
         && resource.data.confirmDelete == true;
 

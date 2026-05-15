@@ -36,11 +36,11 @@ function TopCategoriesFlow() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!authLoading && (!user || !user.emailVerified)) router.replace("/");
+    if (!authLoading && !user) router.replace("/");
   }, [authLoading, user, router]);
 
   if (authLoading) return <Shell text="Carregando..." />;
-  if (!user || !user.emailVerified) return null;
+  if (!user) return null;
 
   const workspaceId = typeof window !== "undefined" ? localStorage.getItem("fincheck_workspace") ?? "" : "";
   if (!workspaceId) { router.replace("/"); return null; }

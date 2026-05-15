@@ -54,7 +54,6 @@ function MembersPage() {
     }
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (u && !u.emailVerified) window.location.replace(`${BASE}/login`);
       if (!u) window.location.replace(`${BASE}/login`);
     });
   }, []);
