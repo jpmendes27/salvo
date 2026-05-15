@@ -18,7 +18,8 @@ import {
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { auth, db, googleProvider } from "@/lib/firebase";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { collectionGroup, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
+import { TERMS_VERSION, PRIVACY_VERSION } from "@/lib/legal";
 
 function maskPhone(value: string): string {
   const d = value.replace(/\D/g, "").slice(0, 11);
@@ -660,6 +661,66 @@ export default function LoginPage() {
         if (data?.acceptedTermsVersion) {
           window.location.replace(`${BASE}/home`);
         } else {
+          // For email-verified users (e.g. Google login) with no user doc,
+          // check if this email already has active workspace memberships under a different uid.
+          if (u.emailVerified && u.email) {
+            try {
+              const memberQ = query(
+                collectionGroup(db, "members"),
+                where("email", "==", u.email),
+                where("status", "==", "active")
+              );
+              const membersSnap = await getDocs(memberQ);
+              if (!membersSnap.empty) {
+                const workspaceIds = [...new Set(membersSnap.docs.map(d => d.ref.parent.parent!.id))];
+                const batch = writeBatch(db);
+                batch.set(doc(db, "users", u.uid), {
+                  uid: u.uid,
+                  displayName: u.displayName || u.email.split("@")[0],
+                  email: u.email,
+                  accountVerified: true,
+                  acceptedTermsVersion: TERMS_VERSION,
+                  acceptedPrivacyVersion: PRIVACY_VERSION,
+                  workspaceIds,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp()
+                });
+                for (const mDoc of membersSnap.docs) {
+                  const wsId = mDoc.ref.parent.parent!.id;
+                  const md = mDoc.data();
+                  batch.set(doc(db, "workspaces", wsId, "members", u.uid), {
+                    uid: u.uid,
+                    role: md.role,
+                    status: "active",
+                    displayName: u.displayName || md.displayName || u.email.split("@")[0],
+                    email: u.email,
+                    ...(md.inviteId ? { inviteId: md.inviteId } : {}),
+                    createdBy: md.createdBy ?? u.uid,
+                    joinedAt: serverTimestamp()
+                  });
+                }
+                try {
+                  await batch.commit();
+                } catch {
+                  // memberEmails not populated yet — create just the user doc.
+                  // Home page will retry member doc creation once memberEmails is available.
+                  await setDoc(doc(db, "users", u.uid), {
+                    uid: u.uid,
+                    displayName: u.displayName || u.email.split("@")[0],
+                    email: u.email,
+                    accountVerified: true,
+                    acceptedTermsVersion: TERMS_VERSION,
+                    acceptedPrivacyVersion: PRIVACY_VERSION,
+                    workspaceIds,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                  });
+                }
+                window.location.replace(`${BASE}/home`);
+                return;
+              }
+            } catch { /* fall through to onboarding */ }
+          }
           window.location.replace(`${BASE}/onboarding`);
         }
       } catch {

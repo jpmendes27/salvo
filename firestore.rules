@@ -10,6 +10,12 @@ service cloud.firestore {
       return signedIn();
     }
 
+    // Allow any authenticated user to read member docs that contain their own email.
+    // Used to detect existing workspace memberships during Google account re-linking.
+    match /{path=**}/members/{memberId} {
+      allow read: if verified() && resource.data.email == request.auth.token.email;
+    }
+
     function memberPath(workspaceId) {
       return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid);
     }
@@ -91,6 +97,17 @@ service cloud.firestore {
             && request.resource.data.status == "active"
             && request.resource.data.inviteId is string
             && inviteIsValid(workspaceId, request.resource.data.inviteId)
+          )
+          ||
+          (
+            // Account re-linking: Google login with same email as existing member.
+            // Allowed when the workspace's memberEmails array includes the requester's email.
+            request.auth.uid == memberId
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.status == "active"
+            && request.resource.data.email == request.auth.token.email
+            && request.auth.token.email != null
+            && request.auth.token.email in get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.memberEmails
           )
         );
         allow update: if isOwner(workspaceId)

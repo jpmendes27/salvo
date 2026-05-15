@@ -16,6 +16,7 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  updateDoc,
   writeBatch
 } from "firebase/firestore";
 import {
@@ -354,6 +355,10 @@ function ExistingUserAccept({ user, invite }: { user: User; invite: Invite }) {
       }, { merge: true });
       await batch.commit();
 
+      await updateDoc(doc(db, "workspaces", invite.workspaceId), {
+        memberEmails: arrayUnion(user.email || "")
+      }).catch(() => {});
+
       await addDoc(collection(db, "consents"), {
         uid: user.uid,
         email: user.email || "",
@@ -567,6 +572,10 @@ function NewUserFlow({ invite }: { invite: Invite }) {
       });
 
       await batch.commit();
+
+      await updateDoc(doc(db, "workspaces", invite.workspaceId), {
+        memberEmails: arrayUnion(user.email || "")
+      }).catch(() => {});
 
       await addDoc(collection(db, "consents"), {
         uid: user.uid,

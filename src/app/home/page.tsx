@@ -13,6 +13,7 @@ import {
 } from "firebase/auth";
 import {
   addDoc,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -225,6 +226,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   );
   const [loading, setLoading] = useState(!cachedProfile);
   const [repairingWorkspace, setRepairingWorkspace] = useState(false);
+  const [workspaceInaccessible, setWorkspaceInaccessible] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -280,6 +282,11 @@ function AuthenticatedApp({ user }: { user: User }) {
           const member = { id: memberSnap.id, workspaceId: wsId, ...memberSnap.data() } as Member;
           if (member.status !== "active") return;
 
+          // Keep memberEmails in sync so Google account re-linking works later.
+          if (user.email) {
+            updateDoc(doc(db, "workspaces", wsId), { memberEmails: arrayUnion(user.email) }).catch(() => {});
+          }
+
           getDoc(doc(db, "workspaces", wsId))
             .then((wsSnap) => {
               if (!wsSnap.exists()) return;
@@ -311,25 +318,14 @@ function AuthenticatedApp({ user }: { user: User }) {
   useEffect(() => {
     if (!profile?.acceptedTermsVersion || !profile.workspaceIds?.length || loading || workspaces.length || repairingWorkspace) return;
     const timer = window.setTimeout(() => {
-      setRepairingWorkspace(true);
-      const displayName = profile.displayName || user.displayName || user.email?.split("@")[0] || "Voce";
-      ensureDefaultWorkspace(user, displayName)
-        .then((workspaceId) => {
-          setError("");
-          setProfile({
-            ...profile,
-            workspaceIds: [workspaceId]
-          });
-          setActiveWorkspaceId(workspaceId);
-        })
-        .catch((err) => {
-          setError(`Nao foi possivel recriar seu workspace: ${errorMessage(err)}`);
-        })
-        .finally(() => setRepairingWorkspace(false));
+      // workspaceIds exist but no workspace loaded — do NOT auto-create a workspace.
+      // This happens when a Google-linked account still needs its member doc created
+      // (requires the original account to log in first to populate memberEmails).
+      setWorkspaceInaccessible(true);
     }, 4000);
 
     return () => window.clearTimeout(timer);
-  }, [loading, profile, repairingWorkspace, setProfile, user, workspaces.length]);
+  }, [loading, profile, repairingWorkspace, user, workspaces.length]);
 
   useEffect(() => {
     if (!workspaces.length) return;
@@ -402,10 +398,25 @@ function AuthenticatedApp({ user }: { user: User }) {
   }
 
   if (!workspaces.length) {
+    if (workspaceInaccessible) {
+      return (
+        <div style={{ minHeight: "100vh", background: "#050505", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, gap: 16, textAlign: "center" }}>
+          <p style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>Workspace inacessível</p>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", maxWidth: 320, lineHeight: 1.6 }}>
+            Não foi possível carregar seu workspace com este login do Google.<br />
+            <strong style={{ color: "rgba(255,255,255,0.7)" }}>Peça para quem te convidou abrir o app uma vez</strong>, depois tente entrar de novo.
+          </p>
+          <button
+            onClick={() => { signOut(auth); window.location.replace(`${BASE}/login`); }}
+            style={{ marginTop: 8, padding: "10px 24px", borderRadius: 10, background: "#b8f55a", border: "none", color: "#050505", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+          >
+            Sair e tentar de novo
+          </button>
+        </div>
+      );
+    }
     return (
-      <CenteredStatus
-        text={repairingWorkspace ? "Recriando seu workspace..." : "Criando seu primeiro workspace..."}
-      />
+      <CenteredStatus text="Carregando workspace..." />
     );
   }
 

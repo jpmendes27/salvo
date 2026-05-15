@@ -111,6 +111,7 @@ function OnboardingFlow({ user }: { user: User }) {
       createdBy: user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      memberEmails: [user.email || ""],
       ...(incomeVal > 0 ? { monthlyIncome: incomeVal } : {})
     });
     batch.set(doc(db, "workspaces", wsRef.id, "members", user.uid), {
