@@ -50,7 +50,10 @@ export default function OnboardingPage() {
       const snap = await getDoc(doc(db, "users", u.uid));
       const data = snap.data();
       if (!snap.exists() || data?.accountVerified === false) {
-        window.location.replace(`${BASE}/verify`); return;
+        // Google users (emailVerified=true) já tiveram identidade confirmada pelo Google
+        if (!u.emailVerified) {
+          window.location.replace(`${BASE}/verify`); return;
+        }
       }
       if (data?.acceptedTermsVersion) {
         window.location.replace(`${BASE}/home`); return;
@@ -133,6 +136,7 @@ function OnboardingFlow({ user }: { user: User }) {
       displayName,
       email: user.email || "",
       ...(cpfDigits.length === 11 ? { cpf: cpfDigits } : {}),
+      accountVerified: true,
       hasCreatedRealMonth: false,
       acceptedTermsVersion: TERMS_VERSION,
       acceptedPrivacyVersion: PRIVACY_VERSION,

@@ -24,7 +24,6 @@ import {
   Check,
   ChevronLeft,
   Eye,
-  Mail,
   MessageCircle,
   TrendingUp
 } from "lucide-react";
@@ -796,23 +795,6 @@ function InviteAcceptFlow({ invite }: { invite: Invite }) {
                 <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{maskPhoneDisplay(phone)}</p>
               </div>
               <div style={{ marginLeft: "auto", background: G, color: "#050505", fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.05em" }}>RECOMENDADO</div>
-            </button>
-
-            <button
-              className="inv-ch-btn"
-              onClick={() => !busy && sendCode("email")}
-              disabled={busy}
-              style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", textAlign: "left" }}
-            >
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {busy && channel === "email"
-                  ? <div style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,0.2)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                  : <Mail size={20} color="rgba(255,255,255,0.5)" />}
-              </div>
-              <div>
-                <p style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.75)", marginBottom: 2 }}>Receber por e-mail</p>
-                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{maskEmailDisplay(email)}</p>
-              </div>
             </button>
 
             {error && <p style={{ fontSize: 13, color: "#ff8080", marginTop: 14 }}>{error}</p>}
