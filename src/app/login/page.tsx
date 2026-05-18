@@ -2,6 +2,7 @@
 
 import {
   createUserWithEmailAndPassword,
+  getRedirectResult,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -647,6 +648,11 @@ function errorMessage(err: unknown) {
 
 export default function LoginPage() {
   const [ready, setReady] = useState(false);
+
+  // Handle redirect result from signInWithPopup mobile fallback
+  useEffect(() => {
+    getRedirectResult(auth).catch(() => {/* ignore stale redirect errors */});
+  }, []);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {

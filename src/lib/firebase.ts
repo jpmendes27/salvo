@@ -1,5 +1,11 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import {
+  GoogleAuthProvider,
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
+  indexedDBLocalPersistence,
+  initializeAuth
+} from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const e = (v: string | undefined, fallback: string) => (v || fallback).trim();
@@ -13,8 +19,17 @@ const firebaseConfig = {
   appId: e(process.env.NEXT_PUBLIC_FIREBASE_APP_ID, "1:000000000000:web:demo")
 };
 
-export const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+
+// IndexedDB persistence avoids Chrome Privacy Sandbox storage partitioning
+// that breaks signInWithPopup/Redirect flows on mobile (sessionStorage gets
+// cleared during cross-site navigations in the OAuth popup).
+export const auth = initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+  popupRedirectResolver: browserPopupRedirectResolver,
+});
+
+export { app };
 export const db = getFirestore(app);
 
 export const googleProvider = new GoogleAuthProvider();

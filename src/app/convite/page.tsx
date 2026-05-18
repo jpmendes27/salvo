@@ -2,6 +2,7 @@
 
 import {
   createUserWithEmailAndPassword,
+  getRedirectResult,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -165,6 +166,10 @@ function InviteFlow() {
   const [inviteError, setInviteError] = useState("");
   const [inviteLoading, setInviteLoading] = useState(true);
   const [showFlow, setShowFlow] = useState(false);
+
+  useEffect(() => {
+    getRedirectResult(auth).catch(() => {/* ignore stale redirect errors */});
+  }, []);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => setUser(u));
