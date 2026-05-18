@@ -302,11 +302,21 @@ function AuthenticatedApp({ user }: { user: User }) {
               setActiveWorkspaceId((current) => current || wsId);
             })
             .catch((err) => {
-              setError(`Nao foi possivel abrir o workspace: ${errorMessage(err)}`);
+              const code = (err as { code?: string }).code;
+              if (code === "permission-denied") {
+                setWorkspaceInaccessible(true);
+              } else {
+                setError(`Nao foi possivel abrir o workspace: ${errorMessage(err)}`);
+              }
             });
         },
         (err) => {
-          setError(`Nao foi possivel validar seu acesso ao workspace: ${errorMessage(err)}`);
+          const code = (err as { code?: string }).code;
+          if (code === "permission-denied") {
+            setWorkspaceInaccessible(true);
+          } else {
+            setError(`Nao foi possivel validar seu acesso ao workspace: ${errorMessage(err)}`);
+          }
         }
       )
     );
@@ -403,8 +413,8 @@ function AuthenticatedApp({ user }: { user: User }) {
         <div style={{ minHeight: "100vh", background: "#050505", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, gap: 16, textAlign: "center" }}>
           <p style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>Workspace inacessível</p>
           <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", maxWidth: 320, lineHeight: 1.6 }}>
-            Não foi possível carregar seu workspace com este login do Google.<br />
-            <strong style={{ color: "rgba(255,255,255,0.7)" }}>Peça para quem te convidou abrir o app uma vez</strong>, depois tente entrar de novo.
+            Não foi possível carregar seu workspace com este login do Google.<br /><br />
+            <strong style={{ color: "rgba(255,255,255,0.7)" }}>Entre uma vez pelo email e senha</strong> para sincronizar sua conta Google com o workspace, depois volte e entre com Google.
           </p>
           <button
             onClick={() => { signOut(auth); window.location.replace(`${BASE}/login`); }}
