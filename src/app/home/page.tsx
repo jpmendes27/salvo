@@ -771,20 +771,62 @@ function WorkspaceApp({
                 profile.cpf,
               ]
             : [];
-          const pdfText = await extractPDFText(file, undefined, pdfCandidates);
-          const { transactions: bankTxs, sourceLabel: bankLabel } = parseBankText(pdfText, { filename: file.name });
 
-          if (bankTxs.length >= 3) {
-            bankTxs.forEach((t) =>
-              rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
-            );
+          // Try client-side pdfjs first; on mobile it may throw out-of-memory
+          let pdfText: string | null = null;
+          try {
+            pdfText = await extractPDFText(file, undefined, pdfCandidates);
+          } catch {
+            // pdfjs failed — will fall back to Cloud Function with raw PDF below
+          }
+
+          if (pdfText !== null) {
+            const { transactions: bankTxs, sourceLabel: bankLabel } = parseBankText(pdfText, { filename: file.name });
+
+            if (bankTxs.length >= 3) {
+              bankTxs.forEach((t) =>
+                rows.push({ ...t, _id: crypto.randomUUID(), selected: true })
+              );
+            } else {
+              const resp = await fetch(PARSE_FUNCTION_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  textData: pdfText,
+                  mimeType: "text/plain",
+                  filename: file.name
+                })
+              });
+              if (!resp.ok) {
+                const errJson = await resp.json().catch(() => ({}));
+                throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+              }
+              const data = await resp.json();
+              const claudeLabel: string = data.sourceLabel || bankLabel;
+              (data.transactions ?? []).forEach((t: ParsedTransaction) => {
+                if (Math.abs(t.amount ?? 0) === 0) return;
+                if (isStopDescription(t.description ?? "")) return;
+                const type = t.type ?? (t.amount < 0 ? "expense" : "income");
+                rows.push({
+                  ...t,
+                  type,
+                  amount: Math.abs(t.amount ?? 0),
+                  category: categorizeTransaction(t.description ?? "", type),
+                  sourceLabel: claudeLabel,
+                  _id: crypto.randomUUID(),
+                  selected: true
+                });
+              });
+            }
           } else {
+            // pdfjs failed (e.g. out-of-memory on mobile) — send raw PDF to Cloud Function
+            const base64 = await fileToBase64(file);
             const resp = await fetch(PARSE_FUNCTION_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                textData: pdfText,
-                mimeType: "text/plain",
+                fileData: base64,
+                mimeType: "application/pdf",
                 filename: file.name
               })
             });
@@ -793,7 +835,7 @@ function WorkspaceApp({
               throw new Error(errJson.error || `Erro ao processar ${file.name}`);
             }
             const data = await resp.json();
-            const claudeLabel: string = data.sourceLabel || bankLabel;
+            const claudeLabel: string = data.sourceLabel || sourceLabelFromFilename(file.name);
             (data.transactions ?? []).forEach((t: ParsedTransaction) => {
               if (Math.abs(t.amount ?? 0) === 0) return;
               if (isStopDescription(t.description ?? "")) return;
