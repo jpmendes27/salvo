@@ -665,29 +665,29 @@ export default function LoginPage() {
           (snap.exists() && data?.accountVerified === false) ||
           (!snap.exists() && !u.emailVerified);
         if (notVerified) { window.location.replace(`${BASE}/verify`); return; }
+
+        // Google users (emailVerified): always run re-link so member docs are guaranteed
+        // to exist for this UID. Idempotent — safe to call even when already linked.
+        if (u.emailVerified) {
+          try {
+            const fns = getFunctions(app, "us-central1");
+            const relink = httpsCallable<unknown, { linked: boolean; workspaceIds: string[] }>(fns, "relinkGoogleAccount");
+            const result = await relink();
+            if (result.data.linked) {
+              await setDoc(doc(db, "users", u.uid), {
+                acceptedTermsVersion: TERMS_VERSION,
+                acceptedPrivacyVersion: PRIVACY_VERSION,
+                updatedAt: serverTimestamp()
+              }, { merge: true });
+              window.location.replace(`${BASE}/home`);
+              return;
+            }
+          } catch { /* fall through */ }
+        }
+
         if (data?.acceptedTermsVersion) {
           window.location.replace(`${BASE}/home`);
         } else {
-          // Google (or other verified) user with no completed account.
-          // Call server-side function to re-link any existing workspace memberships
-          // found by email — Admin SDK bypasses Firestore rules, no memberEmails needed.
-          if (u.emailVerified) {
-            try {
-              const fns = getFunctions(app, "us-central1");
-              const relink = httpsCallable<unknown, { linked: boolean; workspaceIds: string[] }>(fns, "relinkGoogleAccount");
-              const result = await relink();
-              if (result.data.linked) {
-                // Function already wrote workspaceIds to user doc — just add terms/privacy
-                await setDoc(doc(db, "users", u.uid), {
-                  acceptedTermsVersion: TERMS_VERSION,
-                  acceptedPrivacyVersion: PRIVACY_VERSION,
-                  updatedAt: serverTimestamp()
-                }, { merge: true });
-                window.location.replace(`${BASE}/home`);
-                return;
-              }
-            } catch { /* fall through to onboarding */ }
-          }
           window.location.replace(`${BASE}/onboarding`);
         }
       } catch {
