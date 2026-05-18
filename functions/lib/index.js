@@ -1,13 +1,48 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = void 0;
+exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const resend_1 = require("resend");
 const crypto_1 = __importDefault(require("crypto"));
+const admin = __importStar(require("firebase-admin"));
+admin.initializeApp();
 // ─── HMAC helpers for stateless verification (no Firestore needed) ────────────
 function signVerifToken(uid, expiry, code, secret) {
     const payload = Buffer.from(`${uid}|${expiry}`).toString("base64url");
@@ -464,5 +499,74 @@ exports.verifyCode = (0, https_1.onRequest)({
         return;
     }
     res.json({ success: true });
+});
+// Links a Google account to existing workspace memberships found by email.
+// Runs server-side with Admin SDK to bypass Firestore rules — no memberEmails needed.
+exports.relinkGoogleAccount = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    const uid = request.auth?.uid;
+    const email = request.auth?.token.email;
+    if (!uid || !email) {
+        throw new Error("Unauthenticated");
+    }
+    const db = admin.firestore();
+    const FieldValue = admin.firestore.FieldValue;
+    // Find all active member docs with this email (may belong to a different uid)
+    const membersSnap = await db
+        .collectionGroup("members")
+        .where("email", "==", email)
+        .where("status", "==", "active")
+        .get();
+    if (membersSnap.empty) {
+        return { linked: false, workspaceIds: [] };
+    }
+    const batch = db.batch();
+    const workspaceIds = [];
+    for (const mDoc of membersSnap.docs) {
+        const wsId = mDoc.ref.parent.parent.id;
+        const md = mDoc.data();
+        workspaceIds.push(wsId);
+        if (mDoc.id === uid)
+            continue; // already linked to this uid
+        // Create member doc under the Google uid
+        const newMemberRef = db.doc(`workspaces/${wsId}/members/${uid}`);
+        batch.set(newMemberRef, {
+            uid,
+            role: md.role,
+            status: "active",
+            displayName: md.displayName || email.split("@")[0],
+            email,
+            ...(md.inviteId ? { inviteId: md.inviteId } : {}),
+            createdBy: md.createdBy ?? uid,
+            joinedAt: FieldValue.serverTimestamp()
+        });
+        // Keep memberEmails in sync
+        batch.update(db.doc(`workspaces/${wsId}`), {
+            memberEmails: FieldValue.arrayUnion(email)
+        });
+    }
+    // Update (or create) the user doc
+    const userRef = db.doc(`users/${uid}`);
+    const userSnap = await userRef.get();
+    const uniqueIds = [...new Set(workspaceIds)];
+    if (userSnap.exists) {
+        batch.update(userRef, {
+            workspaceIds: uniqueIds,
+            accountVerified: true,
+            updatedAt: FieldValue.serverTimestamp()
+        });
+    }
+    else {
+        batch.set(userRef, {
+            uid,
+            email,
+            displayName: request.auth?.token.name || email.split("@")[0],
+            accountVerified: true,
+            workspaceIds: uniqueIds,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+        });
+    }
+    await batch.commit();
+    return { linked: true, workspaceIds: uniqueIds };
 });
 //# sourceMappingURL=index.js.map

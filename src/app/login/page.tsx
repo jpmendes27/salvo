@@ -18,8 +18,9 @@ import {
   Users
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
-import { auth, db, googleProvider } from "@/lib/firebase";
-import { collectionGroup, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
+import { auth, db, googleProvider, app } from "@/lib/firebase";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { TERMS_VERSION, PRIVACY_VERSION } from "@/lib/legal";
 
 function maskPhone(value: string): string {
@@ -667,61 +668,21 @@ export default function LoginPage() {
         if (data?.acceptedTermsVersion) {
           window.location.replace(`${BASE}/home`);
         } else {
-          // For email-verified users (e.g. Google login) with no user doc,
-          // check if this email already has active workspace memberships under a different uid.
-          if (u.emailVerified && u.email) {
+          // Google (or other verified) user with no completed account.
+          // Call server-side function to re-link any existing workspace memberships
+          // found by email — Admin SDK bypasses Firestore rules, no memberEmails needed.
+          if (u.emailVerified) {
             try {
-              const memberQ = query(
-                collectionGroup(db, "members"),
-                where("email", "==", u.email),
-                where("status", "==", "active")
-              );
-              const membersSnap = await getDocs(memberQ);
-              if (!membersSnap.empty) {
-                const workspaceIds = [...new Set(membersSnap.docs.map(d => d.ref.parent.parent!.id))];
-                const batch = writeBatch(db);
-                batch.set(doc(db, "users", u.uid), {
-                  uid: u.uid,
-                  displayName: u.displayName || u.email.split("@")[0],
-                  email: u.email,
-                  accountVerified: true,
+              const fns = getFunctions(app, "us-central1");
+              const relink = httpsCallable<unknown, { linked: boolean; workspaceIds: string[] }>(fns, "relinkGoogleAccount");
+              const result = await relink();
+              if (result.data.linked) {
+                // Function already wrote workspaceIds to user doc — just add terms/privacy
+                await setDoc(doc(db, "users", u.uid), {
                   acceptedTermsVersion: TERMS_VERSION,
                   acceptedPrivacyVersion: PRIVACY_VERSION,
-                  workspaceIds,
-                  createdAt: serverTimestamp(),
                   updatedAt: serverTimestamp()
-                });
-                for (const mDoc of membersSnap.docs) {
-                  const wsId = mDoc.ref.parent.parent!.id;
-                  const md = mDoc.data();
-                  batch.set(doc(db, "workspaces", wsId, "members", u.uid), {
-                    uid: u.uid,
-                    role: md.role,
-                    status: "active",
-                    displayName: u.displayName || md.displayName || u.email.split("@")[0],
-                    email: u.email,
-                    ...(md.inviteId ? { inviteId: md.inviteId } : {}),
-                    createdBy: md.createdBy ?? u.uid,
-                    joinedAt: serverTimestamp()
-                  });
-                }
-                try {
-                  await batch.commit();
-                } catch {
-                  // memberEmails not populated yet — create just the user doc.
-                  // Home page will retry member doc creation once memberEmails is available.
-                  await setDoc(doc(db, "users", u.uid), {
-                    uid: u.uid,
-                    displayName: u.displayName || u.email.split("@")[0],
-                    email: u.email,
-                    accountVerified: true,
-                    acceptedTermsVersion: TERMS_VERSION,
-                    acceptedPrivacyVersion: PRIVACY_VERSION,
-                    workspaceIds,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp()
-                  });
-                }
+                }, { merge: true });
                 window.location.replace(`${BASE}/home`);
                 return;
               }

@@ -1,7 +1,10 @@
-import { onRequest } from "firebase-functions/v2/https";
+import { onCall, onRequest } from "firebase-functions/v2/https";
 import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
 import crypto from "crypto";
+import * as admin from "firebase-admin";
+
+admin.initializeApp();
 
 // ─── HMAC helpers for stateless verification (no Firestore needed) ────────────
 
@@ -518,5 +521,88 @@ export const verifyCode = onRequest(
     if (!valid) { res.status(400).json({ error: "Código inválido ou expirado" }); return; }
 
     res.json({ success: true });
+  }
+);
+
+// Links a Google account to existing workspace memberships found by email.
+// Runs server-side with Admin SDK to bypass Firestore rules — no memberEmails needed.
+export const relinkGoogleAccount = onCall(
+  { maxInstances: 10 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const email = request.auth?.token.email as string | undefined;
+
+    if (!uid || !email) {
+      throw new Error("Unauthenticated");
+    }
+
+    const db = admin.firestore();
+    const FieldValue = admin.firestore.FieldValue;
+
+    // Find all active member docs with this email (may belong to a different uid)
+    const membersSnap = await db
+      .collectionGroup("members")
+      .where("email", "==", email)
+      .where("status", "==", "active")
+      .get();
+
+    if (membersSnap.empty) {
+      return { linked: false, workspaceIds: [] };
+    }
+
+    const batch = db.batch();
+    const workspaceIds: string[] = [];
+
+    for (const mDoc of membersSnap.docs) {
+      const wsId = mDoc.ref.parent.parent!.id;
+      const md = mDoc.data();
+      workspaceIds.push(wsId);
+
+      if (mDoc.id === uid) continue; // already linked to this uid
+
+      // Create member doc under the Google uid
+      const newMemberRef = db.doc(`workspaces/${wsId}/members/${uid}`);
+      batch.set(newMemberRef, {
+        uid,
+        role: md.role,
+        status: "active",
+        displayName: md.displayName || email.split("@")[0],
+        email,
+        ...(md.inviteId ? { inviteId: md.inviteId } : {}),
+        createdBy: md.createdBy ?? uid,
+        joinedAt: FieldValue.serverTimestamp()
+      });
+
+      // Keep memberEmails in sync
+      batch.update(db.doc(`workspaces/${wsId}`), {
+        memberEmails: FieldValue.arrayUnion(email)
+      });
+    }
+
+    // Update (or create) the user doc
+    const userRef = db.doc(`users/${uid}`);
+    const userSnap = await userRef.get();
+    const uniqueIds = [...new Set(workspaceIds)];
+
+    if (userSnap.exists) {
+      batch.update(userRef, {
+        workspaceIds: uniqueIds,
+        accountVerified: true,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+    } else {
+      batch.set(userRef, {
+        uid,
+        email,
+        displayName: request.auth?.token.name || email.split("@")[0],
+        accountVerified: true,
+        workspaceIds: uniqueIds,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      });
+    }
+
+    await batch.commit();
+    return { linked: true, workspaceIds: uniqueIds };
   }
 );
