@@ -302,8 +302,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               setActiveWorkspaceId((current) => current || wsId);
             })
             .catch((err) => {
-              const code = (err as { code?: string }).code;
-              if (code === "permission-denied") {
+              if (isPermissionDenied(err)) {
                 setWorkspaceInaccessible(true);
               } else {
                 setError(`Nao foi possivel abrir o workspace: ${errorMessage(err)}`);
@@ -311,11 +310,10 @@ function AuthenticatedApp({ user }: { user: User }) {
             });
         },
         (err) => {
-          const code = (err as { code?: string }).code;
-          if (code === "permission-denied") {
+          if (isPermissionDenied(err)) {
             setWorkspaceInaccessible(true);
           } else {
-            setError(`Nao foi possivel validar seu acesso ao workspace: ${errorMessage(err)}`);
+            setError(`Nao foi possivel validar seu acesso ao workspace: [${(err as {code?:string}).code}] ${errorMessage(err)}`);
           }
         }
       )
@@ -4530,4 +4528,9 @@ async function ensureDefaultWorkspace(user: User, displayName: string): Promise<
 function errorMessage(err: unknown) {
   if (err instanceof Error) return err.message;
   return "Algo saiu do eixo. Tente de novo.";
+}
+
+function isPermissionDenied(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  return e.code === "permission-denied" || (e.message ?? "").includes("Missing or insufficient permissions");
 }
