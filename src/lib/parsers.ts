@@ -15,7 +15,7 @@ export const CATEGORIES = [
   "Alimentacao",
   "Mercado",
   "Transporte",
-  "Combustivel",
+  "Carro",
   "Assinaturas",
   "Saude",
   "Varejo",
@@ -40,7 +40,7 @@ export const CATEGORY_COLORS: Record<Category, string> = {
   Alimentacao:    "#f5a623",
   Mercado:        "#5c9eff",
   Transporte:     "#4dcc8f",
-  Combustivel:    "#4dcc8f",
+  Carro:          "#4dcc8f",
   Assinaturas:    "#a78bfa",
   Saude:          "#ff5c5c",
   Varejo:         "#5c9eff",
@@ -98,11 +98,20 @@ const CATEGORY_MAP: Record<string, string[]> = {
     "cabify", "99pop", "99 ", "uber", "taxi", "taxista",
     "brt", "vlt", "trem", "terminal"
   ],
-  Combustivel: [
-    "combustivel", "br distribuidora", "ale combustiveis",
-    "auto posto", "gasolina", "alcool combust",
-    "ipiranga", "petrobras", "raizen", "etanol",
-    "shell", "posto", "gnv", "diesel"
+  Carro: [
+    // postos e combustível
+    "combustivel", "gasolina", "etanol", "alcool combust", "diesel", "gnv",
+    "posto", "auto posto", "ipiranga", "petrobras", "shell", "raizen",
+    "br distribuidora", "ale combustiveis", "texaco",
+    // manutenção
+    "oficina", "mecanico", "funilaria", "borracharia", "pneu",
+    "troca de oleo", "revisao auto", "balanceamento", "alinhamento",
+    "amortecedor", "bateria auto", "autopecas", "peca auto",
+    // lavagem
+    "lava jato", "lava rapido", "lavagem auto",
+    // pedágio e estacionamento
+    "pedagio", "sem parar", "veloe", "conectcar", "move mais",
+    "estacionamento", "zona azul", "rotativo"
   ],
   Assinaturas: [
     "amazon prime", "amazon music", "disney plus", "youtube premium",
