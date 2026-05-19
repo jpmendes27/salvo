@@ -201,11 +201,10 @@ function OnboardingFlow({ user }: { user: User }) {
   }
 
   async function handleSendInvite() {
-    const wsId = workspaceId;
-    if (!wsId) return;
     setBusy(true);
     setError("");
     try {
+      const wsId = workspaceId || await createWorkspace();
       const displayName = name.trim() || user.displayName || user.email?.split("@")[0] || "Você";
       const token = crypto.randomUUID();
       const invDigits = invitePhone.replace(/\D/g, "");
@@ -222,11 +221,16 @@ function OnboardingFlow({ user }: { user: User }) {
         expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
       });
       const link = `${window.location.origin}${BASE}/convite?token=${token}`;
-      fetch(SEND_WA_FUNCTION_URL, {
+      const waResp = await fetch(SEND_WA_FUNCTION_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: invPhone, workspaceName: "Minha vida financeira", inviteLink: link, fromName: displayName })
-      }).catch(console.error);
+      }).catch(() => null);
+      if (!waResp?.ok) {
+        setError("Não foi possível enviar o convite. Tente de novo.");
+        setBusy(false);
+        return;
+      }
       await goHome(wsId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");

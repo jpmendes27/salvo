@@ -288,7 +288,7 @@ export const sendInviteWhatsApp = onRequest(
     if (!apiKey) { res.status(500).json({ error: "EVOLUTION_API_KEY not configured" }); return; }
 
     const sender = fromName || "Alguém";
-    const message = `${sender} te adicionou no painel financeiro dele no Fincheck Pro. 💚\nAgora vocês acompanham tudo juntos — entradas, gastos e o planejamento do mês em tempo real.\n👉 ${inviteLink}`;
+    const message = `${sender} te chamou pro Fincheck Pro 👊\n\nVocês vão acompanhar entradas, gastos e o plano do mês juntos — em tempo real, sem ninguém ter que ficar perguntando "ué, gastou onde isso?".\n\nBora entrar?\n${inviteLink}`;
 
     try {
       const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
