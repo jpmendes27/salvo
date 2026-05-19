@@ -4,7 +4,9 @@ import {
   browserLocalPersistence,
   browserPopupRedirectResolver,
   indexedDBLocalPersistence,
-  initializeAuth
+  initializeAuth,
+  getAuth,
+  type Auth
 } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
@@ -22,12 +24,15 @@ const firebaseConfig = {
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
 // IndexedDB persistence avoids Chrome Privacy Sandbox storage partitioning
-// that breaks signInWithPopup/Redirect flows on mobile (sessionStorage gets
+// that breaks signInWithPopup/Redirect flows on mobile (sessionStorage is
 // cleared during cross-site navigations in the OAuth popup).
-export const auth = initializeAuth(app, {
-  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-  popupRedirectResolver: browserPopupRedirectResolver,
-});
+// getAuth() is used during Next.js SSR/build (Node.js, no indexedDB).
+export const auth: Auth = typeof window !== "undefined"
+  ? initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    })
+  : getAuth(app);
 
 export { app };
 export const db = getFirestore(app);
