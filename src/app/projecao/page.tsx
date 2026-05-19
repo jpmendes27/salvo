@@ -141,7 +141,7 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
     <div style={{ minHeight: "100vh", background: "#09090b", color: "#fff", fontFamily: "var(--font-dm-sans, sans-serif)" }}>
       {/* Header */}
       <div style={{ position: "sticky", top: 0, zIndex: 10, background: "rgba(9,9,11,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "14px 24px", display: "flex", alignItems: "center", gap: 16 }}>
-        <button onClick={() => router.push("/")} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: 0 }}>
+        <button onClick={() => router.push("/home")} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: 0 }}>
           <ArrowLeft size={16} /> Voltar
         </button>
         <div style={{ flex: 1 }}>

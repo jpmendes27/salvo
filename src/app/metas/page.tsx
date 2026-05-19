@@ -117,7 +117,7 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <button
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/home")}
             style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: 0 }}
           >
             <ArrowLeft size={15} /> Voltar

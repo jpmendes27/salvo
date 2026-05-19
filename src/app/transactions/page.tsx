@@ -121,7 +121,7 @@ function TransactionList({
         display: "flex", alignItems: "center", gap: 16
       }}>
         <button
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/home")}
           style={{
             display: "flex", alignItems: "center", gap: 6,
             background: "transparent", border: "none",

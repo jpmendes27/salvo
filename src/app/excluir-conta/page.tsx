@@ -44,7 +44,7 @@ export default function DeleteAccountPage() {
 
   return (
     <main className="page legal-doc">
-      <Link className="btn secondary" href="/">
+      <Link className="btn secondary" href="/home">
         Voltar
       </Link>
       <h1>Excluir conta</h1>
