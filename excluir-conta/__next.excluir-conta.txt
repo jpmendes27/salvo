@@ -2,4 +2,4 @@
 2:I[39756,["/fincheck-pro/_next/static/chunks/0rp6hwvw5yd~w.js","/fincheck-pro/_next/static/chunks/0d3shmwh5_nmn.js","/fincheck-pro/_next/static/chunks/17vzze5vkrf8x.js","/fincheck-pro/_next/static/chunks/0v47o5mclxiec.js"],"default"]
 3:I[37457,["/fincheck-pro/_next/static/chunks/0rp6hwvw5yd~w.js","/fincheck-pro/_next/static/chunks/0d3shmwh5_nmn.js","/fincheck-pro/_next/static/chunks/17vzze5vkrf8x.js","/fincheck-pro/_next/static/chunks/0v47o5mclxiec.js"],"default"]
 4:[]
-0:{"rsc":["$","$1","c",{"children":[null,["$","$L2",null,{"parallelRouterKey":"children","template":["$","$L3",null,{}]}]]}],"isPartial":false,"staleTime":300,"varyParams":"$W4","buildId":"XnlNYfaMPesCsbjMHt1Gv"}
+0:{"rsc":["$","$1","c",{"children":[null,["$","$L2",null,{"parallelRouterKey":"children","template":["$","$L3",null,{}]}]]}],"isPartial":false,"staleTime":300,"varyParams":"$W4","buildId":"SwJPZblYofuRpnz_q9Qvq"}
