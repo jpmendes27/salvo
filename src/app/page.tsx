@@ -4,7 +4,7 @@ import { LandingEffects } from "./landing-effects";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const metadata: Metadata = {
-  title: "fincheck pro — o amigo rico que você nunca teve",
+  title: "fincheck pro | o amigo rico que você nunca teve",
   description: "Um app que olha sua vida financeira do jeito que ela é, te fala a verdade na cara e te mostra um caminho real pra sair do sufoco. Sem planilha. Sem palavra difícil. Sem promessa furada.",
 };
 
