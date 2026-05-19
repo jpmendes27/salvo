@@ -400,6 +400,15 @@ function AuthScreen() {
         }
       `}</style>
 
+      <a
+        href={BASE || "/"}
+        style={{ position: "fixed", top: 20, right: 24, zIndex: 10, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "rgba(255,255,255,0.38)", fontFamily: "'Inter Tight','Inter',system-ui,sans-serif", fontWeight: 500, letterSpacing: "-0.01em", textDecoration: "none", transition: "color .2s ease", padding: "6px 0" }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.80)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.38)"; }}
+      >
+        ← voltar pro site
+      </a>
+
       <div style={{ position: "fixed", top: "-18%", left: "-5%", width: 900, height: 780, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse at 35% 45%, rgba(184,245,90,0.12) 0%, rgba(120,200,50,0.05) 38%, transparent 68%)", filter: "blur(52px)" }} />
       <div style={{ position: "fixed", bottom: "-12%", right: "8%", width: 640, height: 520, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse, rgba(150,220,60,0.07) 0%, transparent 62%)", filter: "blur(64px)" }} />
       <canvas ref={canvasRef} style={{ position: "fixed", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0 }} />
@@ -409,17 +418,13 @@ function AuthScreen() {
       <div className="auth-left" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "48px 56px", position: "relative", zIndex: 1, animation: "fadeUp .75s ease both" }}>
         <div style={{ marginBottom: 52 }}><Logo /></div>
 
-        <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.28)", marginBottom: 16 }}>
-          Controle financeiro
-        </p>
-
         <h1 style={{ fontFamily: "'Inter Tight', 'Inter', system-ui, sans-serif", fontSize: "clamp(36px, 4.5vw, 58px)", fontWeight: 700, lineHeight: 1.05, letterSpacing: "-0.03em", marginBottom: 18, color: "#fff" }}>
-          Seu extrato virou<br />
-          <span style={{ color: G }}>painel em segundos.</span>
+          Bora colocar a sua<br />
+          <span style={{ color: G }}>vida em ordem.</span>
         </h1>
 
         <p style={{ fontSize: 15, color: "rgba(255,255,255,0.40)", lineHeight: 1.75, maxWidth: 400, marginBottom: 48 }}>
-          Importe o PDF do banco, veja para onde seu dinheiro foi e planeje o próximo mês — sem planilha, sem surpresa no fechamento.
+          Em 1 minuto você vê pra onde foi o seu dinheiro esse mês.
         </p>
 
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -538,7 +543,7 @@ function AuthScreen() {
                 <div style={{ width: 17, height: 17, border: "2.5px solid rgba(0,0,0,0.35)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
               ) : (
                 <>
-                  <span>{mode === "signup" && signupStep === 2 ? "Criar conta" : mode === "signin" && passwordStep ? "Entrar com e-mail" : "Avançar"}</span>
+                  <span>{mode === "signup" && signupStep === 2 ? "Criar conta" : mode === "signin" && passwordStep ? "Entrar com e-mail" : mode === "signin" ? "Quero entrar" : "Avançar"}</span>
                   <ArrowRight size={15} />
                 </>
               )}
