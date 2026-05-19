@@ -76,12 +76,20 @@ const CATEGORY_MAP: Record<string, string[]> = {
     "sushi", "acai", "doces", "delivery"
   ],
   Mercado: [
-    "pao de acucar", "magazine luiza mercado", "supermercado",
-    "hipermercado", "atacadao", "atacado", "hortifruti",
-    "carrefour", "walmart", "assai", "prezunic", "st marche",
-    "zona sul", "condor", "bergamini", "g barbosa", "bistek",
-    "mundial", "sonda", "big bom", "rede top", "mercadinho",
-    "mercado", "extra mkt", "feira", "sacolao"
+    // redes grandes
+    "pao de acucar", "carrefour", "walmart", "assai", "atacadao",
+    "makro", "fort atacadista", "tenda atacado", "maxxi atacado",
+    // redes regionais
+    "prezunic", "st marche", "zona sul", "condor", "bergamini",
+    "g barbosa", "bistek", "mundial", "sonda", "big bom", "rede top",
+    "muffato", "savegnago", "angeloni", "bretas", "super nosso",
+    "hirota", "mambo", "coop supermercado", "mateus supermercado",
+    "bom preco", "oba hortifruti", "guanabara supermercado",
+    // genéricos
+    "supermercado", "hipermercado", "atacado", "hortifruti",
+    "mercadinho", "mercado", "extra mkt", "magazine luiza mercado",
+    "varejao", "mercearia", "frutaria", "verdureiro", "sacolao",
+    "feira livre", "feira", "quitanda", "emporio"
   ],
   Transporte: [
     "bilhete unico", "passagem metro", "transporte urbano",
