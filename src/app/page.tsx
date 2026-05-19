@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { LandingEffects } from "./landing-effects";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -10,6 +11,7 @@ export const metadata: Metadata = {
 const css = `
   :root{--bg:#050505;--accent:#b8f55a;--fg:#ffffff;--muted:rgba(255,255,255,0.45);--line:rgba(255,255,255,0.08);--card:#111111;--card-2:#1a1a1a}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
   html,body{background:#050505!important;color:#ffffff!important;font-family:'Inter Tight','Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
   a{color:inherit;text-decoration:none}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
@@ -17,17 +19,36 @@ const css = `
   .wrap{max-width:1240px;margin:0 auto;padding:0 32px}
   @media(max-width:640px){.wrap{padding:0 22px}}
 
-  .logo{font-family:'DM Serif Display',serif;font-weight:400;letter-spacing:-0.02em;font-size:24px;line-height:1;display:inline-flex;align-items:flex-start;gap:0}
+  /* content above canvas */
+  header,section,footer{position:relative;z-index:1}
+
+  /* scroll reveal */
+  .reveal{opacity:0;transform:translateY(26px);transition:opacity .65s cubic-bezier(.16,1,.3,1),transform .65s cubic-bezier(.16,1,.3,1)}
+  .reveal.visible{opacity:1;transform:none}
+  .d1{transition-delay:.08s}
+  .d2{transition-delay:.16s}
+  .d3{transition-delay:.26s}
+  .d4{transition-delay:.36s}
+
+  /* hero entrance */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+  .hero .pill{animation:fadeUp .75s cubic-bezier(.16,1,.3,1) both}
+  .hero h1.hero-h{animation:fadeUp .75s .1s cubic-bezier(.16,1,.3,1) both}
+  .hero .hero-sub{animation:fadeUp .75s .22s cubic-bezier(.16,1,.3,1) both}
+  .hero .hero-cta{animation:fadeUp .75s .34s cubic-bezier(.16,1,.3,1) both}
+  .hero .hero-meta{animation:fadeUp .75s .5s cubic-bezier(.16,1,.3,1) both}
+
+  .logo{font-family:'DM Serif Display',serif;font-weight:400;letter-spacing:-0.02em;font-size:20px;line-height:1;display:inline-flex;align-items:flex-start;gap:0}
   .logo .fc{color:var(--accent)}
   .logo .pro{color:#fff}
   .logo .reg{font-family:'DM Mono',monospace;font-weight:400;font-size:0.42em;line-height:1;transform:translateY(2px);margin-left:2px;color:var(--accent)}
 
-  nav.top{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);background:rgba(5,5,5,0.7);border-bottom:1px solid var(--line)}
-  nav.top .inner{display:flex;align-items:center;justify-content:space-between;height:72px}
-  nav.top .links{display:flex;gap:32px;align-items:center}
-  nav.top .links a{color:var(--muted);font-size:14px;transition:color .2s ease}
+  nav.top{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);background:rgba(5,5,5,0.75);border-bottom:1px solid var(--line)}
+  nav.top .inner{display:flex;align-items:center;justify-content:space-between;height:56px}
+  nav.top .links{display:flex;gap:28px;align-items:center}
+  nav.top .links a{color:var(--muted);font-size:13px;transition:color .2s ease}
   nav.top .links a:hover{color:#fff}
-  .btn{display:inline-flex;align-items:center;gap:10px;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px;transition:transform .15s ease,background .2s ease,color .2s ease,border-color .2s ease;white-space:nowrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:999px;font-weight:600;font-size:13px;transition:transform .15s ease,background .2s ease,color .2s ease,border-color .2s ease;white-space:nowrap}
   .btn.primary{background:var(--accent);color:#050505}
   .btn.primary:hover{transform:translateY(-1px);background:#c8ff66}
   .btn.ghost{color:#fff;border:1px solid rgba(255,255,255,0.15)}
@@ -36,9 +57,9 @@ const css = `
   .btn:hover .arrow{transform:translateX(3px)}
   @media(max-width:780px){nav.top .links{display:none}}
 
-  .hero{position:relative;padding:110px 0 120px;overflow:hidden}
-  .hero::before{content:"";position:absolute;inset:auto 0 -40% 0;height:80%;background:radial-gradient(60% 50% at 50% 0%,rgba(184,245,90,0.10),transparent 70%);pointer-events:none}
-  .hero .grid-lines{position:absolute;inset:0;background-image:linear-gradient(to right,rgba(255,255,255,0.035) 1px,transparent 1px);background-size:96px 100%;mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 100%);pointer-events:none}
+  .hero{position:relative;z-index:1;padding:110px 0 120px;overflow:hidden}
+  .hero::before{content:"";position:absolute;inset:auto 0 -40% 0;height:80%;background:radial-gradient(60% 50% at 50% 0%,rgba(184,245,90,0.08),transparent 70%);pointer-events:none}
+  .hero .grid-lines{position:absolute;inset:0;background-image:linear-gradient(to right,rgba(255,255,255,0.03) 1px,transparent 1px);background-size:96px 100%;mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 100%);pointer-events:none}
   .pill{display:inline-flex;align-items:center;gap:10px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;font-size:13px;color:var(--muted);background:rgba(255,255,255,0.02)}
   .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(184,245,90,0.12)}
   h1.hero-h{font-family:'Inter Tight','Inter',system-ui,sans-serif;font-weight:700;font-size:clamp(48px,8.2vw,124px);line-height:1.05;letter-spacing:-0.03em;margin-top:28px;max-width:14ch;text-wrap:balance}
@@ -135,7 +156,7 @@ const css = `
   .ws-row .amt.neg{color:#ff7a59}
 
   .manifesto{padding:160px 0;text-align:center;border-top:1px solid var(--line);border-bottom:1px solid var(--line);position:relative}
-  .manifesto::before{content:"";position:absolute;inset:0;background:radial-gradient(60% 50% at 50% 50%,rgba(184,245,90,0.06),transparent 70%);pointer-events:none}
+  .manifesto::before{content:"";position:absolute;inset:0;background:radial-gradient(60% 50% at 50% 50%,rgba(184,245,90,0.05),transparent 70%);pointer-events:none}
   .manifesto .quote{font-family:'Inter Tight','Inter',system-ui,sans-serif;font-weight:700;font-size:clamp(40px,6.5vw,96px);line-height:1.05;letter-spacing:-0.03em;text-wrap:balance;max-width:18ch;margin:0 auto;position:relative}
   .manifesto .quote em{font-style:normal;color:var(--accent);font-weight:700}
   .manifesto .sig{margin-top:36px;display:inline-flex;align-items:center;gap:12px;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px;letter-spacing:0.04em}
@@ -162,6 +183,8 @@ export default function LandingPage() {
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital,wght@0,400;1,400&family=DM+Mono:wght@300;400;500&family=Inter+Tight:ital,wght@0,300..800;1,300..800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       <style dangerouslySetInnerHTML={{ __html: css }} />
+
+      <LandingEffects />
 
       <nav className="top">
         <div className="wrap inner">
@@ -199,7 +222,7 @@ export default function LandingPage() {
             </div>
             <div className="item">
               <div className="k">100% <em>BR</em></div>
-              <div className="v">Feito pra realidade do brasileiro que ganha de 1,5k a 4k</div>
+              <div className="v">Feito pra realidade financeira do brasileiro</div>
             </div>
             <div className="item">
               <div className="k">WhatsApp</div>
@@ -210,23 +233,23 @@ export default function LandingPage() {
       </header>
 
       <section className="pain" id="dor">
-        <div className="wrap" style={{ paddingTop: "80px", paddingBottom: 0 }}>
+        <div className="wrap reveal" style={{ paddingTop: "80px", paddingBottom: 0 }}>
           <span className="eyebrow">A real</span>
           <h2 className="section-h">A gente sabe <em>onde dói</em> — porque já passou por aí.</h2>
           <p className="section-lead">Não é falta de vontade. Não é preguiça. É que ninguém nunca te ensinou. E todo app que existe parece que foi feito pra outra pessoa, não pra você.</p>
         </div>
         <div className="pain-grid" style={{ marginTop: "64px" }}>
-          <div className="pain-item">
+          <div className="pain-item reveal">
             <div className="num">01</div>
             <div className="line">Chega no dia <em>20</em> e você já não sabe pra onde foi o dinheiro.</div>
             <div className="foot">O salário entra, evapora, e no fim do mês fica aquela sensação ruim de quem foi roubado pela própria conta.</div>
           </div>
-          <div className="pain-item">
+          <div className="pain-item reveal d1">
             <div className="num">02</div>
             <div className="line">Você até tentou planilha — durou <em>3 dias.</em></div>
             <div className="foot">Não é falta de força de vontade. Planilha foi feita pra contador, não pra quem só quer entender o que tá rolando.</div>
           </div>
-          <div className="pain-item">
+          <div className="pain-item reveal d2">
             <div className="num">03</div>
             <div className="line">Ninguém nunca te ensinou — e <em>tá tudo bem.</em></div>
             <div className="foot">Educação financeira é coisa que escola não deu. A gente parte do zero, na sua linguagem, sem te julgar por nada.</div>
@@ -237,7 +260,7 @@ export default function LandingPage() {
 
       <section className="section" id="como">
         <div className="wrap">
-          <div className="how-head">
+          <div className="how-head reveal">
             <div>
               <span className="eyebrow">Como funciona</span>
               <h2 className="section-h">Três passos. <em>Zero enrolação.</em></h2>
@@ -245,7 +268,7 @@ export default function LandingPage() {
             <p className="section-lead" style={{ marginTop: 0 }}>Não precisa configurar nada complicado. Não precisa lembrar de cadastrar gasto. Você só precisa querer.</p>
           </div>
           <div className="steps">
-            <div className="step">
+            <div className="step reveal">
               <div className="step-num">
                 <span>Passo 01</span>
                 <span className="badge">1</span>
@@ -260,7 +283,7 @@ export default function LandingPage() {
                 </div>
               </div>
             </div>
-            <div className="step">
+            <div className="step reveal d1">
               <div className="step-num">
                 <span>Passo 02</span>
                 <span className="badge">2</span>
@@ -273,7 +296,7 @@ export default function LandingPage() {
                 <div className="ai-line"><span className="v">38% do que sobrou</span><span className="pos">priorizar</span></div>
               </div>
             </div>
-            <div className="step">
+            <div className="step reveal d2">
               <div className="step-num">
                 <span>Passo 03</span>
                 <span className="badge">3</span>
@@ -293,10 +316,12 @@ export default function LandingPage() {
 
       <section className="section" id="features" style={{ paddingTop: 0 }}>
         <div className="wrap">
-          <span className="eyebrow">O que tem dentro</span>
-          <h2 className="section-h">Tudo o que um <em>amigo rico</em> faria por você.</h2>
+          <div className="reveal">
+            <span className="eyebrow">O que tem dentro</span>
+            <h2 className="section-h">Tudo o que um <em>amigo rico</em> faria por você.</h2>
+          </div>
           <div className="features">
-            <div className="feat feat--ai">
+            <div className="feat feat--ai reveal">
               <div className="ftop">
                 <span>01 · Diagnóstico de IA</span>
                 <span>· honesto</span>
@@ -314,7 +339,7 @@ export default function LandingPage() {
                 </div>
               </div>
             </div>
-            <div className="feat feat--reg">
+            <div className="feat feat--reg reveal d1">
               <div className="ftop">
                 <span>02 · Importação</span>
                 <span>· auto</span>
@@ -327,7 +352,7 @@ export default function LandingPage() {
                 <div className="imp-row"><span className="fmt">CSV</span><span className="file-n">caixa_conta_corrente.csv</span><span className="ok">✓ 34 lançamentos</span></div>
               </div>
             </div>
-            <div className="feat feat--wfull">
+            <div className="feat feat--wfull reveal d2">
               <div className="ftop">
                 <span>03 · Planejamento</span>
                 <span>· real</span>
@@ -349,7 +374,7 @@ export default function LandingPage() {
                 </div>
               </div>
             </div>
-            <div className="feat feat--big">
+            <div className="feat feat--big reveal d3">
               <div className="ftop">
                 <span>04 · Workspace</span>
                 <span>· família/casal</span>
@@ -370,22 +395,22 @@ export default function LandingPage() {
 
       <section className="manifesto" id="manifesto">
         <div className="wrap" style={{ position: "relative" }}>
-          <p className="quote">A gente não veio te ensinar a <em>investir.</em><br />Veio te ajudar a parar de fazer <em>merda</em> com o seu dinheiro.</p>
-          <div className="sig">manifesto fincheck pro</div>
+          <p className="quote reveal">A gente não veio te ensinar a <em>investir.</em><br />Veio te ajudar a parar de fazer <em>merda</em> com o seu dinheiro.</p>
+          <div className="sig reveal d1">manifesto fincheck pro</div>
         </div>
       </section>
 
       <section className="cta-final">
         <div className="wrap">
-          <h2>Bora colocar a sua vida <em>em ordem?</em></h2>
-          <p className="sub">Vagas limitadas no beta. Dois minutos pra entrar. Zero risco — você só vai ganhar paz.</p>
-          <a className="btn primary" href={`${BASE}/login`}>Começar agora <span className="arrow">→</span></a>
+          <h2 className="reveal">Bora colocar a sua vida <em>em ordem?</em></h2>
+          <p className="sub reveal d1">Vagas limitadas. Dois minutos pra entrar. Zero risco — você só vai ganhar paz.</p>
+          <a className="btn primary reveal d2" href={`${BASE}/login`}>Começar agora <span className="arrow">→</span></a>
         </div>
       </section>
 
       <footer>
         <div className="wrap row">
-          <a href="#" className="logo" style={{ fontSize: "20px" }}>
+          <a href="#" className="logo" style={{ fontSize: "18px" }}>
             <span className="fc">fincheck</span><span className="pro">pro</span><span className="reg">®</span>
           </a>
           <div className="flinks">
