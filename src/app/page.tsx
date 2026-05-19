@@ -43,7 +43,7 @@ const css = `
   .logo .pro{color:#fff}
   .logo .reg{font-family:'DM Mono',monospace;font-weight:400;font-size:0.42em;line-height:1;transform:translateY(2px);margin-left:2px;color:var(--accent)}
 
-  nav.top{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);background:rgba(5,5,5,0.75);border-bottom:1px solid var(--line)}
+  nav.top{position:fixed;top:0;left:0;right:0;width:100%;z-index:50;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(5,5,5,0.6);border-bottom:1px solid rgba(255,255,255,0.07)}
   nav.top .inner{display:flex;align-items:center;justify-content:space-between;height:56px}
   nav.top .links{display:flex;gap:28px;align-items:center}
   nav.top .links a{color:var(--muted);font-size:13px;transition:color .2s ease}
@@ -57,7 +57,7 @@ const css = `
   .btn:hover .arrow{transform:translateX(3px)}
   @media(max-width:780px){nav.top .links{display:none}}
 
-  .hero{position:relative;z-index:1;padding:110px 0 120px;overflow:hidden}
+  .hero{position:relative;z-index:1;padding:110px 0 120px;margin-top:56px;overflow:hidden}
   .hero::before{content:"";position:absolute;inset:auto 0 -40% 0;height:80%;background:radial-gradient(60% 50% at 50% 0%,rgba(184,245,90,0.08),transparent 70%);pointer-events:none}
   .hero .grid-lines{position:absolute;inset:0;background-image:linear-gradient(to right,rgba(255,255,255,0.03) 1px,transparent 1px);background-size:96px 100%;mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 100%);pointer-events:none}
   .pill{display:inline-flex;align-items:center;gap:10px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;font-size:13px;color:var(--muted);background:rgba(255,255,255,0.02)}
