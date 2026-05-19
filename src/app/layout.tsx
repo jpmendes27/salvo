@@ -19,8 +19,8 @@ export const metadata: Metadata = {
     icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8f564'/><text x='50%25' y='72%25' font-family='sans-serif' font-weight='700' font-size='20' fill='%23111410' text-anchor='middle'>F</text></svg>"
   },
   openGraph: {
-    title: "Fincheck Pro · Controle financeiro",
-    description: "Importe o PDF do banco, veja para onde seu dinheiro foi e planeje o próximo mês — sem planilha, sem surpresa no fechamento.",
+    title: "fincheck pro — Bora colocar a sua vida em ordem.",
+    description: "Em 1 minuto você vê pra onde foi o seu dinheiro esse mês.",
     url: "https://jpmendes.com/fincheck-pro",
     type: "website",
     images: [{ url: "https://jpmendes.com/fincheck-pro/og.png" }]
