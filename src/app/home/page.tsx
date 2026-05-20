@@ -914,26 +914,27 @@ function WorkspaceApp({
 
   async function confirmImport(rows: ParsedWithMeta[]) {
     setImportState({ phase: "saving", rows });
-    const selected = rows.filter((r) => r.selected);
-    for (const tx of selected) {
-      await addDoc(collection(db, "workspaces", workspace.id, "transactions"), {
-        type: tx.type,
-        description: tx.description,
-        amount: tx.amount,
-        category: tx.category || categorizeTransaction(tx.description, tx.type),
-        date: tx.date,
-        monthKey: tx.monthKey || tx.date.slice(0, 7),
-        createdBy: user.uid,
-        createdByName: profile.displayName,
-        sourceLabel: tx.sourceLabel ?? null,
-        dedupKey: tx.dedupKey || `${tx.date}|${tx.description.toLowerCase().trim()}|${tx.amount.toFixed(2)}`,
-        source: "import",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-    }
-    await markReal();
-    setImportState(null);
+    try {
+      const selected = rows.filter((r) => r.selected);
+      for (const tx of selected) {
+        await addDoc(collection(db, "workspaces", workspace.id, "transactions"), {
+          type: tx.type,
+          description: tx.description,
+          amount: tx.amount,
+          category: tx.category || categorizeTransaction(tx.description, tx.type),
+          date: tx.date,
+          monthKey: tx.monthKey || tx.date.slice(0, 7),
+          createdBy: user.uid,
+          createdByName: profile.displayName,
+          sourceLabel: tx.sourceLabel ?? null,
+          dedupKey: tx.dedupKey || `${tx.date}|${tx.description.toLowerCase().trim()}|${tx.amount.toFixed(2)}`,
+          source: "import",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+      await markReal();
+      setImportState(null);
 
     // Reconciliação: detecta faturas de cartão e propõe adicionar ao Plano do mês
     const isCard = (label: string) => label.includes("••••") || /cartão|fatura/i.test(label);
@@ -949,6 +950,10 @@ function WorkspaceApp({
     const suggestions = Object.values(totals);
     if (suggestions.length > 0) {
       setReconcilePrompt(suggestions.map((s) => ({ ...s, include: true })));
+    }
+    } catch (err) {
+      setImportState({ phase: "preview", rows });
+      setError(err instanceof Error ? err.message : "Erro ao salvar transações. Tente de novo.");
     }
   }
 
@@ -2033,27 +2038,31 @@ function WorkspaceApp({
           onChange={setReconcilePrompt}
           onClose={() => setReconcilePrompt([])}
           onConfirm={async (items) => {
-            for (const item of items.filter((i) => i.include)) {
-              const docId = `fatura_${item.sourceLabel.replace(/\s+/g, "_")}_${item.monthKey}`;
-              await setDoc(
-                doc(db, "workspaces", workspace.id, "plannedItems", docId),
-                {
-                  type: "expense",
-                  title: `Cartão ${item.sourceLabel}`,
-                  amount: Math.round(item.amount * 100) / 100,
-                  category: "Contas",
-                  dueDay: 10,
-                  monthKey: item.monthKey,
-                  status: "planned",
-                  createdBy: user.uid,
-                  createdByName: profile.displayName,
-                  createdAt: serverTimestamp(),
-                  updatedAt: serverTimestamp()
-                },
-                { merge: true }
-              );
+            try {
+              for (const item of items.filter((i) => i.include)) {
+                const docId = `fatura_${item.sourceLabel.replace(/\s+/g, "_")}_${item.monthKey}`;
+                await setDoc(
+                  doc(db, "workspaces", workspace.id, "plannedItems", docId),
+                  {
+                    type: "expense",
+                    title: `Cartão ${item.sourceLabel}`,
+                    amount: Math.round(item.amount * 100) / 100,
+                    category: "Contas",
+                    dueDay: 10,
+                    monthKey: item.monthKey,
+                    status: "planned",
+                    createdBy: user.uid,
+                    createdByName: profile.displayName,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                  },
+                  { merge: true }
+                );
+              }
+              setReconcilePrompt([]);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Erro ao salvar. Tente de novo.");
             }
-            setReconcilePrompt([]);
           }}
         />
       )}

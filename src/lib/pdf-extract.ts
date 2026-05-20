@@ -5,7 +5,8 @@ async function getPdfjs() {
   if (!_pdfjs) {
     _pdfjs = await import("pdfjs-dist");
     // Use unpkg CDN for the worker — avoids bundler complications with Turbopack
-    _pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${_pdfjs.version}/build/pdf.worker.min.js`;
+    const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
+    _pdfjs.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.mjs`;
   }
   return _pdfjs;
 }
