@@ -3138,10 +3138,11 @@ function ImportModal({
   const selectedCount = rows.filter((r) => r.selected).length;
   const error = state.phase === "preview" ? state.error : undefined;
 
-  const categoriesFor = (type: "income" | "expense") =>
-    type === "income"
-      ? CATEGORIES.filter((c) => true)
-      : CATEGORIES.filter((c) => c !== "Recebimentos");
+  const categoriesFor = (type: "income" | "expense") => {
+    if (type === "income") return [...CATEGORIES].sort();
+    const sorted = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros").sort();
+    return [...sorted, "Outros"];
+  };
 
   return (
     <div
@@ -3463,7 +3464,7 @@ function AddTransactionModal({
   const [category, setCategory] = useState("Alimentacao");
   const [date, setDate] = useState(`${monthKey}-01`);
   const [busy, setBusy] = useState(false);
-  const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros");
+  const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros").sort();
   const categories = type === "income" ? ["Recebimentos"] : [...expenseCategories, "Outros"];
 
   async function submit(e: FormEvent) {
@@ -3657,7 +3658,7 @@ function AddPlannedItemModal({
   const [dueDay, setDueDay] = useState("10");
   const [recurring, setRecurring] = useState(false);
   const [busy, setBusy] = useState(false);
-  const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros");
+  const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros").sort();
   const categories = type === "income" ? ["Recebimentos"] : [...expenseCategories, "Outros"];
 
   async function submit(e: FormEvent) {

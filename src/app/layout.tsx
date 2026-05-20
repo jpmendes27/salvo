@@ -3,6 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "./auth-provider";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -14,7 +15,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Fincheck Pro · Controle financeiro",
   description: "Importe o PDF do banco, veja para onde seu dinheiro foi e planeje o próximo mês — sem planilha, sem surpresa no fechamento.",
-  manifest: "/manifest.json",
+  manifest: `${BASE}/manifest.json`,
   icons: {
     icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8f564'/><text x='50%25' y='72%25' font-family='sans-serif' font-weight='700' font-size='20' fill='%23111410' text-anchor='middle'>F</text></svg>"
   },

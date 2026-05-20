@@ -24,6 +24,19 @@ const SEND_WA_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_WA_URL ||
   "https://sendinvitewhatsapp-ihalwtxjpq-uc.a.run.app";
 
+function validateCPF(cpf: string): boolean {
+  const d = cpf.replace(/\D/g, "");
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += +d[i] * (10 - i);
+  let dv1 = 11 - (sum % 11); if (dv1 >= 10) dv1 = 0;
+  if (+d[9] !== dv1) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += +d[i] * (11 - i);
+  let dv2 = 11 - (sum % 11); if (dv2 >= 10) dv2 = 0;
+  return +d[10] === dv2;
+}
+
 function maskCPF(value: string): string {
   const d = value.replace(/\D/g, "").slice(0, 11);
   if (d.length <= 3) return d;
@@ -157,8 +170,8 @@ function OnboardingFlow({ user }: { user: User }) {
 
   async function handleStep1Next() {
     const cpfDigits = cpf.replace(/\D/g, "");
-    if (cpfDigits.length !== 11) {
-      setError("Informe seu CPF completo.");
+    if (!validateCPF(cpfDigits)) {
+      setError("CPF inválido. Verifique os dígitos.");
       return;
     }
     setBusy(true);
