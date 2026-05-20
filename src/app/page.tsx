@@ -204,7 +204,7 @@ export default function LandingPage() {
       <header className="hero">
         <div className="grid-lines" />
         <div className="wrap" style={{ position: "relative" }}>
-          <span className="pill"><span className="dot" /> Em fase de teste — vagas limitadas</span>
+          <span className="pill"><span className="dot" /> Em fase de teste</span>
           <h1 className="hero-h">O amigo rico que <em>você nunca teve.</em></h1>
           <p className="hero-sub">Um app que olha sua vida financeira do jeito que ela é, te fala a verdade na cara e te mostra um caminho real pra sair do sufoco. Sem planilha. Sem palavra difícil. Sem promessa furada.</p>
           <div className="hero-cta">
@@ -403,7 +403,7 @@ export default function LandingPage() {
       <section className="cta-final">
         <div className="wrap">
           <h2 className="reveal">Bora colocar a sua vida <em>em ordem?</em></h2>
-          <p className="sub reveal d1">Vagas limitadas. Dois minutos pra entrar. Zero risco — você só vai ganhar paz.</p>
+          <p className="sub reveal d1">Dois minutos pra entrar. Zero risco — você só vai ganhar paz.</p>
           <a className="btn primary reveal d2" href={`${BASE}/login`}>Começar agora <span className="arrow">→</span></a>
         </div>
       </section>
