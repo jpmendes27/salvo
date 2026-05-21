@@ -499,6 +499,10 @@ const SEND_WA_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_WA_URL ||
   "https://sendinvitewhatsapp-ihalwtxjpq-uc.a.run.app";
 
+const GENERATE_DIAGNOSIS_URL =
+  process.env.NEXT_PUBLIC_GENERATE_DIAGNOSIS_URL ||
+  "https://generatediagnosis-ihalwtxjpq-uc.a.run.app";
+
 type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
 
 type ImportState =
@@ -2750,6 +2754,8 @@ function InsightsView({
   const router = useRouter();
   const [editingRenda, setEditingRenda] = useState(false);
   const [rendaText, setRendaText] = useState("");
+  const [aiDiag, setAiDiag] = useState<{ narrativa: string; bullet1: string | null; bullet2: string | null; scoreLabel: string } | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
 
   const expenses = transactions.filter((t) => t.type === "expense");
   const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
@@ -2811,6 +2817,47 @@ function InsightsView({
   }, [transactions]);
 
   const maxCategory = byCategory[0]?.[1] ?? 1;
+  const expenseChange = prevTotalGasto > 0 ? Math.round(((totalGasto - prevTotalGasto) / prevTotalGasto) * 100) : null;
+  const topCat = byCategory[0] ?? null;
+  const net = totalEntradas - totalGasto;
+
+  useEffect(() => {
+    if (!expenses.length || score === null) return;
+    let cancelled = false;
+    setDiagLoading(true);
+    setAiDiag(null);
+    const payload = {
+      totalGasto,
+      totalEntradas,
+      comprometimento,
+      net,
+      score,
+      topCat: topCat
+        ? {
+            nome: CATEGORY_LABELS[topCat[0] as keyof typeof CATEGORY_LABELS] ?? topCat[0],
+            valor: topCat[1],
+            percentual: Math.round((topCat[1] / totalGasto) * 100)
+          }
+        : null,
+      expenseChange,
+      byCategory: byCategory.slice(0, 5).map(([cat, val]) => ({
+        nome: CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat,
+        valor: val
+      })),
+      monthLabel: monthLabel(monthKey)
+    };
+    fetch(GENERATE_DIAGNOSIS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
+      .then((data) => { if (!cancelled) setAiDiag(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setDiagLoading(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthKey, totalGasto, totalEntradas, score]);
 
   if (!expenses.length) {
     return (
@@ -2823,9 +2870,6 @@ function InsightsView({
   const INS_LABEL: CSSProperties = { fontSize: 11, color: "rgba(255,255,255,0.32)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10, fontWeight: 700 };
   const scoreRgb = scoreColor === G ? "184,245,90" : scoreColor === "#facc15" ? "250,204,21" : "255,128,128";
 
-  const expenseChange = prevTotalGasto > 0 ? Math.round(((totalGasto - prevTotalGasto) / prevTotalGasto) * 100) : null;
-  const topCat = byCategory[0] ?? null;
-  const net = totalEntradas - totalGasto;
   const narrativa = (score ?? 0) >= 8
     ? `Fechou o mês no positivo em ${formatCurrency(net)}. Só ${comprometimento}% da renda foi embora — isso é disciplina de verdade.`
     : (score ?? 0) >= 6
@@ -2847,25 +2891,26 @@ function InsightsView({
         <div style={{ position: "absolute", top: -60, right: -60, width: 220, height: 220, borderRadius: "50%", background: `rgba(${scoreRgb},0.10)`, filter: "blur(55px)", pointerEvents: "none" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 24, position: "relative" }}>
           <div style={{ flex: 1 }}>
-            <p style={{ fontSize: 10.5, color: `rgba(${scoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10 }}>
+            <p style={{ fontSize: 10.5, color: `rgba(${scoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
               Diagnóstico do mês
+              {diagLoading && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: `rgba(${scoreRgb},0.5)`, animation: "pulse 1.2s ease-in-out infinite" }} />}
             </p>
             <p style={{ fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: "-0.03em", marginBottom: 10, lineHeight: 1.1 }}>
-              {scoreLabel}
+              {aiDiag?.scoreLabel ?? scoreLabel}
             </p>
-            <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65, marginBottom: bullet1 || bullet2 ? 10 : 0 }}>
-              {narrativa}
+            <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65, marginBottom: (aiDiag?.bullet1 ?? bullet1) || (aiDiag?.bullet2 ?? bullet2) ? 10 : 0, transition: "opacity .4s", opacity: diagLoading ? 0.5 : 1 }}>
+              {aiDiag?.narrativa ?? narrativa}
             </p>
-            {(bullet1 || bullet2) && (
+            {((aiDiag?.bullet1 ?? bullet1) || (aiDiag?.bullet2 ?? bullet2)) && (
               <div style={{ display: "grid", gap: 5 }}>
-                {bullet1 && (
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${scoreRgb},0.55)` }}>
-                    <span style={{ flexShrink: 0, marginTop: 1 }}>↗</span>{bullet1}
+                {(aiDiag?.bullet1 ?? bullet1) && (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${scoreRgb},0.55)`, transition: "opacity .4s", opacity: diagLoading ? 0.5 : 1 }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}>↗</span>{aiDiag?.bullet1 ?? bullet1}
                   </div>
                 )}
-                {bullet2 && (
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${scoreRgb},0.55)` }}>
-                    <span style={{ flexShrink: 0, marginTop: 1 }}>{expenseChange! < 0 ? "↘" : "↗"}</span>{bullet2}
+                {(aiDiag?.bullet2 ?? bullet2) && (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${scoreRgb},0.55)`, transition: "opacity .4s", opacity: diagLoading ? 0.5 : 1 }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}>{expenseChange !== null && expenseChange < 0 ? "↘" : "↗"}</span>{aiDiag?.bullet2 ?? bullet2}
                   </div>
                 )}
               </div>
