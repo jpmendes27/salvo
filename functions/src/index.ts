@@ -606,3 +606,165 @@ export const relinkGoogleAccount = onCall(
     return { linked: true, workspaceIds: uniqueIds };
   }
 );
+
+// ─── generateDiagnosis ────────────────────────────────────────────────────────
+
+async function getSalarioMinimo(): Promise<number | null> {
+  try {
+    const res = await fetch(
+      "https://servicodados.ibge.gov.br/api/v1/pesquisas/indicadores/1619/resultados"
+    );
+    const data = await res.json();
+    const serie = data[0]?.series?.[0]?.serie;
+    if (!serie) return null;
+    const valores = Object.values(serie) as string[];
+    const ultimo = valores[valores.length - 1];
+    return ultimo ? parseFloat(ultimo) : null;
+  } catch {
+    return null;
+  }
+}
+
+export const generateDiagnosis = onRequest(
+  {
+    cors: true,
+    secrets: ["ANTHROPIC_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+  },
+  async (req, res) => {
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method Not Allowed" });
+      return;
+    }
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+      return;
+    }
+
+    const {
+      totalGasto,
+      totalEntradas,
+      comprometimento,
+      net,
+      score,
+      topCat,
+      expenseChange,
+      byCategory,
+      monthLabel: month
+    } = req.body as {
+      totalGasto: number;
+      totalEntradas: number;
+      comprometimento: number;
+      net: number;
+      score: number;
+      topCat: { nome: string; valor: number; percentual: number } | null;
+      expenseChange: number | null;
+      byCategory: Array<{ nome: string; valor: number }>;
+      monthLabel: string;
+    };
+
+    const salarioMinimo = await getSalarioMinimo();
+
+    const fmt = (v: number) =>
+      `R$${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const topCatLine = topCat
+      ? `- Maior categoria: ${topCat.nome} — ${fmt(topCat.valor)} (${topCat.percentual}% dos gastos)`
+      : "- Maior categoria: nenhuma";
+
+    const expChangeLine =
+      expenseChange !== null
+        ? `- Variação vs mês anterior: ${expenseChange > 0 ? "+" : ""}${expenseChange}%`
+        : "- Variação vs mês anterior: sem dados do mês anterior";
+
+    const byCatLines = byCategory
+      .slice(0, 5)
+      .map((c) => `  • ${c.nome}: ${fmt(c.valor)}`)
+      .join("\n");
+
+    const salarioLine = salarioMinimo !== null
+      ? `- Salário mínimo vigente: ${fmt(salarioMinimo)}`
+      : "- Salário mínimo vigente: não disponível";
+
+    const prompt = `Você é o Salvô — o conselheiro financeiro honesto que o brasileiro nunca teve.
+Fala direto, sem enrolação, sem julgamento moral. Tom popular, neutro em gênero.
+Sem vocativos (sem "irmão", "cara", "mano"). Frases curtas e precisas.
+Sem termos técnicos: nunca use "otimizar", "alocar", "comprometer renda", "déficit".
+
+Dados financeiros do usuário em ${month}:
+- Entradas: ${fmt(totalEntradas)}
+- Gastos: ${fmt(totalGasto)}
+- Saldo do mês: ${fmt(Math.abs(net))} (${net >= 0 ? "positivo" : "negativo"})
+- % da renda gasta: ${comprometimento}%
+- Nota calculada: ${score}/10
+${topCatLine}
+${expChangeLine}
+- Top categorias:
+${byCatLines}
+${salarioLine}
+
+REGRAS CRÍTICAS:
+1. Use APENAS os números enviados nos dados. Nunca invente valores.
+2. Se salário mínimo estiver disponível, pode usá-lo para dar contexto
+   a valores grandes — ex: "isso é X salários mínimos".
+   Se não estiver disponível, não mencione salário mínimo em hipótese alguma.
+3. Para dar peso a números, prefira proporções dos próprios dados
+   — ex: "27% de tudo que saiu", "quase o que você gastou com moradia".
+4. Nunca compare com inflação, custo de vida, ou qualquer referência
+   externa que não foi fornecida nos dados.
+
+Retorne APENAS um JSON válido, sem markdown, sem explicação:
+{
+  "narrativa": "2-3 frases. Começa com o resultado do mês, depois o peso disso.",
+  "bullet1": "Observação sobre a maior categoria com impacto real.",
+  "bullet2": "Observação sobre a variação vs mês anterior com reação proporcional.",
+  "scoreLabel": "Label curto baseado na nota: >=8 'Arrasando 💪', >=6 'Dá pra melhorar', <6 'Tá pesado.'"
+}
+
+Exemplos de tom:
+- "Fechou positivo, mas 85% da renda foi embora. De cada R$100 que entrou, R$85 sumiu."
+- "Carro engoliu R$3.527 — 27% de tudo que saiu. São 2,3 salários mínimos só de ferro."
+  (esse exemplo só vale se salário mínimo foi fornecido)
+- "Gastos explodiram 2333% vs mês passado. O que mudou?"`;
+
+    const client = new Anthropic({ apiKey });
+
+    try {
+      const message = await client.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        messages: [{ role: "user", content: prompt }]
+      });
+
+      const rawText =
+        message.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
+
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
+      res.set("Access-Control-Allow-Origin", "*");
+      res.json({
+        narrativa: parsed.narrativa ?? null,
+        bullet1: parsed.bullet1 ?? null,
+        bullet2: parsed.bullet2 ?? null,
+        scoreLabel: parsed.scoreLabel ?? null
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("generateDiagnosis error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
