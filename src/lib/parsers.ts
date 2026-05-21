@@ -16,6 +16,7 @@ export const CATEGORIES = [
   "Mercado",
   "Transporte",
   "Carro",
+  "CartaoCredito",
   "Assinaturas",
   "Saude",
   "Varejo",
@@ -41,6 +42,7 @@ export const CATEGORY_COLORS: Record<Category, string> = {
   Mercado:        "#5c9eff",
   Transporte:     "#4dcc8f",
   Carro:          "#4dcc8f",
+  CartaoCredito:  "#e879f9",
   Assinaturas:    "#a78bfa",
   Saude:          "#ff5c5c",
   Varejo:         "#5c9eff",
@@ -97,6 +99,21 @@ const CATEGORY_MAP: Record<string, string[]> = {
     "metrô", "metro", "sptrans", "onibus", "ônibus",
     "cabify", "99pop", "99 ", "uber", "taxi", "taxista",
     "brt", "vlt", "trem", "terminal"
+  ],
+  CartaoCredito: [
+    // por emissor
+    "fatura nubank", "nubank fatura", "fatura bradesco", "bradesco fatura",
+    "fatura itau", "itau fatura", "fatura santander", "santander fatura",
+    "fatura caixa", "fatura c6", "c6 fatura", "fatura inter", "inter fatura",
+    "fatura xp", "xp fatura", "fatura next", "fatura neon", "fatura will",
+    "fatura sicoob", "fatura banrisul", "fatura bmg", "fatura pan",
+    "fatura avenue", "fatura mercadopago", "fatura pagbank",
+    // por bandeira
+    "fatura mastercard", "fatura visa", "fatura elo",
+    "fatura amex", "fatura american express", "fatura hipercard",
+    // genéricos
+    "pagamento cartao", "pgto cartao", "pgto fatura",
+    "pagamento fatura", "fatura cartao", "cartao credito", "fatura"
   ],
   Carro: [
     // postos e combustível
