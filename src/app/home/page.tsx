@@ -3096,6 +3096,7 @@ function DailySpendChart({
   const { cap, hasCappedDays } = useMemo(() => {
     const nonZero = data.map(d => d.value).filter(v => v > 0).sort((a, b) => a - b);
     if (nonZero.length === 0) return { cap: undefined, hasCappedDays: false };
+    console.log("nonZero sample:", nonZero.slice(0, 5));
     const median = nonZero[Math.floor(nonZero.length / 2)];
     const c = median * 3;
     const hasPeak = nonZero.some(v => v > c);
@@ -3136,7 +3137,7 @@ function DailySpendChart({
             tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 10 }}
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v: number) => v >= 1000 ? `R$${(v / 1000).toFixed(0)}k` : `R$${v}`}
+            tickFormatter={(v: number) => v >= 1000 ? `R$${(v / 1000).toFixed(0)}k` : `R$${Math.round(v)}`}
             width={40}
             domain={cap ? [0, cap] : undefined}
           />
@@ -3181,7 +3182,12 @@ function DailySpendChart({
               y={cap}
               stroke="rgba(255,255,255,0.12)"
               strokeDasharray="2 4"
-              label={{ value: "pico fora da escala", position: "insideRight", fill: "rgba(255,255,255,0.3)", fontSize: 10 }}
+              label={{
+                value: `pico fora da escala (${cap >= 1000 ? `R$${(cap / 1000).toFixed(0)}k` : `R$${Math.round(cap)}`})`,
+                position: "insideRight",
+                fill: "rgba(255,255,255,0.3)",
+                fontSize: 10
+              }}
             />
           )}
         </ComposedChart>
