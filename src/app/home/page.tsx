@@ -3048,7 +3048,7 @@ function InsightsView({
 
 const PT_MONTHS_SHORT = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 
-interface DailyPoint { key: string; label: string; day: number; value: number }
+interface DailyPoint { key: string; label: string; day: number; value: number; rawValue?: number }
 
 function buildMonthData(monthKey: string, byDay: Record<string, number>): DailyPoint[] {
   const [year, month] = monthKey.split("-").map(Number);
@@ -3066,11 +3066,12 @@ function buildMonthData(monthKey: string, byDay: Record<string, number>): DailyP
 function DailyTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: DailyPoint }> }) {
   if (!active || !payload?.length) return null;
   const pt = payload[0].payload;
+  const realValue = pt.rawValue ?? pt.value;
   return (
     <div style={{ background: "#1a1a1a", border: "1px solid rgba(184,245,90,0.3)", borderRadius: 8, padding: "6px 10px", fontSize: 12, pointerEvents: "none", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}>
       <p style={{ color: "rgba(255,255,255,0.45)", marginBottom: 2 }}>{pt.label}</p>
-      <p style={{ fontWeight: 700, color: pt.value > 0 ? G : "rgba(255,255,255,0.3)" }}>
-        {pt.value > 0 ? formatCurrency(pt.value) : "Nenhum gasto"}
+      <p style={{ fontWeight: 700, color: realValue > 0 ? G : "rgba(255,255,255,0.3)" }}>
+        {realValue > 0 ? formatCurrency(realValue) : "Nenhum gasto"}
       </p>
     </div>
   );
@@ -3098,14 +3099,25 @@ function DailySpendChart({
     const median = nonZero[Math.floor(nonZero.length / 2)];
     const c = median * 3;
     const hasPeak = nonZero.some(v => v > c);
+    console.log("cap:", hasPeak ? c : undefined, "hasPeak:", hasPeak, "maxValue:", Math.max(...nonZero));
     return { cap: hasPeak ? c : undefined, hasCappedDays: hasPeak };
   }, [data]);
+
+  // Truncate value to cap for rendering; preserve rawValue for tooltip.
+  const chartData = useMemo(() =>
+    prevData.map(pt => cap !== undefined
+      ? { ...pt, rawValue: pt.value, value: Math.min(pt.value, cap) }
+      : pt
+    ),
+    [prevData, cap]
+  );
+
   const lastWithData = useMemo(() => [...data].reverse().find(d => d.value > 0), [data]);
 
   return (
     <>
       <ResponsiveContainer width="100%" height={180}>
-        <ComposedChart data={prevData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+        <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
           <defs>
             <linearGradient id="dailyGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="rgba(184,245,90,0.25)" />
