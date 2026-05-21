@@ -587,7 +587,6 @@ function WorkspaceApp({
   };
 
   const showDemo = false;
-  const isEmpty = transactions.length === 0;
   const visibleTx = showDemo ? demoTransactions : transactions;
   const sources = useMemo(() => {
     const labels = [...new Set(transactions.map((t) => t.sourceLabel).filter(Boolean))] as string[];
@@ -1307,44 +1306,6 @@ function WorkspaceApp({
 
       <div className="ws-main-content ws-desktop-layout" style={D.content}>
         {/* Demo banner */}
-        {isEmpty && (
-          <div
-            style={{
-              background: "rgba(184,245,90,0.07)",
-              border: "1px solid rgba(184,245,90,0.18)",
-              borderRadius: 12,
-              padding: "14px 20px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 16,
-              animation: "fadeUp .5s ease both"
-            }}
-          >
-            <div>
-              <span style={{ fontWeight: 700, color: G, fontSize: 13 }}>
-                Veja para onde vai cada real
-              </span>
-              <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", marginTop: 3 }}>
-                Importe o extrato do seu banco — PDF, CSV ou OFX — e receba um diagnóstico financeiro em segundos.
-              </p>
-            </div>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 800,
-                color: G,
-                background: "rgba(184,245,90,0.12)",
-                border: "1px solid rgba(184,245,90,0.22)",
-                borderRadius: 999,
-                padding: "4px 10px",
-                flexShrink: 0
-              }}
-            >
-              COMEÇAR
-            </span>
-          </div>
-        )}
 
         {error && (
           <div
