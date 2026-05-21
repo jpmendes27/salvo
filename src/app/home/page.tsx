@@ -69,7 +69,7 @@ import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fi
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
-import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot, ReferenceLine } from "recharts";
+import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
 
 type Profile = {
@@ -3048,7 +3048,7 @@ function InsightsView({
 
 const PT_MONTHS_SHORT = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 
-interface DailyPoint { key: string; label: string; day: number; value: number; rawValue?: number }
+interface DailyPoint { key: string; label: string; day: number; value: number }
 
 function buildMonthData(monthKey: string, byDay: Record<string, number>): DailyPoint[] {
   const [year, month] = monthKey.split("-").map(Number);
@@ -3066,12 +3066,11 @@ function buildMonthData(monthKey: string, byDay: Record<string, number>): DailyP
 function DailyTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: DailyPoint }> }) {
   if (!active || !payload?.length) return null;
   const pt = payload[0].payload;
-  const realValue = pt.rawValue ?? pt.value;
   return (
     <div style={{ background: "#1a1a1a", border: "1px solid rgba(184,245,90,0.3)", borderRadius: 8, padding: "6px 10px", fontSize: 12, pointerEvents: "none", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}>
       <p style={{ color: "rgba(255,255,255,0.45)", marginBottom: 2 }}>{pt.label}</p>
-      <p style={{ fontWeight: 700, color: realValue > 0 ? G : "rgba(255,255,255,0.3)" }}>
-        {realValue > 0 ? formatCurrency(realValue) : "Nenhum gasto"}
+      <p style={{ fontWeight: 700, color: pt.value > 0 ? G : "rgba(255,255,255,0.3)" }}>
+        {pt.value > 0 ? formatCurrency(pt.value) : "Nenhum gasto"}
       </p>
     </div>
   );
@@ -3092,32 +3091,12 @@ function DailySpendChart({
     return data.map((pt, i) => ({ ...pt, prevValue: full[i]?.value ?? 0 }));
   }, [data, prevMonthKey, prevByDay]);
 
-  // Cap Y axis when a single day dwarfs the rest: only triggers when max > 4× p75.
-  const { cap, hasCappedDays } = useMemo(() => {
-    const nonZero = data.map(d => d.value).filter(v => v > 0).sort((a, b) => a - b);
-    if (nonZero.length === 0) return { cap: undefined, hasCappedDays: false };
-    const max = nonZero[nonZero.length - 1] ?? 0;
-    const p75 = nonZero[Math.floor(nonZero.length * 0.75)] ?? 0;
-    const c = p75 * 4;
-    const hasPeak = max > c;
-    return { cap: hasPeak ? c : undefined, hasCappedDays: hasPeak };
-  }, [data]);
-
-  // Truncate value to cap for rendering; preserve rawValue for tooltip.
-  const chartData = useMemo(() =>
-    prevData.map(pt => cap !== undefined
-      ? { ...pt, rawValue: pt.value, value: Math.min(pt.value, cap) }
-      : pt
-    ),
-    [prevData, cap]
-  );
-
   const lastWithData = useMemo(() => [...data].reverse().find(d => d.value > 0), [data]);
 
   return (
     <>
       <ResponsiveContainer width="100%" height={180}>
-        <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+        <ComposedChart data={prevData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
           <defs>
             <linearGradient id="dailyGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="rgba(184,245,90,0.25)" />
@@ -3138,7 +3117,6 @@ function DailySpendChart({
             tickLine={false}
             tickFormatter={(v: number) => v >= 1000 ? `R$${(v / 1000).toFixed(0)}k` : `R$${Math.round(v)}`}
             width={40}
-            domain={cap ? [0, cap] : undefined}
           />
           <Tooltip
             content={(props) => <DailyTooltip active={props.active} payload={props.payload as unknown as Array<{ payload: DailyPoint }>} />}
@@ -3169,24 +3147,11 @@ function DailySpendChart({
           {lastWithData && (
             <ReferenceDot
               x={lastWithData.label}
-              y={Math.min(lastWithData.value, cap ?? lastWithData.value)}
+              y={lastWithData.value}
               r={5}
               fill={G}
               stroke="#fff"
               strokeWidth={2}
-            />
-          )}
-          {hasCappedDays && cap !== undefined && (
-            <ReferenceLine
-              y={cap}
-              stroke="rgba(255,255,255,0.12)"
-              strokeDasharray="2 4"
-              label={{
-                value: `pico fora da escala (${cap >= 1000 ? `R$${(cap / 1000).toFixed(0)}k` : `R$${Math.round(cap)}`})`,
-                position: "insideRight",
-                fill: "rgba(255,255,255,0.3)",
-                fontSize: 10
-              }}
             />
           )}
         </ComposedChart>
