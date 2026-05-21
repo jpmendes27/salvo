@@ -1063,6 +1063,16 @@ function WorkspaceApp({
   const mobIncomeChange = mobPrevIncome > 0 && summary.income > 0 ? Math.round(((summary.income - mobPrevIncome) / mobPrevIncome) * 100) : null;
   const prevSavingsRate = mobPrevIncome > 0 ? Math.round(((mobPrevIncome - mobPrevExpense) / mobPrevIncome) * 100) : null;
   const mobSavingsChange = prevSavingsRate !== null ? summary.savingsRate - prevSavingsRate : null;
+  const mobByDay = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of mobExpenses) m[tx.date] = (m[tx.date] ?? 0) + tx.amount;
+    return m;
+  }, [mobExpenses]);
+  const mobPrevByDay = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of prevTransactions.filter(t => t.type === "expense")) m[tx.date] = (m[tx.date] ?? 0) + tx.amount;
+    return m;
+  }, [prevTransactions]);
 
   const D = {
     shell: {
@@ -1658,7 +1668,15 @@ function WorkspaceApp({
           </div>
         </div>
 
-        {/* 2. Diagnóstico do mês */}
+        {/* 2. Gastos do mês */}
+        {mobExpenses.length > 0 && (
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
+            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>Gastos do mês</p>
+            <DailySpendChart byDay={mobByDay} monthKey={showDemo ? "2026-04" : monthKey} prevByDay={mobPrevByDay} prevMonthKey={prevMonthKey} />
+          </div>
+        )}
+
+        {/* 3. Diagnóstico do mês */}
         {mobExpenses.length > 0 && (() => {
           const mobNet = mobTotalEntradas - mobTotalGasto;
           const mobNarrativa = (mobScore ?? 0) >= 6
@@ -1753,7 +1771,7 @@ function WorkspaceApp({
                 const pct = Math.round((total / mobTotalGasto) * 100);
                 return (
                   <div key={cat} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}66`, flexShrink: 0 }} />
+                    <CategoryAvatar categoria={cat} size={28} radius={8} />
                     <span style={{ flex: 1, fontSize: 13, color: "rgba(255,255,255,0.78)", fontWeight: 600 }}>{cat}</span>
                     <div style={{ width: 60, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${Math.round((total / mobMaxCategory) * 100)}%`, background: color, borderRadius: 2 }} />
