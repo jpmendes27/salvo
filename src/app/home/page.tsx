@@ -69,6 +69,7 @@ import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fi
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { track } from "@/lib/analytics";
 
 type Profile = {
@@ -2977,14 +2978,10 @@ function InsightsView({
         </div>
       </div>
 
-      {/* Dias de maior gasto */}
+      {/* Gastos do mês */}
       <div className="ins-card">
-        <p style={INS_LABEL}>Dias de maior gasto</p>
-        {topDays.length === 0 ? (
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>Sem dados suficientes.</p>
-        ) : (
-          <DaysBarChart topDays={topDays} maxDayAmount={maxDayAmount} />
-        )}
+        <p style={INS_LABEL}>Gastos do mês</p>
+        <DailySpendChart byDay={byDay} monthKey={monthKey} />
       </div>
 
       {/* Top 3 Categorias + Assinaturas */}
@@ -3034,78 +3031,70 @@ function InsightsView({
   );
 }
 
-// ─── DaysBarChart ─────────────────────────────────────────────────────────────
+// ─── DailySpendChart ──────────────────────────────────────────────────────────
 
-function DaysBarChart({ topDays, maxDayAmount }: { topDays: [string, number][]; maxDayAmount: number }) {
-  const [mounted, setMounted] = useState(false);
-  const [hovIdx, setHovIdx] = useState<number | null>(null);
+const PT_MONTHS_SHORT = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 
-  useEffect(() => {
-    const t = setTimeout(() => setMounted(true), 60);
-    return () => clearTimeout(t);
-  }, []);
+interface DailyPoint { key: string; label: string; day: number; value: number }
 
+function buildMonthData(monthKey: string, byDay: Record<string, number>): DailyPoint[] {
+  const [year, month] = monthKey.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = new Date();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+  const lastDay = isCurrentMonth ? today.getDate() : daysInMonth;
+  return Array.from({ length: lastDay }, (_, i) => {
+    const day = i + 1;
+    const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return { key, label: `${String(day).padStart(2, "0")} ${PT_MONTHS_SHORT[month - 1]}`, day, value: byDay[key] ?? 0 };
+  });
+}
+
+function DailyTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: DailyPoint }> }) {
+  if (!active || !payload?.length) return null;
+  const pt = payload[0].payload;
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      {topDays.map(([date, amount], idx) => {
-        const parts = date.split("-");
-        const dateLabel = `${parts[2]}/${parts[1]}`;
-        const barW = mounted ? Math.round((amount / maxDayAmount) * 100) : 0;
-        const isTop = idx === 0;
-        const isHov = hovIdx === idx;
-        const opacity = isTop ? 1 : Math.max(0.2, 1 - idx * 0.18);
-        const barColor = isHov || isTop ? G : `rgba(184,245,90,${opacity})`;
-
-        return (
-          <div
-            key={date}
-            style={{ position: "relative" }}
-            onMouseEnter={() => setHovIdx(idx)}
-            onMouseLeave={() => setHovIdx(null)}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{
-                fontSize: 12, fontWeight: isTop ? 700 : 500,
-                color: isTop ? G : "rgba(255,255,255,0.5)",
-                width: 36, flexShrink: 0, textAlign: "right"
-              }}>
-                {dateLabel}
-              </span>
-              <div style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
-                <div style={{
-                  height: "100%", borderRadius: 4,
-                  width: `${barW}%`,
-                  background: barColor,
-                  filter: isHov ? "brightness(1.15)" : "none",
-                  boxShadow: isTop || isHov ? "0 0 10px rgba(184,245,90,0.4)" : "none",
-                  transition: "width 800ms ease-out, background .2s ease, filter .15s ease"
-                }} />
-              </div>
-              <span style={{
-                fontSize: 11.5, fontWeight: isTop ? 700 : 400,
-                color: "rgba(255,255,255,0.45)",
-                width: 72, flexShrink: 0, textAlign: "right",
-                opacity: isHov ? 0 : 1, transition: "opacity .15s"
-              }}>
-                {formatCurrency(amount)}
-              </span>
-            </div>
-            {isHov && (
-              <div style={{
-                position: "absolute", right: 0, top: -36, zIndex: 20,
-                background: "#1a1a1a", border: "1px solid rgba(184,245,90,0.3)",
-                borderRadius: 8, padding: "5px 10px",
-                fontSize: 12, pointerEvents: "none", whiteSpace: "nowrap",
-                boxShadow: "0 4px 16px rgba(0,0,0,0.5)"
-              }}>
-                <span style={{ color: "rgba(255,255,255,0.45)", marginRight: 6 }}>{dateLabel}</span>
-                <span style={{ fontWeight: 700, color: G }}>{formatCurrency(amount)}</span>
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div style={{ background: "#1a1a1a", border: "1px solid rgba(184,245,90,0.3)", borderRadius: 8, padding: "6px 10px", fontSize: 12, pointerEvents: "none", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}>
+      <p style={{ color: "rgba(255,255,255,0.45)", marginBottom: 2 }}>{pt.label}</p>
+      <p style={{ fontWeight: 700, color: pt.value > 0 ? G : "rgba(255,255,255,0.3)" }}>
+        {pt.value > 0 ? formatCurrency(pt.value) : "Nenhum gasto"}
+      </p>
     </div>
+  );
+}
+
+function DailySpendChart({ byDay, monthKey }: { byDay: Record<string, number>; monthKey: string }) {
+  const data = useMemo(() => buildMonthData(monthKey, byDay), [monthKey, byDay]);
+  return (
+    <ResponsiveContainer width="100%" height={160}>
+      <AreaChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
+        <defs>
+          <linearGradient id="dailyGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(184,245,90,0.25)" />
+            <stop offset="100%" stopColor="rgba(184,245,90,0)" />
+          </linearGradient>
+        </defs>
+        <CartesianGrid horizontal={true} vertical={false} stroke="rgba(255,255,255,0.06)" />
+        <XAxis dataKey="day" hide={true} />
+        <YAxis hide={true} />
+        <Tooltip
+          content={(props) => <DailyTooltip active={props.active} payload={props.payload as unknown as Array<{ payload: DailyPoint }>} />}
+          cursor={{ stroke: "rgba(184,245,90,0.2)", strokeWidth: 1 }}
+        />
+        <Area
+          type="monotone"
+          dataKey="value"
+          stroke={G}
+          strokeWidth={2}
+          fill="url(#dailyGradient)"
+          dot={false}
+          activeDot={{ r: 4, fill: G, stroke: "#fff", strokeWidth: 2 }}
+          animationDuration={1000}
+          animationEasing="ease-out"
+          isAnimationActive={true}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
   );
 }
 
