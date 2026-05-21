@@ -35,7 +35,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Copy,
   Crown,
   Eye,
   EyeOff,
@@ -1578,46 +1577,6 @@ function WorkspaceApp({
                   {ins}
                 </p>
               ))}
-              <textarea
-                readOnly
-                value={summary.shareText}
-                style={{
-                  width: "100%",
-                  marginTop: 10,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  borderRadius: 8,
-                  color: "rgba(255,255,255,0.55)",
-                  fontSize: 11.5,
-                  padding: "10px 12px",
-                  resize: "vertical",
-                  minHeight: 80,
-                  lineHeight: 1.6
-                }}
-              />
-              <button
-                onClick={() => navigator.clipboard.writeText(summary.shareText)}
-                style={{
-                  marginTop: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "rgba(255,255,255,0.45)",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: 0,
-                  transition: "color .18s"
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = "#fff")}
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.color = "rgba(255,255,255,0.45)")
-                }
-              >
-                <Copy size={13} /> Copiar
-              </button>
             </WsCard>
 
             {/* Projeção link */}
