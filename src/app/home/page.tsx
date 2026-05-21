@@ -2981,7 +2981,9 @@ function InsightsView({
       {/* Gastos do mês */}
       <div className="ins-card">
         <p style={INS_LABEL}>Gastos do mês</p>
-        <DailySpendChart byDay={byDay} monthKey={monthKey} />
+        <div style={{ width: "100%", minWidth: 0 }}>
+          <DailySpendChart byDay={byDay} monthKey={monthKey} />
+        </div>
       </div>
 
       {/* Top 3 Categorias + Assinaturas */}

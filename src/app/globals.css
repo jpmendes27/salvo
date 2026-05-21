@@ -1131,7 +1131,7 @@ button {
 }
 
 /* Insights grid children need min-width: 0 to allow text truncation */
-.ins-2col > * { min-width: 0; overflow: hidden; }
+.ins-2col > * { min-width: 0; }
 .ins-metrics > * { min-width: 0; }
 
 @media (max-width: 960px) {
