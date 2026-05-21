@@ -3091,16 +3091,15 @@ function DailySpendChart({
     return data.map((pt, i) => ({ ...pt, prevValue: full[i]?.value ?? 0 }));
   }, [data, prevMonthKey, prevByDay]);
 
-  // Cap Y axis at p90 of non-zero values so outlier days don't flatten the chart.
-  const cap = useMemo(() => {
+  // Cap Y axis at 3× median so single outlier days don't flatten the rest.
+  const { cap, hasCappedDays } = useMemo(() => {
     const nonZero = data.map(d => d.value).filter(v => v > 0).sort((a, b) => a - b);
-    if (nonZero.length < 2) return undefined;
-    const p90 = nonZero[Math.floor(nonZero.length * 0.90)];
-    // Only apply cap when the max is meaningfully larger than p90 (>2×)
-    return nonZero[nonZero.length - 1] > p90 * 2 ? p90 : undefined;
+    if (nonZero.length === 0) return { cap: undefined, hasCappedDays: false };
+    const median = nonZero[Math.floor(nonZero.length / 2)];
+    const c = median * 3;
+    const hasPeak = nonZero.some(v => v > c);
+    return { cap: hasPeak ? c : undefined, hasCappedDays: hasPeak };
   }, [data]);
-
-  const hasCappedDays = cap !== undefined && data.some(d => d.value > cap);
   const lastWithData = useMemo(() => [...data].reverse().find(d => d.value > 0), [data]);
 
   return (
@@ -3165,12 +3164,12 @@ function DailySpendChart({
               strokeWidth={2}
             />
           )}
-          {hasCappedDays && (
+          {hasCappedDays && cap !== undefined && (
             <ReferenceLine
               y={cap}
               stroke="rgba(255,255,255,0.12)"
               strokeDasharray="2 4"
-              label={{ value: "pico fora da escala", position: "insideTopRight", fill: "rgba(255,255,255,0.22)", fontSize: 9 }}
+              label={{ value: "pico fora da escala", position: "insideRight", fill: "rgba(255,255,255,0.3)", fontSize: 10 }}
             />
           )}
         </ComposedChart>
