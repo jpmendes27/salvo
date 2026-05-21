@@ -4188,7 +4188,8 @@ const inputStyle: CSSProperties = {
   borderRadius: 8,
   color: "#fff",
   fontSize: 13,
-  padding: "11px 13px"
+  padding: "11px 13px",
+  colorScheme: "dark"
 };
 
 function WsCard({
@@ -4385,7 +4386,7 @@ function InviteContactModal({
     width: "100%", boxSizing: "border-box",
     background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
     borderRadius: 8, color: "#fff", fontSize: 14, padding: "10px 12px",
-    outline: "none", marginBottom: 12
+    outline: "none", marginBottom: 12, colorScheme: "dark"
   };
 
   return (
