@@ -1564,21 +1564,6 @@ function WorkspaceApp({
               }
             />
 
-            {/* Summary card */}
-            <WsCard>
-              <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>
-                Resumo de {monthLabel(showDemo ? "2026-04" : monthKey)}
-              </h3>
-              {summary.insights.map((ins) => (
-                <p
-                  key={ins}
-                  style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 6 }}
-                >
-                  {ins}
-                </p>
-              ))}
-            </WsCard>
-
             {/* Projeção link */}
             <button
               onClick={() => { localStorage.setItem("fincheck_workspace", workspace.id); router.push("/projecao"); }}
