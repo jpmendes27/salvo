@@ -69,7 +69,7 @@ import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fi
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
 
 type Profile = {
@@ -2766,6 +2766,11 @@ function InsightsView({
   const prevExpenses = prevTransactions.filter((t) => t.type === "expense");
   const prevTotalGasto = prevExpenses.reduce((s, t) => s + t.amount, 0);
 
+  const prevMonthKey = useMemo(() => {
+    const [y, m] = monthKey.split("-").map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+  }, [monthKey]);
+
   // Dias com gasto para média/dia
   const daysWithExpenses = useMemo(() => new Set(expenses.map((t) => t.date)).size, [expenses]);
   const mediaGastoPorDia = daysWithExpenses > 0 ? totalGasto / daysWithExpenses : 0;
@@ -2793,6 +2798,12 @@ function InsightsView({
     for (const tx of expenses) m[tx.date] = (m[tx.date] ?? 0) + tx.amount;
     return m;
   }, [expenses]);
+
+  const prevByDay = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tx of prevExpenses) m[tx.date] = (m[tx.date] ?? 0) + tx.amount;
+    return m;
+  }, [prevExpenses]);
 
   const topDays = useMemo(() => {
     return Object.entries(byDay).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -2982,7 +2993,7 @@ function InsightsView({
       <div className="ins-card">
         <p style={INS_LABEL}>Gastos do mês</p>
         <div style={{ width: "100%", minWidth: 0 }}>
-          <DailySpendChart byDay={byDay} monthKey={monthKey} />
+          <DailySpendChart byDay={byDay} monthKey={monthKey} prevByDay={prevByDay} prevMonthKey={prevMonthKey} />
         </div>
       </div>
 
@@ -3065,38 +3076,89 @@ function DailyTooltip({ active, payload }: { active?: boolean; payload?: Array<{
   );
 }
 
-function DailySpendChart({ byDay, monthKey }: { byDay: Record<string, number>; monthKey: string }) {
+function DailySpendChart({
+  byDay, monthKey, prevByDay, prevMonthKey
+}: {
+  byDay: Record<string, number>; monthKey: string;
+  prevByDay: Record<string, number>; prevMonthKey: string;
+}) {
   const data = useMemo(() => buildMonthData(monthKey, byDay), [monthKey, byDay]);
+  const prevData = useMemo(() => {
+    const full = buildMonthData(prevMonthKey, prevByDay);
+    // trim or extend prev to same length as current month
+    if (full.length >= data.length) return full.slice(0, data.length);
+    const extra = Array.from({ length: data.length - full.length }, (_, i) => {
+      const day = full.length + i + 1;
+      return { key: "", label: "", day, value: 0 };
+    });
+    return [...full, ...extra];
+  }, [prevMonthKey, prevByDay, data.length]);
+
+  const lastWithData = useMemo(() => [...data].reverse().find(d => d.value > 0), [data]);
+
   return (
-    <ResponsiveContainer width="100%" height={160}>
-      <AreaChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
-        <defs>
-          <linearGradient id="dailyGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(184,245,90,0.25)" />
-            <stop offset="100%" stopColor="rgba(184,245,90,0)" />
-          </linearGradient>
-        </defs>
-        <CartesianGrid horizontal={true} vertical={false} stroke="rgba(255,255,255,0.06)" />
-        <XAxis dataKey="day" hide={true} />
-        <YAxis hide={true} />
-        <Tooltip
-          content={(props) => <DailyTooltip active={props.active} payload={props.payload as unknown as Array<{ payload: DailyPoint }>} />}
-          cursor={{ stroke: "rgba(184,245,90,0.2)", strokeWidth: 1 }}
-        />
-        <Area
-          type="monotone"
-          dataKey="value"
-          stroke={G}
-          strokeWidth={2}
-          fill="url(#dailyGradient)"
-          dot={false}
-          activeDot={{ r: 4, fill: G, stroke: "#fff", strokeWidth: 2 }}
-          animationDuration={1000}
-          animationEasing="ease-out"
-          isAnimationActive={true}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+    <>
+      <ResponsiveContainer width="100%" height={160}>
+        <ComposedChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
+          <defs>
+            <linearGradient id="dailyGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(184,245,90,0.25)" />
+              <stop offset="100%" stopColor="rgba(184,245,90,0)" />
+            </linearGradient>
+          </defs>
+          <CartesianGrid horizontal={true} vertical={false} stroke="rgba(255,255,255,0.06)" />
+          <XAxis dataKey="day" hide={true} type="number" domain={[1, data.length]} />
+          <YAxis hide={true} />
+          <Tooltip
+            content={(props) => <DailyTooltip active={props.active} payload={props.payload as unknown as Array<{ payload: DailyPoint }>} />}
+            cursor={{ stroke: "rgba(184,245,90,0.2)", strokeWidth: 1 }}
+          />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={G}
+            strokeWidth={2}
+            fill="url(#dailyGradient)"
+            dot={false}
+            activeDot={{ r: 4, fill: G, stroke: "#fff", strokeWidth: 2 }}
+            animationDuration={1000}
+            animationEasing="ease-out"
+            isAnimationActive={true}
+          />
+          <Line
+            data={prevData}
+            type="monotone"
+            dataKey="value"
+            stroke="rgba(255,255,255,0.25)"
+            strokeWidth={1.5}
+            strokeDasharray="4 4"
+            dot={false}
+            activeDot={false}
+            isAnimationActive={false}
+          />
+          {lastWithData && (
+            <ReferenceDot
+              x={lastWithData.day}
+              y={lastWithData.value}
+              r={5}
+              fill={G}
+              stroke="#fff"
+              strokeWidth={2}
+            />
+          )}
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11, color: "rgba(255,255,255,0.45)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 16, height: 2, background: G, borderRadius: 1, display: "inline-block" }} />
+          Este mês
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 16, height: 2, background: "rgba(255,255,255,0.25)", borderRadius: 1, display: "inline-block" }} />
+          Mês passado
+        </span>
+      </div>
+    </>
   );
 }
 
