@@ -2982,25 +2982,7 @@ function InsightsView({
         {topDays.length === 0 ? (
           <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>Sem dados suficientes.</p>
         ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {topDays.map(([date, amount], idx) => {
-              const parts = date.split("-");
-              const dateLabel = `${parts[2]}/${parts[1]}`;
-              const isTop = idx === 0;
-              const barW = Math.round((amount / maxDayAmount) * 100);
-              return (
-                <div key={date}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: isTop ? 800 : 600, color: isTop ? G : "rgba(255,255,255,0.65)" }}>{dateLabel}</span>
-                    <span style={{ fontSize: 12, fontWeight: isTop ? 800 : 600, color: isTop ? G : "rgba(255,255,255,0.45)" }}>{formatCurrency(amount)}</span>
-                  </div>
-                  <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
-                    <div style={{ height: "100%", borderRadius: 2, width: `${barW}%`, background: isTop ? G : "rgba(255,255,255,0.22)", boxShadow: isTop ? `0 0 8px ${G}55` : "none", transition: "width .5s cubic-bezier(.4,0,.2,1)" }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <DaysBarChart topDays={topDays} maxDayAmount={maxDayAmount} />
         )}
       </div>
 
@@ -3016,32 +2998,12 @@ function InsightsView({
               Ver tudo <ArrowRight size={11} />
             </button>
           </div>
-          <div style={{ display: "grid", gap: 12 }}>
-            {byCategory.slice(0, 3).map(([cat, total]) => {
-              const color = (CATEGORY_COLORS as Record<string, string>)[cat] ?? "#888";
-              const pct = Math.round((total / totalGasto) * 100);
-              const prev = prevByCategory[cat] ?? 0;
-              const changePct = prev > 0 ? ((total - prev) / prev) * 100 : null;
-              return (
-                <div key={cat}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>{CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0, marginLeft: 8 }}>
-                      {changePct !== null && (
-                        <span style={{ fontSize: 10.5, fontWeight: 700, color: changePct < 0 ? G : "#ff8080" }}>
-                          {changePct < 0 ? "▼" : "▲"} {Math.abs(changePct).toFixed(0)}%
-                        </span>
-                      )}
-                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.36)" }}>{formatCurrency(total)} <span style={{ opacity: 0.7 }}>{pct}%</span></span>
-                    </div>
-                  </div>
-                  <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
-                    <div style={{ height: "100%", borderRadius: 2, width: `${Math.round((total / maxCategory) * 100)}%`, background: color, boxShadow: `0 0 8px ${color}55`, transition: "width .5s cubic-bezier(.4,0,.2,1)" }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <TopCategoriesChart
+            byCategory={byCategory}
+            maxCategory={maxCategory}
+            totalGasto={totalGasto}
+            prevByCategory={prevByCategory}
+          />
         </div>
 
         <div className="ins-card">
@@ -3070,6 +3032,199 @@ function InsightsView({
     </div>
   );
 }
+
+// ─── DaysBarChart ─────────────────────────────────────────────────────────────
+
+function DaysBarChart({ topDays, maxDayAmount }: { topDays: [string, number][]; maxDayAmount: number }) {
+  const [mounted, setMounted] = useState(false);
+  const [hovIdx, setHovIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 60);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {topDays.map(([date, amount], idx) => {
+        const parts = date.split("-");
+        const dateLabel = `${parts[2]}/${parts[1]}`;
+        const barW = mounted ? Math.round((amount / maxDayAmount) * 100) : 0;
+        const isTop = idx === 0;
+        const isHov = hovIdx === idx;
+        const opacity = isTop ? 1 : Math.max(0.2, 1 - idx * 0.18);
+        const barColor = isHov || isTop ? G : `rgba(184,245,90,${opacity})`;
+
+        return (
+          <div
+            key={date}
+            style={{ position: "relative" }}
+            onMouseEnter={() => setHovIdx(idx)}
+            onMouseLeave={() => setHovIdx(null)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{
+                fontSize: 12, fontWeight: isTop ? 700 : 500,
+                color: isTop ? G : "rgba(255,255,255,0.5)",
+                width: 36, flexShrink: 0, textAlign: "right"
+              }}>
+                {dateLabel}
+              </span>
+              <div style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 4,
+                  width: `${barW}%`,
+                  background: barColor,
+                  filter: isHov ? "brightness(1.15)" : "none",
+                  boxShadow: isTop || isHov ? "0 0 10px rgba(184,245,90,0.4)" : "none",
+                  transition: "width 800ms ease-out, background .2s ease, filter .15s ease"
+                }} />
+              </div>
+              <span style={{
+                fontSize: 11.5, fontWeight: isTop ? 700 : 400,
+                color: "rgba(255,255,255,0.45)",
+                width: 72, flexShrink: 0, textAlign: "right",
+                opacity: isHov ? 0 : 1, transition: "opacity .15s"
+              }}>
+                {formatCurrency(amount)}
+              </span>
+            </div>
+            {isHov && (
+              <div style={{
+                position: "absolute", right: 0, top: -36, zIndex: 20,
+                background: "#1a1a1a", border: "1px solid rgba(184,245,90,0.3)",
+                borderRadius: 8, padding: "5px 10px",
+                fontSize: 12, pointerEvents: "none", whiteSpace: "nowrap",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.5)"
+              }}>
+                <span style={{ color: "rgba(255,255,255,0.45)", marginRight: 6 }}>{dateLabel}</span>
+                <span style={{ fontWeight: 700, color: G }}>{formatCurrency(amount)}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── TopCategoriesChart ───────────────────────────────────────────────────────
+
+const CAT_COLORS: Record<string, string> = {
+  Alimentacao:    "#f5a623",
+  Mercado:        "#5c9eff",
+  Transporte:     "#00c9a7",
+  Carro:          "#4dcc8f",
+  CartaoCredito:  "#e879f9",
+  Assinaturas:    "#a78bfa",
+  Saude:          "#ff5c5c",
+  Varejo:         "#f97316",
+  Educacao:       "#38bdf8",
+  Moradia:        "#818cf8",
+  Contas:         "#4dcc8f",
+  Seguros:        "#fb923c",
+  Taxas:          "#ff8c42",
+  Emprestimos:    "#f43f5e",
+  Doacoes:        "#c8f564",
+  Transferencias: "#6b7080",
+  Hospedagem:     "#e11d48",
+  Viagem:         "#06b6d4",
+  Lazer:          "#c8f564",
+  Recebimentos:   "#4dcc8f",
+  Outros:         "#6b7080",
+};
+
+function TopCategoriesChart({
+  byCategory,
+  maxCategory,
+  totalGasto,
+  prevByCategory
+}: {
+  byCategory: [string, number][];
+  maxCategory: number;
+  totalGasto: number;
+  prevByCategory: Record<string, number>;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [hovCat, setHovCat] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 60);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <div style={{ display: "grid", gap: 4 }}>
+      {byCategory.slice(0, 3).map(([cat, total]) => {
+        const color = CAT_COLORS[cat] ?? "#888";
+        const pct = totalGasto > 0 ? Math.round((total / totalGasto) * 100) : 0;
+        const barW = mounted ? Math.round((total / maxCategory) * 100) : 0;
+        const prev = prevByCategory[cat] ?? 0;
+        const changePct = prev > 0 ? ((total - prev) / prev) * 100 : null;
+        const isHov = hovCat === cat;
+        const label = CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat;
+        const initial = label.charAt(0).toUpperCase();
+
+        return (
+          <div
+            key={cat}
+            onMouseEnter={() => setHovCat(cat)}
+            onMouseLeave={() => setHovCat(null)}
+            style={{
+              padding: "8px 10px", borderRadius: 8,
+              background: isHov ? "rgba(255,255,255,0.04)" : "transparent",
+              transition: "background .15s", position: "relative"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <div style={{
+                width: 26, height: 26, borderRadius: "50%",
+                background: `${color}22`, border: `1px solid ${color}55`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, fontSize: 11, fontWeight: 800, color
+              }}>
+                {initial}
+              </div>
+              <span style={{
+                flex: 1, fontSize: 13, fontWeight: 700, color: "#e8e9ec",
+                minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+              }}>
+                {label}
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: "#fff" }}>{formatCurrency(total)}</span>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{pct}%</span>
+              </div>
+            </div>
+            <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginLeft: 36 }}>
+              <div style={{
+                height: "100%", borderRadius: 2,
+                width: `${barW}%`,
+                background: color,
+                boxShadow: `0 0 8px ${color}55`,
+                transition: "width 800ms ease-out"
+              }} />
+            </div>
+            {isHov && changePct !== null && (
+              <div style={{
+                position: "absolute", right: 10, top: -30, zIndex: 20,
+                background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 8, padding: "4px 10px",
+                fontSize: 11.5, fontWeight: 700, pointerEvents: "none",
+                color: changePct < 0 ? G : "#ff8080", whiteSpace: "nowrap",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.5)"
+              }}>
+                {changePct < 0 ? "▼" : "▲"} {Math.abs(changePct).toFixed(0)}% vs mês anterior
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── InsightScoreRing ─────────────────────────────────────────────────────────
 
 function InsightScoreRing({ score, color }: { score: number | null; color: string; size?: number }) {
   return (
