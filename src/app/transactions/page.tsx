@@ -17,7 +17,7 @@ import { useSearchParams } from "next/navigation";
 import { useAuthUser } from "@/app/auth-provider";
 import { db } from "@/lib/firebase";
 import { formatCurrency, monthLabel } from "@/lib/money";
-import { CATEGORY_COLORS } from "@/lib/parsers";
+import { CATEGORY_COLORS, CATEGORY_LABELS } from "@/lib/parsers";
 import type { Transaction } from "@/lib/types";
 
 const G = "#b8f55a";
@@ -248,7 +248,7 @@ function TxRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
           {tx.description}
         </p>
         <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
-          {tx.category} · {dateLabel}
+          {CATEGORY_LABELS[tx.category as keyof typeof CATEGORY_LABELS] ?? tx.category} · {dateLabel}
           {tx.sourceLabel ? ` · ${tx.sourceLabel}` : ""}
         </p>
       </div>

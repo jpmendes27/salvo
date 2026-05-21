@@ -65,7 +65,7 @@ import { buildMonthlyPlanSummary } from "@/lib/planning";
 import { buildMonthlySummary } from "@/lib/summary";
 import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction, TransactionType, Workspace } from "@/lib/types";
 import { defaultCategories, demoTransactions } from "@/lib/demo";
-import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, fileToBase64, guessCategory, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
+import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { extractPDFText } from "@/lib/pdf-extract";
 import { track } from "@/lib/analytics";
@@ -2974,7 +2974,7 @@ function InsightsView({
               return (
                 <div key={cat}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>{cat}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>{CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat}</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0, marginLeft: 8 }}>
                       {changePct !== null && (
                         <span style={{ fontSize: 10.5, fontWeight: 700, color: changePct < 0 ? G : "#ff8080" }}>
@@ -3088,7 +3088,7 @@ function TxRow({
           {tx.description}
         </p>
         <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
-          {tx.category} · {dateLabel}
+          {CATEGORY_LABELS[tx.category as keyof typeof CATEGORY_LABELS] ?? tx.category} · {dateLabel}
         </p>
       </div>
       <span
@@ -3375,7 +3375,7 @@ function ImportModal({
                       >
                         {categoriesFor(row.type).map((c) => (
                           <option key={c} value={c} style={{ background: "#111", color: "#fff" }}>
-                            {c}
+                            {CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c}
                           </option>
                         ))}
                       </select>
@@ -3588,7 +3588,7 @@ function AddTransactionModal({
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c}
                 </option>
               ))}
             </select>
@@ -3814,7 +3814,7 @@ function AddPlannedItemModal({
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c}
                 </option>
               ))}
             </select>

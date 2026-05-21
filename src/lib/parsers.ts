@@ -37,6 +37,30 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
+export const CATEGORY_LABELS: Record<Category, string> = {
+  Alimentacao:    "Alimentação",
+  Mercado:        "Mercado",
+  Transporte:     "Transporte",
+  Carro:          "Carro",
+  CartaoCredito:  "Cartão de Crédito",
+  Assinaturas:    "Assinaturas",
+  Saude:          "Saúde",
+  Varejo:         "Varejo",
+  Educacao:       "Educação",
+  Moradia:        "Moradia",
+  Contas:         "Contas",
+  Seguros:        "Seguros",
+  Taxas:          "Taxas",
+  Emprestimos:    "Empréstimos",
+  Doacoes:        "Doações",
+  Transferencias: "Transferências",
+  Hospedagem:     "Hospedagem",
+  Viagem:         "Viagem",
+  Lazer:          "Lazer",
+  Recebimentos:   "Recebimentos",
+  Outros:         "Outros"
+};
+
 export const CATEGORY_COLORS: Record<Category, string> = {
   Alimentacao:    "#f5a623",
   Mercado:        "#5c9eff",
