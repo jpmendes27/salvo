@@ -656,6 +656,18 @@ export default function LoginPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    // signInWithPopup creates iframes it removes directly from the DOM,
+    // bypassing React's fiber tree and causing a fatal removeChild crash.
+    // This patch silently ignores removals where the child has no parent.
+    const orig = Node.prototype.removeChild;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Node.prototype as any).removeChild = function (child: Node) {
+      if (child.parentNode !== this) return child;
+      return orig.call(this, child);
+    };
+  }, []);
+
+  useEffect(() => {
     getRedirectResult(auth).catch(() => {});
   }, []);
 
