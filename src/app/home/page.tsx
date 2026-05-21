@@ -1036,9 +1036,6 @@ function WorkspaceApp({
     if (mobRatio >= 0.50) return 8.5;
     return 10;
   })();
-  const mobScoreColor = mobScore === null ? G : mobScore >= 8 ? G : mobScore >= 6 ? "#facc15" : "#ff8080";
-  const mobScoreLabel = mobScore === null ? "—" : mobScore >= 8 ? "Saúde em dia" : mobScore >= 6 ? "Atenção" : "Situação crítica";
-  const mobScoreRgb = mobScoreColor === G ? "184,245,90" : mobScoreColor === "#facc15" ? "250,204,21" : "255,128,128";
   const mobByCategory = useMemo(() => {
     const m: Record<string, number> = {};
     for (const tx of mobExpenses) m[tx.category] = (m[tx.category] ?? 0) + tx.amount;
@@ -1059,7 +1056,6 @@ function WorkspaceApp({
   const mobRecentTx = useMemo(() => [...visibleTx].slice(0, 6), [visibleTx]);
   const mobPrevExpense = useMemo(() => prevTransactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0), [prevTransactions]);
   const mobPrevIncome = useMemo(() => prevTransactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [prevTransactions]);
-  const mobExpenseChange = mobPrevExpense > 0 && summary.expense > 0 ? Math.round(((summary.expense - mobPrevExpense) / mobPrevExpense) * 100) : null;
   const mobIncomeChange = mobPrevIncome > 0 && summary.income > 0 ? Math.round(((summary.income - mobPrevIncome) / mobPrevIncome) * 100) : null;
   const prevSavingsRate = mobPrevIncome > 0 ? Math.round(((mobPrevIncome - mobPrevExpense) / mobPrevIncome) * 100) : null;
   const mobSavingsChange = prevSavingsRate !== null ? summary.savingsRate - prevSavingsRate : null;
@@ -1073,6 +1069,65 @@ function WorkspaceApp({
     for (const tx of prevTransactions.filter(t => t.type === "expense")) m[tx.date] = (m[tx.date] ?? 0) + tx.amount;
     return m;
   }, [prevTransactions]);
+
+  // Mobile diagnosis — same AI fetch + fallback as InsightsView
+  const [mobAiDiag, setMobAiDiag] = useState<{ narrativa: string; bullet1: string | null; bullet2: string | null; scoreLabel: string } | null>(null);
+  const [mobDiagLoading, setMobDiagLoading] = useState(false);
+  const mobScoreColor = mobScore === null ? G : mobScore >= 8 ? G : mobScore >= 6 ? "#facc15" : "#ff8080";
+  const mobScoreRgb = mobScoreColor === G ? "184,245,90" : mobScoreColor === "#facc15" ? "250,204,21" : "255,128,128";
+  const mobScoreLabel = mobScore === null ? "—" : mobScore >= 8 ? "Arrasando 💪" : mobScore >= 6 ? "Dá pra melhorar" : "Tá pesado.";
+  const mobNet = mobTotalEntradas - mobTotalGasto;
+  const mobTopCat = mobByCategory[0] ?? null;
+  const mobExpenseChange = mobPrevExpense > 0 && summary.expense > 0 ? Math.round(((summary.expense - mobPrevExpense) / mobPrevExpense) * 100) : null;
+  const mobNarrativa = (mobScore ?? 0) >= 8
+    ? `Fechou o mês no positivo em ${formatCurrency(mobNet)}. Só ${mobComprometimento}% da renda foi embora — isso é disciplina de verdade.`
+    : (mobScore ?? 0) >= 6
+    ? `Mês fechou ${mobNet >= 0 ? "positivo" : "no vermelho"} em ${formatCurrency(Math.abs(mobNet))}, mas ${mobComprometimento}% da renda já era. Dá pra apertar mais.`
+    : `${mobComprometimento}% da renda foi embora esse mês. Sobrou ${formatCurrency(Math.abs(mobNet))}${mobNet < 0 ? " no negativo" : ""} — isso precisa mudar.`;
+  const mobBullet1 = mobTopCat ? `${mobTopCat[0]} engoliu ${formatCurrency(mobTopCat[1])} — ${Math.round((mobTopCat[1] / mobTotalGasto) * 100)}% de tudo que saiu` : null;
+  const mobBullet2 = mobExpenseChange !== null
+    ? mobExpenseChange > 100
+      ? `Gastos explodiram ${Math.abs(mobExpenseChange)}% vs mês passado — o que mudou?`
+      : mobExpenseChange > 0
+      ? `Gastos ${Math.abs(mobExpenseChange)}% maiores que o mês passado`
+      : `Você cortou ${Math.abs(mobExpenseChange)}% dos gastos vs mês passado — continua assim`
+    : null;
+
+  useEffect(() => {
+    if (!mobExpenses.length || mobScore === null) return;
+    let cancelled = false;
+    setMobDiagLoading(true);
+    setMobAiDiag(null);
+    const payload = {
+      totalGasto: mobTotalGasto,
+      totalEntradas: mobTotalEntradas,
+      comprometimento: mobComprometimento,
+      net: mobNet,
+      score: mobScore,
+      topCat: mobTopCat ? {
+        nome: CATEGORY_LABELS[mobTopCat[0] as keyof typeof CATEGORY_LABELS] ?? mobTopCat[0],
+        valor: mobTopCat[1],
+        percentual: Math.round((mobTopCat[1] / mobTotalGasto) * 100)
+      } : null,
+      expenseChange: mobExpenseChange,
+      byCategory: mobByCategory.slice(0, 5).map(([cat, val]) => ({
+        nome: CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat,
+        valor: val
+      })),
+      monthLabel: monthLabel(showDemo ? "2026-04" : monthKey)
+    };
+    fetch(GENERATE_DIAGNOSIS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
+      .then((data) => { if (!cancelled) setMobAiDiag(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setMobDiagLoading(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthKey, mobTotalGasto, mobTotalEntradas, mobScore]);
 
   const D = {
     shell: {
@@ -1668,35 +1723,34 @@ function WorkspaceApp({
           </div>
         </div>
 
-        {/* 2. Gastos do mês */}
+        {/* 2. Diagnóstico do mês */}
         {mobExpenses.length > 0 && (
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
-            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>Gastos do mês</p>
-            <DailySpendChart byDay={mobByDay} monthKey={showDemo ? "2026-04" : monthKey} prevByDay={mobPrevByDay} prevMonthKey={prevMonthKey} />
-          </div>
-        )}
-
-        {/* 3. Diagnóstico do mês */}
-        {mobExpenses.length > 0 && (() => {
-          const mobNet = mobTotalEntradas - mobTotalGasto;
-          const mobNarrativa = (mobScore ?? 0) >= 6
-            ? `Seu mês fechou ${mobNet >= 0 ? "positivo" : "no negativo"} em ${formatCurrency(Math.abs(mobNet))}. Você comprometeu ${mobComprometimento}% das suas entradas.`
-            : `Você teve ${formatCurrency(mobTotalGasto)} em gastos, comprometendo ${mobComprometimento}% da renda declarada.`;
-          const mobTopCat = mobByCategory[0];
-          const mobBullet1 = mobTopCat ? `${mobTopCat[0]} foi sua maior categoria, com ${formatCurrency(mobTopCat[1])}` : null;
-          const mobBullet2 = mobExpenseChange !== null
-            ? `Gastos ${mobExpenseChange < 0 ? "caíram" : "subiram"} ${Math.abs(mobExpenseChange)}% vs ${monthLabel(prevMonthKey).toLowerCase()}`
-            : null;
-          return (
-            <div style={{ border: `1px solid rgba(${mobScoreRgb},0.12)`, borderLeft: `3px solid ${mobScoreColor}`, borderRadius: 12, background: `rgba(${mobScoreRgb},0.05)`, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div style={{ border: `1px solid rgba(${mobScoreRgb},0.18)`, background: `rgba(${mobScoreRgb},0.04)`, borderRadius: 14, padding: "16px", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: -60, right: -60, width: 220, height: 220, borderRadius: "50%", background: `rgba(${mobScoreRgb},0.10)`, filter: "blur(55px)", pointerEvents: "none" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 16, position: "relative" }}>
               <div style={{ flex: 1 }}>
-                <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.65)`, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Diagnóstico do mês</p>
-                <p style={{ fontSize: 17, fontWeight: 800, color: mobScoreColor, marginBottom: 6, lineHeight: 1.2 }}>{mobScoreLabel}</p>
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.5 }}>{mobNarrativa}</p>
-                {(mobBullet1 || mobBullet2) && (
-                  <div style={{ marginTop: 7, display: "grid", gap: 3 }}>
-                    {mobBullet1 && <p style={{ fontSize: 10.5, color: `rgba(${mobScoreRgb},0.5)` }}>↗ {mobBullet1}</p>}
-                    {mobBullet2 && <p style={{ fontSize: 10.5, color: `rgba(${mobScoreRgb},0.5)` }}>{mobExpenseChange! < 0 ? "↘" : "↗"} {mobBullet2}</p>}
+                <p style={{ fontSize: 10.5, color: `rgba(${mobScoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  Diagnóstico do mês
+                  {mobDiagLoading && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: `rgba(${mobScoreRgb},0.5)`, animation: "pulse 1.2s ease-in-out infinite" }} />}
+                </p>
+                <p style={{ fontSize: 24, fontWeight: 900, color: mobScoreColor, letterSpacing: "-0.03em", marginBottom: 10, lineHeight: 1.1 }}>
+                  {mobAiDiag?.scoreLabel ?? mobScoreLabel}
+                </p>
+                <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65, marginBottom: ((mobAiDiag?.bullet1 ?? mobBullet1) || (mobAiDiag?.bullet2 ?? mobBullet2)) ? 10 : 0, transition: "opacity .4s", opacity: mobDiagLoading ? 0.5 : 1 }}>
+                  {mobAiDiag?.narrativa ?? mobNarrativa}
+                </p>
+                {((mobAiDiag?.bullet1 ?? mobBullet1) || (mobAiDiag?.bullet2 ?? mobBullet2)) && (
+                  <div style={{ display: "grid", gap: 5 }}>
+                    {(mobAiDiag?.bullet1 ?? mobBullet1) && (
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${mobScoreRgb},0.55)`, transition: "opacity .4s", opacity: mobDiagLoading ? 0.5 : 1 }}>
+                        <span style={{ flexShrink: 0, marginTop: 1 }}>↗</span>{mobAiDiag?.bullet1 ?? mobBullet1}
+                      </div>
+                    )}
+                    {(mobAiDiag?.bullet2 ?? mobBullet2) && (
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${mobScoreRgb},0.55)`, transition: "opacity .4s", opacity: mobDiagLoading ? 0.5 : 1 }}>
+                        <span style={{ flexShrink: 0, marginTop: 1 }}>{mobExpenseChange !== null && mobExpenseChange < 0 ? "↘" : "↗"}</span>{mobAiDiag?.bullet2 ?? mobBullet2}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1707,8 +1761,16 @@ function WorkspaceApp({
                 <p style={{ fontSize: 10, color: `rgba(${mobScoreRgb},0.5)`, marginTop: 2 }}>/ nota</p>
               </div>
             </div>
-          );
-        })()}
+          </div>
+        )}
+
+        {/* 3. Gastos por dia */}
+        {mobExpenses.length > 0 && (
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
+            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>Gastos por dia</p>
+            <DailySpendChart byDay={mobByDay} monthKey={showDemo ? "2026-04" : monthKey} prevByDay={mobPrevByDay} prevMonthKey={prevMonthKey} />
+          </div>
+        )}
 
         {/* 3. Renda mensal */}
         <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
@@ -2912,9 +2974,9 @@ function InsightsView({
         </div>
       </div>
 
-      {/* Gastos do mês */}
+      {/* Gastos por dia */}
       <div className="ins-card">
-        <p style={INS_LABEL}>Gastos do mês</p>
+        <p style={INS_LABEL}>Gastos por dia</p>
         <div style={{ width: "100%", minWidth: 0 }}>
           <DailySpendChart byDay={byDay} monthKey={monthKey} prevByDay={prevByDay} prevMonthKey={prevMonthKey} />
         </div>
