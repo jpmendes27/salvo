@@ -3092,15 +3092,14 @@ function DailySpendChart({
     return data.map((pt, i) => ({ ...pt, prevValue: full[i]?.value ?? 0 }));
   }, [data, prevMonthKey, prevByDay]);
 
-  // Cap Y axis at 3× median so single outlier days don't flatten the rest.
+  // Cap Y axis when a single day dwarfs the rest: only triggers when max > 4× p75.
   const { cap, hasCappedDays } = useMemo(() => {
     const nonZero = data.map(d => d.value).filter(v => v > 0).sort((a, b) => a - b);
     if (nonZero.length === 0) return { cap: undefined, hasCappedDays: false };
-    console.log("nonZero sample:", nonZero.slice(0, 5));
-    const median = nonZero[Math.floor(nonZero.length / 2)];
-    const c = median * 3;
-    const hasPeak = nonZero.some(v => v > c);
-    console.log("cap:", hasPeak ? c : undefined, "hasPeak:", hasPeak, "maxValue:", Math.max(...nonZero));
+    const max = nonZero[nonZero.length - 1] ?? 0;
+    const p75 = nonZero[Math.floor(nonZero.length * 0.75)] ?? 0;
+    const c = p75 * 4;
+    const hasPeak = max > c;
     return { cap: hasPeak ? c : undefined, hasCappedDays: hasPeak };
   }, [data]);
 
