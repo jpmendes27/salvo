@@ -69,7 +69,7 @@ import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fi
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
-import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
+import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot, ReferenceLine } from "recharts";
 import { track } from "@/lib/analytics";
 
 type Profile = {
@@ -3083,23 +3083,30 @@ function DailySpendChart({
   prevByDay: Record<string, number>; prevMonthKey: string;
 }) {
   const data = useMemo(() => buildMonthData(monthKey, byDay), [monthKey, byDay]);
+
+  // Merge prev month values into each data point so both series share the same
+  // x-axis (categorical by label), avoiding cross-month label misalignment.
   const prevData = useMemo(() => {
     const full = buildMonthData(prevMonthKey, prevByDay);
-    // trim or extend prev to same length as current month
-    if (full.length >= data.length) return full.slice(0, data.length);
-    const extra = Array.from({ length: data.length - full.length }, (_, i) => {
-      const day = full.length + i + 1;
-      return { key: "", label: "", day, value: 0 };
-    });
-    return [...full, ...extra];
-  }, [prevMonthKey, prevByDay, data.length]);
+    return data.map((pt, i) => ({ ...pt, prevValue: full[i]?.value ?? 0 }));
+  }, [data, prevMonthKey, prevByDay]);
 
+  // Cap Y axis at p90 of non-zero values so outlier days don't flatten the chart.
+  const cap = useMemo(() => {
+    const nonZero = data.map(d => d.value).filter(v => v > 0).sort((a, b) => a - b);
+    if (nonZero.length < 2) return undefined;
+    const p90 = nonZero[Math.floor(nonZero.length * 0.90)];
+    // Only apply cap when the max is meaningfully larger than p90 (>2×)
+    return nonZero[nonZero.length - 1] > p90 * 2 ? p90 : undefined;
+  }, [data]);
+
+  const hasCappedDays = cap !== undefined && data.some(d => d.value > cap);
   const lastWithData = useMemo(() => [...data].reverse().find(d => d.value > 0), [data]);
 
   return (
     <>
-      <ResponsiveContainer width="100%" height={160}>
-        <ComposedChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
+      <ResponsiveContainer width="100%" height={180}>
+        <ComposedChart data={prevData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
           <defs>
             <linearGradient id="dailyGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="rgba(184,245,90,0.25)" />
@@ -3107,8 +3114,21 @@ function DailySpendChart({
             </linearGradient>
           </defs>
           <CartesianGrid horizontal={true} vertical={false} stroke="rgba(255,255,255,0.06)" />
-          <XAxis dataKey="day" hide={true} type="number" domain={[1, data.length]} />
-          <YAxis hide={true} />
+          <XAxis
+            dataKey="label"
+            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v: number) => v >= 1000 ? `R$${(v / 1000).toFixed(0)}k` : `R$${v}`}
+            width={40}
+            domain={cap ? [0, cap] : undefined}
+          />
           <Tooltip
             content={(props) => <DailyTooltip active={props.active} payload={props.payload as unknown as Array<{ payload: DailyPoint }>} />}
             cursor={{ stroke: "rgba(184,245,90,0.2)", strokeWidth: 1 }}
@@ -3126,9 +3146,8 @@ function DailySpendChart({
             isAnimationActive={true}
           />
           <Line
-            data={prevData}
             type="monotone"
-            dataKey="value"
+            dataKey="prevValue"
             stroke="rgba(255,255,255,0.25)"
             strokeWidth={1.5}
             strokeDasharray="4 4"
@@ -3138,17 +3157,25 @@ function DailySpendChart({
           />
           {lastWithData && (
             <ReferenceDot
-              x={lastWithData.day}
-              y={lastWithData.value}
+              x={lastWithData.label}
+              y={Math.min(lastWithData.value, cap ?? lastWithData.value)}
               r={5}
               fill={G}
               stroke="#fff"
               strokeWidth={2}
             />
           )}
+          {hasCappedDays && (
+            <ReferenceLine
+              y={cap}
+              stroke="rgba(255,255,255,0.12)"
+              strokeDasharray="2 4"
+              label={{ value: "pico fora da escala", position: "insideTopRight", fill: "rgba(255,255,255,0.22)", fontSize: 9 }}
+            />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
-      <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11, color: "rgba(255,255,255,0.45)" }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 4, fontSize: 11, color: "rgba(255,255,255,0.45)" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 16, height: 2, background: G, borderRadius: 1, display: "inline-block" }} />
           Este mês
