@@ -1,0 +1,55 @@
+import {
+  Car, ShoppingCart, Bus, CreditCard, Repeat, Heart,
+  ShoppingBag, GraduationCap, Home, Receipt, Shield,
+  Landmark, HandHeart, ArrowLeftRight, Hotel, Plane,
+  Gamepad2, TrendingUp, MoreHorizontal
+} from "lucide-react";
+import type { ElementType } from "react";
+
+export const CATEGORY_COLORS: Record<string, string> = {
+  Alimentacao:    "#f5a623",
+  Mercado:        "#5c9eff",
+  Transporte:     "#00c9a7",
+  Carro:          "#4dcc8f",
+  CartaoCredito:  "#e879f9",
+  Assinaturas:    "#a78bfa",
+  Saude:          "#ff5c5c",
+  Varejo:         "#f97316",
+  Educacao:       "#38bdf8",
+  Moradia:        "#818cf8",
+  Contas:         "#4dcc8f",
+  Seguros:        "#fb923c",
+  Taxas:          "#ff8c42",
+  Emprestimos:    "#f43f5e",
+  Doacoes:        "#c8f564",
+  Transferencias: "#6b7080",
+  Hospedagem:     "#e11d48",
+  Viagem:         "#06b6d4",
+  Lazer:          "#c8f564",
+  Recebimentos:   "#4dcc8f",
+  Outros:         "#6b7080",
+};
+
+export const CATEGORY_ICONS: Record<string, ElementType> = {
+  Alimentacao:    ShoppingCart,
+  Mercado:        ShoppingBag,
+  Transporte:     Bus,
+  Carro:          Car,
+  CartaoCredito:  CreditCard,
+  Assinaturas:    Repeat,
+  Saude:          Heart,
+  Varejo:         ShoppingBag,
+  Educacao:       GraduationCap,
+  Moradia:        Home,
+  Contas:         Receipt,
+  Seguros:        Shield,
+  Taxas:          Landmark,
+  Emprestimos:    Landmark,
+  Doacoes:        HandHeart,
+  Transferencias: ArrowLeftRight,
+  Hospedagem:     Hotel,
+  Viagem:         Plane,
+  Lazer:          Gamepad2,
+  Recebimentos:   TrendingUp,
+  Outros:         MoreHorizontal,
+};

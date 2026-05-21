@@ -61,29 +61,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   Outros:         "Outros"
 };
 
-export const CATEGORY_COLORS: Record<Category, string> = {
-  Alimentacao:    "#f5a623",
-  Mercado:        "#5c9eff",
-  Transporte:     "#4dcc8f",
-  Carro:          "#4dcc8f",
-  CartaoCredito:  "#e879f9",
-  Assinaturas:    "#a78bfa",
-  Saude:          "#ff5c5c",
-  Varejo:         "#5c9eff",
-  Educacao:       "#5c9eff",
-  Moradia:        "#5c9eff",
-  Contas:         "#4dcc8f",
-  Seguros:        "#ff5c5c",
-  Taxas:          "#ff8c42",
-  Emprestimos:    "#ff5c5c",
-  Doacoes:        "#c8f564",
-  Transferencias: "#6b7080",
-  Hospedagem:     "#ff5c5c",
-  Viagem:         "#ff5c5c",
-  Lazer:          "#c8f564",
-  Recebimentos:   "#4dcc8f",
-  Outros:         "#6b7080"
-};
+export { CATEGORY_COLORS } from "@/lib/categories";
 
 // ─── Keyword map ──────────────────────────────────────────────────────────────
 // Ordenado por tamanho no build, evita match errado por substring curta.

@@ -9,6 +9,7 @@ import { useAuthUser } from "@/app/auth-provider";
 import { db } from "@/lib/firebase";
 import { formatCurrency, monthLabel } from "@/lib/money";
 import { CATEGORY_COLORS, CATEGORY_LABELS } from "@/lib/parsers";
+import { CategoryAvatar } from "@/components/CategoryAvatar";
 import type { Transaction } from "@/lib/types";
 
 const G = "#b8f55a";
@@ -132,7 +133,7 @@ function CategoryRanking({ workspaceId, monthKey }: { workspaceId: string; month
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontSize: 13, color: "rgba(255,255,255,0.28)", fontWeight: 700, width: 20 }}>#{idx + 1}</span>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}88`, flexShrink: 0 }} />
+                      <CategoryAvatar categoria={cat} size={32} radius={9} />
                       <span style={{ fontSize: 14, fontWeight: 800, color: isTop ? G : "#e8e9ec" }}>{(CATEGORY_LABELS as Record<string, string>)[cat] ?? cat}</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>

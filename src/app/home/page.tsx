@@ -67,6 +67,7 @@ import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction
 import { defaultCategories, demoTransactions } from "@/lib/demo";
 import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
+import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
 import { track } from "@/lib/analytics";
 
@@ -3110,30 +3111,6 @@ function DaysBarChart({ topDays, maxDayAmount }: { topDays: [string, number][]; 
 
 // ─── TopCategoriesChart ───────────────────────────────────────────────────────
 
-const CAT_COLORS: Record<string, string> = {
-  Alimentacao:    "#f5a623",
-  Mercado:        "#5c9eff",
-  Transporte:     "#00c9a7",
-  Carro:          "#4dcc8f",
-  CartaoCredito:  "#e879f9",
-  Assinaturas:    "#a78bfa",
-  Saude:          "#ff5c5c",
-  Varejo:         "#f97316",
-  Educacao:       "#38bdf8",
-  Moradia:        "#818cf8",
-  Contas:         "#4dcc8f",
-  Seguros:        "#fb923c",
-  Taxas:          "#ff8c42",
-  Emprestimos:    "#f43f5e",
-  Doacoes:        "#c8f564",
-  Transferencias: "#6b7080",
-  Hospedagem:     "#e11d48",
-  Viagem:         "#06b6d4",
-  Lazer:          "#c8f564",
-  Recebimentos:   "#4dcc8f",
-  Outros:         "#6b7080",
-};
-
 function TopCategoriesChart({
   byCategory,
   maxCategory,
@@ -3156,14 +3133,13 @@ function TopCategoriesChart({
   return (
     <div style={{ display: "grid", gap: 4 }}>
       {byCategory.slice(0, 3).map(([cat, total]) => {
-        const color = CAT_COLORS[cat] ?? "#888";
+        const color = CATEGORY_COLORS[cat] ?? "#888";
         const pct = totalGasto > 0 ? Math.round((total / totalGasto) * 100) : 0;
         const barW = mounted ? Math.round((total / maxCategory) * 100) : 0;
         const prev = prevByCategory[cat] ?? 0;
         const changePct = prev > 0 ? ((total - prev) / prev) * 100 : null;
         const isHov = hovCat === cat;
         const label = CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat;
-        const initial = label.charAt(0).toUpperCase();
 
         return (
           <div
@@ -3177,14 +3153,7 @@ function TopCategoriesChart({
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <div style={{
-                width: 26, height: 26, borderRadius: "50%",
-                background: `${color}22`, border: `1px solid ${color}55`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                flexShrink: 0, fontSize: 11, fontWeight: 800, color
-              }}>
-                {initial}
-              </div>
+              <CategoryAvatar categoria={cat} size={28} radius={8} />
               <span style={{
                 flex: 1, fontSize: 13, fontWeight: 700, color: "#e8e9ec",
                 minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
@@ -3196,7 +3165,7 @@ function TopCategoriesChart({
                 <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{pct}%</span>
               </div>
             </div>
-            <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginLeft: 36 }}>
+            <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginLeft: 38 }}>
               <div style={{
                 height: "100%", borderRadius: 2,
                 width: `${barW}%`,
