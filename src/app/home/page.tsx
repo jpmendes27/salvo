@@ -2778,7 +2778,7 @@ function InsightsView({
     return 10;
   })();
   const scoreColor = score === null ? G : score >= 8 ? G : score >= 6 ? "#facc15" : "#ff8080";
-  const scoreLabel = score === null ? "—" : score >= 8 ? "Saúde em dia" : score >= 6 ? "Atenção" : "Situação crítica";
+  const scoreLabel = score === null ? "—" : score >= 8 ? "Arrasando 💪" : score >= 6 ? "Dá pra melhorar" : "Tá pesado.";
 
   const byDay = useMemo(() => {
     const m: Record<string, number> = {};
@@ -2826,12 +2826,18 @@ function InsightsView({
   const expenseChange = prevTotalGasto > 0 ? Math.round(((totalGasto - prevTotalGasto) / prevTotalGasto) * 100) : null;
   const topCat = byCategory[0] ?? null;
   const net = totalEntradas - totalGasto;
-  const narrativa = (score ?? 0) >= 6
-    ? `Seu mês fechou ${net >= 0 ? "positivo" : "no negativo"} em ${formatCurrency(Math.abs(net))}. Você comprometeu ${comprometimento}% das suas entradas.`
-    : `Você teve ${formatCurrency(totalGasto)} em gastos neste período, comprometendo ${comprometimento}% da renda declarada.`;
-  const bullet1 = topCat ? `${topCat[0]} foi sua maior categoria de gastos, com ${formatCurrency(topCat[1])}` : null;
+  const narrativa = (score ?? 0) >= 8
+    ? `Fechou o mês no positivo em ${formatCurrency(net)}. Só ${comprometimento}% da renda foi embora — isso é disciplina de verdade.`
+    : (score ?? 0) >= 6
+    ? `Mês fechou ${net >= 0 ? "positivo" : "no vermelho"} em ${formatCurrency(Math.abs(net))}, mas ${comprometimento}% da renda já era. Dá pra apertar mais.`
+    : `${comprometimento}% da renda foi embora esse mês. Sobrou ${formatCurrency(Math.abs(net))}${net < 0 ? " no negativo" : ""} — isso precisa mudar.`;
+  const bullet1 = topCat ? `${topCat[0]} engoliu ${formatCurrency(topCat[1])} — ${Math.round((topCat[1] / totalGasto) * 100)}% de tudo que saiu` : null;
   const bullet2 = expenseChange !== null
-    ? `Seus gastos ${expenseChange < 0 ? "caíram" : "aumentaram"} ${Math.abs(expenseChange)}% em relação ao mês anterior`
+    ? expenseChange > 100
+      ? `Gastos explodiram ${Math.abs(expenseChange)}% vs mês passado — o que mudou?`
+      : expenseChange > 0
+      ? `Gastos ${Math.abs(expenseChange)}% maiores que o mês passado`
+      : `Você cortou ${Math.abs(expenseChange)}% dos gastos vs mês passado — continua assim`
     : null;
 
   return (
