@@ -2,7 +2,6 @@ import { initializeApp, getApps } from "firebase/app";
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
-  browserPopupRedirectResolver,
   indexedDBLocalPersistence,
   initializeAuth,
   getAuth,
@@ -24,13 +23,16 @@ const firebaseConfig = {
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
 // IndexedDB persistence avoids Chrome Privacy Sandbox storage partitioning
-// that breaks signInWithPopup/Redirect flows on mobile (sessionStorage is
-// cleared during cross-site navigations in the OAuth popup).
+// that breaks signInWithPopup flows on mobile (sessionStorage is cleared
+// during cross-site navigations in the OAuth popup).
+// popupRedirectResolver is intentionally NOT set here — passing it globally
+// causes Firebase to call resolver._initialize() on every auth init, which
+// reads stale redirect state from IndexedDB and delays auth resolution.
+// We pass it explicitly to signInWithPopup/getRedirectResult instead.
 // getAuth() is used during Next.js SSR/build (Node.js, no indexedDB).
 export const auth: Auth = typeof window !== "undefined"
   ? initializeAuth(app, {
       persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-      popupRedirectResolver: browserPopupRedirectResolver,
     })
   : getAuth(app);
 

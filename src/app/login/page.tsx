@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  browserPopupRedirectResolver,
   createUserWithEmailAndPassword,
   getRedirectResult,
   onAuthStateChanged,
@@ -308,7 +309,7 @@ function AuthScreen() {
     setError("");
     setBusy(true);
     try {
-      const result = await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
       const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
       track(isNew ? "sign_up" : "login", { method: "google" });
     } catch (err) {
@@ -653,7 +654,13 @@ function errorMessage(err: unknown) {
 }
 
 export default function LoginPage() {
+  // mounted guard: server renders nothing; initial client render also nothing.
+  // This eliminates React #418 hydration mismatch caused by simulator.js or
+  // Firebase resolver touching the DOM before React hydrates.
+  const [mounted, setMounted] = useState(false);
   const [ready, setReady] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     // signInWithPopup creates iframes it removes directly from the DOM,
@@ -668,7 +675,9 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    getRedirectResult(auth).catch(() => {});
+    // Explicitly process and clear any stale redirect state left by previous
+    // signInWithRedirect attempts (resolver is no longer set globally in initializeAuth).
+    getRedirectResult(auth, browserPopupRedirectResolver).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -712,6 +721,7 @@ export default function LoginPage() {
     });
   }, []);
 
+  if (!mounted) return null;
   if (!ready) return <FincheckLoader />;
   return <AuthScreen />;
 }
