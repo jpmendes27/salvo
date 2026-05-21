@@ -7,7 +7,6 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signInWithRedirect,
   signOut,
   type User
 } from "firebase/auth";
@@ -309,13 +308,6 @@ function AuthScreen() {
     setError("");
     setBusy(true);
     try {
-      const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if (isMobile) {
-        // signInWithRedirect avoids the iframe-DOM conflict that crashes React on mobile.
-        // onAuthStateChanged handles navigation; getRedirectResult above tracks the event.
-        await signInWithRedirect(auth, googleProvider);
-        return;
-      }
       const result = await signInWithPopup(auth, googleProvider);
       const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
       track(isNew ? "sign_up" : "login", { method: "google" });
@@ -663,16 +655,8 @@ function errorMessage(err: unknown) {
 export default function LoginPage() {
   const [ready, setReady] = useState(false);
 
-  // Handles the result when returning from signInWithRedirect on mobile.
-  // Navigation is handled by onAuthStateChanged below; this only tracks the event.
   useEffect(() => {
-    getRedirectResult(auth)
-      .then((result) => {
-        if (!result?.user) return;
-        const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
-        track(isNew ? "sign_up" : "login", { method: "google" });
-      })
-      .catch(() => {});
+    getRedirectResult(auth).catch(() => {});
   }, []);
 
   useEffect(() => {
