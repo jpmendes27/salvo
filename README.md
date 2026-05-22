@@ -1,4 +1,4 @@
-# Fincheck Pro
+# Salvô!
 
 Web/PWA para gestao financeira mensal, compartilhavel e preparada para Open Finance futuro.
 
