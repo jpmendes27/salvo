@@ -89,7 +89,7 @@ function TourStep1({ onDismiss }: { onDismiss: () => void }) {
         pointerEvents: "auto",
         boxShadow: `0 0 48px rgba(184,245,90,0.18)`
       }}>
-        <p style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: G, margin: "0 0 8px" }}>
+        <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: G, margin: "0 0 8px" }}>
           COMO FUNCIONA
         </p>
         <p style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.02em", margin: "0 0 6px" }}>
@@ -195,7 +195,7 @@ function SliderInput({ value, max, onChange }: { value: number; max: number; onC
         />
       </div>
       <div style={{ textAlign: "center", marginTop: 10 }}>
-        <span style={{ fontSize: 22, color: "#fff", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.01em" }}>
+        <span style={{ fontSize: 22, color: "#fff", letterSpacing: "-0.01em" }}>
           {formatCurrency(value)}
         </span>
         <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginLeft: 8 }}>
@@ -261,20 +261,20 @@ function GoalCard({ goal, router }: { goal: GoalSuggestion; router: ReturnType<t
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
           <div>
-            <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>Por mês</p>
-            <p style={{ fontSize: 18, color: G, margin: 0, fontVariantNumeric: "tabular-nums" }}>
+            <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>Por mês</p>
+            <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", color: G, margin: 0 }}>
               {formatCurrency(goal.valorMensal)}
             </p>
           </div>
           <div>
-            <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>Meta total</p>
-            <p style={{ fontSize: 18, color: "#fff", margin: 0, fontVariantNumeric: "tabular-nums" }}>
+            <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>Meta total</p>
+            <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", color: "#fff", margin: 0 }}>
               {formatCurrency(goal.valorMeta)}
             </p>
           </div>
           <div>
-            <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>Prazo</p>
-            <p style={{ fontSize: 18, color: "#fff", margin: 0 }}>
+            <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>Prazo</p>
+            <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", color: "#fff", margin: 0 }}>
               {goal.prazoMeses} meses
             </p>
           </div>
@@ -541,7 +541,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
           <ArrowLeft size={15} /> Voltar
         </button>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-          <span style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: G }}>MISSÃO {currentYear}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: G }}>MISSÃO {currentYear}</span>
           <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1 }}>Projeção 12 meses</span>
         </div>
         <div style={{
@@ -598,7 +598,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
                   zIndex: tourStep === 1 ? 150 : "auto"
                 }}
               >
-                <p style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 8px" }}>
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 8px" }}>
                   SIMULADOR
                 </p>
                 <p style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.02em", margin: "0 0 4px" }}>
@@ -632,19 +632,19 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
                     </p>
                     <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
                       <div>
-                        <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>
+                        <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>
                           Sobra por mês
                         </p>
-                        <p style={{ fontSize: 26, color: G, letterSpacing: "-0.01em", margin: 0, transition: "all 200ms ease", fontVariantNumeric: "tabular-nums" }}>
+                        <p style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: G, margin: 0, transition: "all 200ms ease" }}>
                           +{formatCurrency(economiaMensal)}
                         </p>
                       </div>
                       {mesesRestantes > 0 && (
                         <div>
-                          <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>
+                          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 4px" }}>
                             Até dezembro
                           </p>
-                          <p style={{ fontSize: 26, color: G, letterSpacing: "-0.01em", margin: 0, transition: "all 200ms ease", fontVariantNumeric: "tabular-nums" }}>
+                          <p style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: G, margin: 0, transition: "all 200ms ease" }}>
                             +{formatCurrency(economiaAnual)}
                           </p>
                         </div>
@@ -676,7 +676,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
 
             {/* ── LISTA MÊS A MÊS ─────────────────────────────────────────── */}
             <div>
-              <p style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 12px" }}>
+              <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 12px" }}>
                 MÊS A MÊS
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -702,9 +702,9 @@ function HeroCard({ label, value, color, sub, highlight }: { label: string; valu
       border: `1px solid ${highlight ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.08)"}`,
       borderRadius: 12, display: "flex", flexDirection: "column", gap: 10
     }}>
-      <p style={{ fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", margin: 0 }}>{label}</p>
-      <p style={{ fontSize: highlight ? 38 : 28, fontWeight: 400, letterSpacing: "-0.01em", lineHeight: 1, fontVariantNumeric: "tabular-nums", color, margin: 0 }}>{value}</p>
-      <p style={{ fontSize: 9, letterSpacing: "0.08em", color: "rgba(255,255,255,0.28)", margin: 0, textTransform: "uppercase" }}>{sub}</p>
+      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.36)", margin: 0 }}>{label}</p>
+      <p style={{ fontSize: highlight ? 36 : 26, fontWeight: highlight ? 900 : 800, letterSpacing: "-0.03em", lineHeight: 1, color, margin: 0 }}>{value}</p>
+      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: 0 }}>{sub}</p>
     </div>
   );
 }
@@ -730,8 +730,8 @@ function TrajectoryCard({ months, endBalance, currentMonth }: { months: MonthRow
           em dezembro.
         </p>
         <div style={{ textAlign: "right" }}>
-          <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", margin: 0 }}>Você está aqui</p>
-          <p style={{ fontSize: 22, fontWeight: 400, color: G, letterSpacing: "-0.01em", margin: "6px 0 0", fontVariantNumeric: "tabular-nums" }}>
+          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", margin: 0 }}>Você está aqui</p>
+          <p style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", color: G, margin: "6px 0 0" }}>
             {formatCurrency(currentAccumulated)}
           </p>
         </div>
@@ -791,7 +791,7 @@ function MonthCard({ month: m, maxBar, simulatorDelta = 0 }: { month: MonthRow; 
         <p style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1, color: m.isCurrent ? G : m.isPast ? "#ffffff" : "rgba(255,255,255,0.38)", margin: 0 }}>
           {m.shortLabel}
         </p>
-        <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: statusColor, margin: "5px 0 0" }}>
+        <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: statusColor, margin: "5px 0 0" }}>
           {statusLabel}
         </p>
       </div>
@@ -802,32 +802,32 @@ function MonthCard({ month: m, maxBar, simulatorDelta = 0 }: { month: MonthRow; 
           <div style={{ flex: 1, height: 5, background: "rgba(255,255,255,0.04)", borderRadius: 999, overflow: "hidden" }}>
             <div style={{ height: "100%", borderRadius: 999, background: G, width: `${incomeW}%`, opacity: m.isFuture ? 0.5 : 1, transition: "width .5s ease" }} />
           </div>
-          <span style={{ minWidth: 90, textAlign: "right", fontSize: 14, fontVariantNumeric: "tabular-nums", color: G }}>{formatCurrency(m.income)}</span>
+          <span style={{ minWidth: 90, textAlign: "right", fontSize: 14, fontWeight: 700, color: G }}>{formatCurrency(m.income)}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ width: 60, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", flexShrink: 0 }}>Saídas</span>
           <div style={{ flex: 1, height: 5, background: "rgba(255,255,255,0.04)", borderRadius: 999, overflow: "hidden" }}>
             <div style={{ height: "100%", borderRadius: 999, background: RED, width: `${expenseW}%`, opacity: m.isFuture ? 0.5 : 1, transition: "width .5s ease" }} />
           </div>
-          <span style={{ minWidth: 90, textAlign: "right", fontSize: 14, fontVariantNumeric: "tabular-nums", color: RED }}>{formatCurrency(m.expense)}</span>
+          <span style={{ minWidth: 90, textAlign: "right", fontSize: 14, fontWeight: 700, color: RED }}>{formatCurrency(m.expense)}</span>
         </div>
       </div>
 
       <div className="proj-mobile-bottom" style={{ textAlign: "right" }}>
-        <p style={{ fontSize: 22, fontWeight: 400, letterSpacing: "-0.01em", lineHeight: 1, fontVariantNumeric: "tabular-nums", color: isPositive ? G : RED, margin: 0 }}>
+        <p style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: isPositive ? G : RED, margin: 0 }}>
           {isPositive ? "+" : "−"}{formatCurrency(Math.abs(m.balance))}
         </p>
         <p style={{ marginTop: 5, color: "rgba(255,255,255,0.45)", fontSize: 11, margin: "5px 0 0" }}>{deltaLabel}</p>
         {simulatorDelta > 0 && (
-          <p style={{ fontSize: 10, color: G, margin: "4px 0 0", animation: "deltaIn 0.25s ease", fontVariantNumeric: "tabular-nums", opacity: 0.8 }}>
+          <p style={{ fontSize: 10, color: G, margin: "4px 0 0", animation: "deltaIn 0.25s ease", opacity: 0.8 }}>
             +{formatCurrency(simulatorDelta)} simulado
           </p>
         )}
       </div>
 
       <div className="proj-mobile-bottom" style={{ textAlign: "right" }}>
-        <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", margin: 0 }}>Acumulado</p>
-        <p style={{ fontSize: 16, fontVariantNumeric: "tabular-nums", color: "#ffffff", letterSpacing: "-0.005em", margin: "5px 0 0" }}>
+        <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", margin: 0 }}>Acumulado</p>
+        <p style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em", color: "#ffffff", margin: "5px 0 0" }}>
           {formatCurrency(m.accumulated)}
         </p>
       </div>
