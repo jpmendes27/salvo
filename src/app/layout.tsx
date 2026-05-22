@@ -17,7 +17,12 @@ export const metadata: Metadata = {
   description: "Importe o PDF do banco, veja para onde seu dinheiro foi e planeje o próximo mês — sem planilha, sem surpresa no fechamento.",
   manifest: `${BASE}/manifest.json`,
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8f564'/><text x='50%25' y='72%25' font-family='sans-serif' font-weight='700' font-size='20' fill='%23111410' text-anchor='middle'>F</text></svg>"
+    icon: [
+      { url: `${BASE}/assets/favicon-32.png`, sizes: "32x32", type: "image/png" },
+      { url: `${BASE}/assets/favicon-16.png`, sizes: "16x16", type: "image/png" },
+      { url: `${BASE}/icon.svg`, type: "image/svg+xml" },
+    ],
+    apple: [{ url: `${BASE}/assets/apple-touch-icon.png`, sizes: "180x180" }],
   },
   openGraph: {
     title: "Salvô! | O amigo rico que você nunca teve",
@@ -36,6 +41,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR">
       <head>
+        <meta name="apple-mobile-web-app-title" content="Salvô!" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="theme-color" content="#000000" />
         {GA_ID && (
           <>
             <script async src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} />
