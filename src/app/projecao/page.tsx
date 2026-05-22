@@ -140,15 +140,26 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
   return (
     <div style={{ minHeight: "100vh", background: "#050505", color: "#fff", fontFamily: "var(--font-ui)" }}>
       <style>{`
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .proj-month-card { transition: border-color .18s, background .18s; }
-        .proj-month-card:hover { background: rgba(255,255,255,0.035) !important; }
+        @media (max-width: 767px) {
+          .proj-month-grid {
+            grid-template-columns: 1fr !important;
+            gap: 14px !important;
+          }
+          .proj-hero-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .proj-bottom-row {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: flex-start !important;
+          }
+        }
       `}</style>
 
       {/* Topbar */}
       <div style={{
         position: "sticky", top: 0, zIndex: 10,
-        background: "rgba(5,5,5,0.92)", backdropFilter: "blur(18px)",
+        background: "rgba(5,5,5,0.94)", backdropFilter: "blur(20px)",
         borderBottom: "1px solid rgba(255,255,255,0.07)",
         padding: "0 24px", height: 56,
         display: "flex", alignItems: "center", gap: 16
@@ -160,12 +171,12 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
           <ArrowLeft size={15} /> Voltar
         </button>
         <div style={{ flex: 1 }}>
-          <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "var(--font-ui)", letterSpacing: "-0.01em" }}>
+          <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em" }}>
             Projeção {currentYear}
           </span>
         </div>
         <span style={{
-          fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 400,
+          fontFamily: "'DM Mono', monospace", fontSize: 9.5, fontWeight: 400,
           color: G, letterSpacing: "0.12em", textTransform: "uppercase",
           background: "rgba(184,245,90,0.08)", border: "1px solid rgba(184,245,90,0.2)",
           borderRadius: 5, padding: "3px 8px"
@@ -174,23 +185,18 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
         </span>
       </div>
 
-      <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 16px 60px" }}>
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 20px 80px" }}>
         {loading ? (
-          <div style={{ textAlign: "center", padding: "64px 0", color: "rgba(255,255,255,0.25)", fontSize: 13, fontFamily: "var(--font-mono)" }}>
+          <div style={{ textAlign: "center", padding: "64px 0", color: "rgba(255,255,255,0.25)", fontSize: 13, fontFamily: "'DM Mono', monospace" }}>
             Carregando...
           </div>
         ) : (
           <>
-            {/* Hero stats */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 28 }}>
-              <HeroCard label="Entradas no ano" value={formatCurrency(totalIncome)} color={G} />
-              <HeroCard label="Saídas no ano" value={formatCurrency(totalExpense)} color={RED} />
-              <HeroCard
-                label="Saldo projetado"
-                value={formatCurrency(endBalance)}
-                color={endBalance >= 0 ? G : RED}
-                highlight
-              />
+            {/* Hero stats — 4 colunas desktop, 2 mobile */}
+            <div className="proj-hero-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 28 }}>
+              <HeroCard label="Entradas no ano" value={formatCurrency(totalIncome)} color={totalIncome > 0 ? G : "rgba(255,255,255,0.4)"} />
+              <HeroCard label="Saídas no ano" value={formatCurrency(totalExpense)} color={totalExpense > 0 ? RED : "rgba(255,255,255,0.4)"} />
+              <HeroCard label="Saldo projetado" value={formatCurrency(endBalance)} color={endBalance >= 0 ? G : RED} highlight />
               <HeroCard
                 label="Meses positivos"
                 value={`${positiveMonths} de 12`}
@@ -200,17 +206,16 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
 
             {recurringItems.length === 0 && (
               <div style={{
-                background: "rgba(250,204,21,0.05)", border: "1px solid rgba(250,204,21,0.14)",
-                borderRadius: 10, padding: "11px 15px", marginBottom: 22,
-                fontSize: 12, color: "rgba(250,204,21,0.75)", lineHeight: 1.6,
-                fontFamily: "var(--font-ui)"
+                background: "rgba(250,204,21,0.04)", border: "1px solid rgba(250,204,21,0.12)",
+                borderRadius: 10, padding: "11px 16px", marginBottom: 24,
+                fontSize: 12, color: "rgba(250,204,21,0.7)", lineHeight: 1.6
               }}>
                 Sem recorrências cadastradas — meses futuros aparecem zerados. Adicione receitas e despesas fixas no Plano do Mês para ver a projeção completa.
               </div>
             )}
 
             {/* Month list */}
-            <div style={{ display: "grid", gap: 7, animation: "fadeUp .4s ease both" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {months.map((m) => (
                 <MonthCard key={m.monthKey} month={m} maxBar={maxBar} />
               ))}
@@ -225,17 +230,31 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
 function HeroCard({ label, value, color, highlight }: { label: string; value: string; color: string; highlight?: boolean }) {
   return (
     <div style={{
-      background: highlight ? "rgba(184,245,90,0.04)" : "#111111",
-      border: `1px solid ${highlight ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.07)"}`,
-      borderRadius: 12, padding: "16px 18px"
+      padding: "22px 24px",
+      background: highlight
+        ? "linear-gradient(135deg, rgba(184,245,90,0.10), rgba(184,245,90,0.02))"
+        : "#111111",
+      border: `1px solid ${highlight ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.08)"}`,
+      borderRadius: 16,
+      display: "flex", flexDirection: "column", gap: 12
     }}>
       <p style={{
-        fontFamily: "var(--font-ui)", fontSize: 10, color: "rgba(255,255,255,0.35)",
-        textTransform: "uppercase", letterSpacing: "0.11em", fontWeight: 700, marginBottom: 8
+        fontFamily: "'DM Mono', monospace", fontSize: 11,
+        letterSpacing: "0.14em", textTransform: "uppercase",
+        color: "rgba(255,255,255,0.45)", margin: 0
       }}>
         {label}
       </p>
-      <p style={{ fontFamily: "var(--font-mono)", fontSize: 19, fontWeight: 500, color, letterSpacing: "-0.02em" }}>
+      <p style={{
+        fontFamily: "'DM Mono', monospace",
+        fontSize: highlight ? 38 : 30,
+        fontWeight: 400,
+        letterSpacing: "-0.01em",
+        lineHeight: 1,
+        fontVariantNumeric: "tabular-nums",
+        color,
+        margin: 0
+      }}>
         {value}
       </p>
     </div>
@@ -249,70 +268,106 @@ function MonthCard({ month: m, maxBar }: { month: MonthRow; maxBar: number }) {
   const isEmpty = !m.hasData && m.isFuture;
 
   const statusLabel = m.isCurrent ? "• em andamento" : m.isPast ? "realizado" : "projetado";
-  const statusColor = m.isCurrent ? "#facc15" : m.isPast ? "rgba(255,255,255,0.3)" : "rgba(184,245,90,0.45)";
+  const statusColor = m.isCurrent ? G : "rgba(255,255,255,0.45)";
+  const deltaLabel = m.isCurrent ? "parcial" : "do mês";
 
   return (
     <div
-      className="proj-month-card"
+      className="proj-month-grid"
       style={{
-        background: m.isCurrent ? "rgba(184,245,90,0.08)" : "#111111",
-        border: `1px solid ${m.isCurrent ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.07)"}`,
-        borderRadius: 12,
-        padding: "14px 16px",
+        display: "grid",
+        gridTemplateColumns: "84px 1fr 180px 160px",
+        gap: 24,
+        alignItems: "center",
+        padding: "18px 24px",
+        background: m.isCurrent
+          ? "linear-gradient(90deg, rgba(184,245,90,0.10), rgba(184,245,90,0.02) 60%)"
+          : "#111111",
+        border: `1px solid ${m.isCurrent ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.08)"}`,
+        borderRadius: 14,
         opacity: isEmpty ? 0.45 : 1,
+        transition: "border-color .15s, background .15s",
       }}
     >
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-        {/* Month label */}
-        <div style={{ flexShrink: 0, width: 44 }}>
-          <p style={{
-            fontFamily: "var(--font-display)", fontSize: 14,
-            color: m.isCurrent ? G : m.isPast ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.38)",
-            marginBottom: 4
-          }}>
-            {m.shortLabel}
-          </p>
-          <span style={{
-            fontFamily: "var(--font-mono)", fontSize: 9, color: statusColor,
-            letterSpacing: "0.04em", display: "block"
-          }}>
-            {statusLabel}
+      {/* Col 1 — nome + estado */}
+      <div>
+        <p style={{
+          fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1,
+          color: m.isCurrent ? G : m.isPast ? "#ffffff" : "rgba(255,255,255,0.38)",
+          margin: 0
+        }}>
+          {m.shortLabel}
+        </p>
+        <p style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 9,
+          letterSpacing: "0.12em", textTransform: "uppercase",
+          color: statusColor, marginTop: 5, margin: "5px 0 0"
+        }}>
+          {statusLabel}
+        </p>
+      </div>
+
+      {/* Col 2 — barras */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Entradas */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11 }}>
+          <span style={{ width: 60, color: "rgba(255,255,255,0.45)", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", flexShrink: 0 }}>
+            Entradas
+          </span>
+          <div style={{ flex: 1, height: 5, background: "rgba(255,255,255,0.04)", borderRadius: 999, overflow: "hidden" }}>
+            <div style={{ height: "100%", borderRadius: 999, background: G, width: `${incomeW}%`, opacity: m.isFuture ? 0.55 : 1, transition: "width .5s ease" }} />
+          </div>
+          <span style={{ minWidth: 90, textAlign: "right", fontFamily: "'DM Mono', monospace", fontWeight: 400, fontSize: 14, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.005em", color: G }}>
+            {formatCurrency(m.income)}
           </span>
         </div>
-
-        {/* Bars */}
-        <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 7 }}>
-          {/* Income */}
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "rgba(255,255,255,0.28)", fontWeight: 600 }}>Entradas</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: G, fontWeight: 500 }}>{formatCurrency(m.income)}</span>
-            </div>
-            <div style={{ height: 5, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${incomeW}%`, background: G, borderRadius: 3, opacity: m.isFuture ? 0.5 : 1, transition: "width .5s ease" }} />
-            </div>
+        {/* Saídas */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11 }}>
+          <span style={{ width: 60, color: "rgba(255,255,255,0.45)", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", flexShrink: 0 }}>
+            Saídas
+          </span>
+          <div style={{ flex: 1, height: 5, background: "rgba(255,255,255,0.04)", borderRadius: 999, overflow: "hidden" }}>
+            <div style={{ height: "100%", borderRadius: 999, background: RED, width: `${expenseW}%`, opacity: m.isFuture ? 0.55 : 1, transition: "width .5s ease" }} />
           </div>
-          {/* Expense */}
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "rgba(255,255,255,0.28)", fontWeight: 600 }}>Saídas</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: RED, fontWeight: 500 }}>{formatCurrency(m.expense)}</span>
-            </div>
-            <div style={{ height: 5, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${expenseW}%`, background: RED, borderRadius: 3, opacity: m.isFuture ? 0.5 : 1, transition: "width .5s ease" }} />
-            </div>
-          </div>
+          <span style={{ minWidth: 90, textAlign: "right", fontFamily: "'DM Mono', monospace", fontWeight: 400, fontSize: 14, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.005em", color: RED }}>
+            {formatCurrency(m.expense)}
+          </span>
         </div>
+      </div>
 
-        {/* Delta + accumulated */}
-        <div style={{ flexShrink: 0, textAlign: "right", minWidth: 86 }}>
-          <p style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 500, color: isPositive ? G : RED, letterSpacing: "-0.02em", marginBottom: 4 }}>
+      {/* Col 3 — delta */}
+      <div className="proj-bottom-row" style={{ textAlign: "right" }}>
+        <div>
+          <p style={{
+            fontFamily: "'DM Mono', monospace", fontSize: 22, fontWeight: 400,
+            letterSpacing: "-0.01em", lineHeight: 1, fontVariantNumeric: "tabular-nums",
+            color: isPositive ? G : RED, margin: 0
+          }}>
             {isPositive ? "+" : "−"}{formatCurrency(Math.abs(m.balance))}
           </p>
-          <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "rgba(255,255,255,0.25)", letterSpacing: "-0.01em" }}>
+          <p style={{ marginTop: 5, color: "rgba(255,255,255,0.45)", fontSize: 11, margin: "5px 0 0" }}>
+            {deltaLabel}
+          </p>
+        </div>
+      </div>
+
+      {/* Col 4 — acumulado */}
+      <div className="proj-bottom-row" style={{ textAlign: "right" }}>
+        <div>
+          <p style={{
+            fontFamily: "'DM Mono', monospace", fontSize: 9,
+            letterSpacing: "0.12em", textTransform: "uppercase",
+            color: "rgba(255,255,255,0.45)", margin: 0
+          }}>
+            Acumulado
+          </p>
+          <p style={{
+            marginTop: 5, fontFamily: "'DM Mono', monospace", fontWeight: 400,
+            fontSize: 16, fontVariantNumeric: "tabular-nums",
+            color: "#ffffff", letterSpacing: "-0.005em", margin: "5px 0 0"
+          }}>
             {formatCurrency(m.accumulated)}
           </p>
-          <p style={{ fontFamily: "var(--font-ui)", fontSize: 9, color: "rgba(255,255,255,0.2)", marginTop: 1 }}>acum.</p>
         </div>
       </div>
     </div>
