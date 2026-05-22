@@ -543,7 +543,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
           .proj-month-row { grid-template-columns: 1fr !important; gap: 12px !important; }
           .proj-mobile-bottom { display: flex !important; justify-content: space-between !important; align-items: flex-end !important; }
           .proj-sim-card { padding: 24px 18px !important; }
-          .proj-traj-headline { font-size: 18px !important; }
+          .proj-traj-headline { font-size: 16px !important; }
           .proj-traj-label { font-size: 9px !important; }
           .proj-traj-value { font-size: 24px !important; }
           .proj-month-name { font-size: 16px !important; }
@@ -552,7 +552,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
           .proj-month-acc-label { font-size: 8px !important; }
           .proj-month-acc-value { font-size: 13px !important; }
           .proj-sim-title { font-size: 18px !important; }
-          .proj-slider-value { font-size: 28px !important; }
+          .proj-slider-value { font-size: 24px !important; }
         }
       `}</style>
 
