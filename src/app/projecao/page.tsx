@@ -221,9 +221,9 @@ function GoalCard({ goal, router }: { goal: GoalSuggestion; router: ReturnType<t
   return (
     <div style={{
       background: "#111111",
-      border: "1px solid rgba(184,245,90,0.15)",
-      borderRadius: 16,
-      padding: 28,
+      border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: 12,
+      padding: "20px 24px",
       animation: "goalFadeIn 0.35s ease"
     }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
@@ -557,7 +557,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
         </div>
       </div>
 
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px 16px 80px" }}>
+      <div style={{ width: "min(860px, calc(100% - 32px))", margin: "0 auto", padding: "32px 0 80px", display: "flex", flexDirection: "column", gap: 24 }}>
         {loading ? (
           <div style={{ textAlign: "center", padding: "64px 0", color: "rgba(255,255,255,0.25)", fontSize: 12, fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em" }}>
             CARREGANDO...
@@ -565,7 +565,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
         ) : (
           <>
             {/* ── MOMENTO 1 · REALIDADE AGORA ─────────────────────────────── */}
-            <div className="proj-hero-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
+            <div className="proj-hero-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
               <HeroCard label="Entradas no ano" value={formatCurrency(totalIncome)} color={G} sub={`${months.filter(m => m.income > 0).length} meses com entrada`} />
               <HeroCard label="Saídas no ano" value={formatCurrency(totalExpense)} color={RED} sub={`${months.filter(m => m.expense > 0).length} meses com saída`} />
               <HeroCard label="Saldo projetado" value={formatCurrency(endBalance)} color={endBalance >= 0 ? G : RED} sub="acumulado em dezembro" highlight />
@@ -585,26 +585,16 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
 
             <TrajectoryCard months={months} endBalance={endBalance} currentMonth={currentMonth} />
 
-            <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 12, marginTop: 28 }}>
-              MÊS A MÊS
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {months.map((m) => (
-                <MonthCard key={m.monthKey} month={m} maxBar={maxBar} simulatorDelta={m.isFuture ? economiaMensal : 0} />
-              ))}
-            </div>
-
             {/* ── MOMENTO 2 · SIMULADOR ────────────────────────────────────── */}
             {vilaoCategory && sliderValue !== null && (
               <div
                 id="sim-card"
                 className="proj-sim-card"
                 style={{
-                  marginTop: 40,
-                  background: "linear-gradient(135deg, rgba(184,245,90,0.06), rgba(184,245,90,0.01))",
-                  border: "1px solid rgba(184,245,90,0.20)",
-                  borderRadius: 20,
-                  padding: 32,
+                  background: "#111111",
+                  border: "1px solid rgba(184,245,90,0.22)",
+                  borderRadius: 12,
+                  padding: "20px 24px",
                   position: "relative",
                   zIndex: tourStep === 1 ? 150 : "auto"
                 }}
@@ -630,10 +620,10 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
 
                 {economiaMensal > 0 && (
                   <div style={{
-                    marginTop: 24, padding: "16px 20px",
-                    background: "rgba(184,245,90,0.05)",
-                    border: "1px solid rgba(184,245,90,0.15)",
-                    borderRadius: 12, transition: "all 200ms ease"
+                    marginTop: 20, padding: "16px 20px",
+                    background: "rgba(184,245,90,0.04)",
+                    border: "1px solid rgba(184,245,90,0.12)",
+                    borderRadius: 10, transition: "all 200ms ease"
                   }}>
                     <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", margin: "0 0 12px", lineHeight: 1.55 }}>
                       Se cortar{" "}
@@ -671,7 +661,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
                     style={{ marginTop: 16, position: "relative", zIndex: tourStep === 2 ? 150 : "auto" }}
                   >
                     {goalLoading ? (
-                      <div style={{ background: "#111111", border: "1px solid rgba(184,245,90,0.15)", borderRadius: 16, padding: "22px 24px", display: "flex", alignItems: "center", gap: 14 }}>
+                      <div style={{ background: "#111111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
                         <DotsLoader />
                         <span style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
                           Salvô! calculando seu caminho...
@@ -684,6 +674,18 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
                 )}
               </div>
             )}
+
+            {/* ── LISTA MÊS A MÊS ─────────────────────────────────────────── */}
+            <div>
+              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 12px" }}>
+                MÊS A MÊS
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {months.map((m) => (
+                  <MonthCard key={m.monthKey} month={m} maxBar={maxBar} simulatorDelta={m.isFuture ? economiaMensal : 0} />
+                ))}
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -696,10 +698,10 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
 function HeroCard({ label, value, color, sub, highlight }: { label: string; value: string; color: string; sub: string; highlight?: boolean }) {
   return (
     <div style={{
-      padding: "22px 24px",
+      padding: "20px 24px",
       background: highlight ? "linear-gradient(135deg, rgba(184,245,90,0.10), rgba(184,245,90,0.02))" : "#111111",
       border: `1px solid ${highlight ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.08)"}`,
-      borderRadius: 16, display: "flex", flexDirection: "column", gap: 10
+      borderRadius: 12, display: "flex", flexDirection: "column", gap: 10
     }}>
       <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", margin: 0 }}>{label}</p>
       <p style={{ fontFamily: "'DM Mono', monospace", fontSize: highlight ? 38 : 28, fontWeight: 400, letterSpacing: "-0.01em", lineHeight: 1, fontVariantNumeric: "tabular-nums", color, margin: 0 }}>{value}</p>
@@ -721,7 +723,7 @@ function TrajectoryCard({ months, endBalance, currentMonth }: { months: MonthRow
   })), [months]);
 
   return (
-    <div style={{ background: "linear-gradient(180deg, rgba(184,245,90,0.04), transparent 70%), #111111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: "24px 24px 16px" }}>
+    <div style={{ background: "#111111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "24px 24px 16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <p style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.45, maxWidth: "55%", margin: 0 }}>
           Se mantiver o ritmo, você chega em{" "}
@@ -779,9 +781,9 @@ function MonthCard({ month: m, maxBar, simulatorDelta = 0 }: { month: MonthRow; 
       style={{
         display: "grid", gridTemplateColumns: "84px 1fr 140px 120px", gap: 24, alignItems: "center",
         padding: "18px 24px",
-        background: m.isCurrent ? "linear-gradient(90deg, rgba(184,245,90,0.10), rgba(184,245,90,0.02) 60%)" : "#111111",
-        border: `1px solid ${m.isCurrent ? "rgba(184,245,90,0.30)" : simulatorDelta > 0 ? "rgba(184,245,90,0.18)" : "rgba(255,255,255,0.08)"}`,
-        borderRadius: 14,
+        background: m.isCurrent ? "linear-gradient(90deg, rgba(184,245,90,0.08), rgba(184,245,90,0.01) 60%)" : "#111111",
+        border: `1px solid ${m.isCurrent ? "rgba(184,245,90,0.25)" : simulatorDelta > 0 ? "rgba(184,245,90,0.15)" : "rgba(255,255,255,0.08)"}`,
+        borderRadius: 12,
         opacity: isEmpty ? 0.45 : 1,
         transition: "border-color .2s"
       }}
