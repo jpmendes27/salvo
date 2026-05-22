@@ -117,31 +117,28 @@ function TourStep2({ onDismiss }: { onDismiss: () => void }) {
 
   return (
     <div style={{
-      position: "fixed", inset: 0, zIndex: 140,
-      background: "rgba(0,0,0,0.6)",
-      pointerEvents: "none"
+      position: "fixed", bottom: 24, left: "50%",
+      transform: "translateX(-50%)",
+      zIndex: 140, pointerEvents: "auto",
+      background: "#1c1c1c",
+      border: `1px solid ${G}`,
+      borderRadius: 14,
+      padding: "14px 20px",
+      width: "min(320px, calc(100vw - 32px))",
+      boxShadow: `0 4px 40px rgba(0,0,0,0.6), 0 0 24px rgba(184,245,90,0.12)`,
+      display: "flex", alignItems: "center", gap: 12
     }}>
-      <div style={{
-        position: "absolute", bottom: 80, left: "50%",
-        transform: "translateX(-50%)",
-        background: "#1c1c1c",
-        border: `1px solid ${G}`,
-        borderRadius: 14,
-        padding: "16px 20px",
-        width: "min(320px, calc(100vw - 32px))",
-        pointerEvents: "auto",
-        boxShadow: `0 0 40px rgba(184,245,90,0.16)`
-      }}>
-        <p style={{ fontSize: 14, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>
+      <div style={{ flex: 1 }}>
+        <p style={{ fontSize: 13, fontWeight: 700, margin: "0 0 2px", letterSpacing: "-0.01em" }}>
           Essa é sua meta sugerida.
         </p>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.5, margin: "0 0 12px" }}>
-          Clique pra criar e começar a acompanhar.
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", margin: 0 }}>
+          Clique pra criar e acompanhar.
         </p>
-        <button onClick={onDismiss} style={{ padding: "8px 16px", background: G, color: "#111", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-ui)" }}>
-          Ok, entendi →
-        </button>
       </div>
+      <button onClick={onDismiss} style={{ padding: "7px 14px", background: G, color: "#111", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-ui)", flexShrink: 0 }}>
+        Ok →
+      </button>
     </div>
   );
 }
@@ -353,7 +350,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
 
   // Lock scroll while tour is active
   useEffect(() => {
-    document.body.style.overflow = tourStep > 0 ? "hidden" : "";
+    document.body.style.overflow = tourStep === 1 ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [tourStep]);
 
