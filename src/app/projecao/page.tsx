@@ -19,7 +19,7 @@ const MONTH_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out"
 
 const SUGGEST_GOAL_URL =
   process.env.NEXT_PUBLIC_SUGGEST_GOAL_URL ||
-  "https://suggestgoal-ihalwtxjpq-uc.a.run.app";
+  "https://us-central1-fincheck-pro.cloudfunctions.net/suggestGoal";
 
 function Shell({ text }: { text: string }) {
   return (
