@@ -351,6 +351,12 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
     try { await updateDoc(doc(db, "users", userId), { projectionTourSeen: true }); } catch { /* silent */ }
   }, [userId]);
 
+  // Lock scroll while tour is active
+  useEffect(() => {
+    document.body.style.overflow = tourStep > 0 ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [tourStep]);
+
   // Data
   useEffect(() => {
     setLoading(true);
