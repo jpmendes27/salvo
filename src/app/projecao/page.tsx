@@ -253,7 +253,7 @@ function GoalCard({ goal, router }: { goal: GoalSuggestion; router: ReturnType<t
           <Target size={22} color={G} />
         </div>
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 28, fontWeight: 900, letterSpacing: "-0.02em", margin: "0 0 6px", fontFamily: FONT_UI }}>
+          <p className="proj-goal-title" style={{ fontSize: 28, fontWeight: 900, letterSpacing: "-0.02em", margin: "0 0 6px", fontFamily: FONT_UI }}>
             {goal.titulo}
           </p>
           <p style={{ fontSize: 12.5, color: C_SEC, lineHeight: 1.6, margin: 0 }}>
@@ -553,6 +553,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
           .proj-month-acc-value { font-size: 13px !important; }
           .proj-sim-title { font-size: 18px !important; }
           .proj-slider-value { font-size: 24px !important; }
+          .proj-goal-title { font-size: 20px !important; }
         }
       `}</style>
 
