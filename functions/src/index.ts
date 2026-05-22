@@ -768,3 +768,103 @@ Exemplos de tom:
     }
   }
 );
+
+// ─── suggestGoal ─────────────────────────────────────────────────────────────
+
+export const suggestGoal = onRequest(
+  {
+    cors: true,
+    secrets: ["ANTHROPIC_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB"
+  },
+  async (req, res) => {
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method Not Allowed" });
+      return;
+    }
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+      return;
+    }
+
+    const { rendaMensal, totalGastoMesAtual, economiaMensalSimulada, categoriaVilao, sobraAtual, mesAtual } = req.body;
+
+    const mes = mesAtual ?? new Date().getMonth() + 1;
+    const mesesRestantes = 12 - mes;
+    const economia = economiaMensalSimulada ?? 0;
+    const economiaAnual = economia * mesesRestantes;
+    const comprometimento = rendaMensal > 0 ? Math.round((totalGastoMesAtual / rendaMensal) * 100) : 0;
+    const fmt = (v: number) => `R$${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const prompt = `Você é o Salvô! — conselheiro financeiro honesto do brasileiro comum.
+Com base nos dados abaixo, sugere UMA meta financeira concreta, pequena e alcançável para esse usuário.
+
+Dados:
+- Renda mensal: ${fmt(rendaMensal ?? 0)}
+- Gasto atual: ${fmt(totalGastoMesAtual ?? 0)} (${comprometimento}% da renda)
+- Se cortar ${categoriaVilao?.nome ?? "gasto principal"}: economiza ${fmt(economia)}/mês
+- Meses restantes no ano: ${mesesRestantes}
+- Economia total possível até dezembro: ${fmt(economiaAnual)}
+- Sobra atual do mês: ${fmt(sobraAtual ?? 0)}
+
+REGRAS:
+1. Sugere apenas UMA meta — a mais impactante e realista
+2. A meta deve ser atingível com a economia simulada
+3. Prioridade: reserva de emergência > quitar dívida pequena > conquista de vida
+4. Se sobrar pouco (< R$300/mês): meta de reserva pequena (R$500-1000)
+5. Se sobrar médio (R$300-800/mês): meta de reserva de emergência (1-3 meses de renda)
+6. Se sobrar muito (> R$800/mês): meta maior (carro, viagem, entrada apartamento)
+7. Tom: direto, popular, neutro em gênero. Sem "otimizar" ou "alocar".
+8. Nunca mencione salário mínimo a menos que seja fornecido nos dados.
+
+Retorna APENAS JSON válido:
+{
+  "titulo": "Nome curto da meta (ex: 'Reserva de emergência')",
+  "descricao": "1-2 frases diretas explicando a meta e por que faz sentido agora",
+  "valorMeta": 1000,
+  "prazoMeses": 5,
+  "valorMensal": 200,
+  "mensagem": "Frase de impacto do Salvô! sobre essa meta (ex: 'Com R$200 por mês, em 5 meses você tem um colchão real. Ninguém te tira do sério.')"
+}`;
+
+    const client = new Anthropic({ apiKey });
+    try {
+      const message = await client.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        messages: [{ role: "user", content: prompt }]
+      });
+
+      const rawText =
+        message.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
+      res.set("Access-Control-Allow-Origin", "*");
+      res.json({
+        titulo: parsed.titulo ?? null,
+        descricao: parsed.descricao ?? null,
+        valorMeta: parsed.valorMeta ?? null,
+        prazoMeses: parsed.prazoMeses ?? null,
+        valorMensal: parsed.valorMensal ?? null,
+        mensagem: parsed.mensagem ?? null
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("suggestGoal error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
