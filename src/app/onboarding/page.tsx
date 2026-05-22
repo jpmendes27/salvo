@@ -265,9 +265,9 @@ function OnboardingFlow({ user }: { user: User }) {
       <div style={{ width: "100%", maxWidth: 440, animation: "fadeUp .4s ease both" }}>
         {/* Logo */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 0, marginBottom: 32 }}>
-          <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: G, letterSpacing: "-0.02em", lineHeight: 1 }}>fincheck</span>
-          <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#fff", letterSpacing: "-0.02em", lineHeight: 1 }}>pro</span>
-          <sup style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.45rem", verticalAlign: "super", color: G, fontWeight: 400, marginLeft: 1 }}>®</sup>
+          <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#b8f55a", letterSpacing: "-0.02em", lineHeight: 1 }}>Salvô</span>
+          <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#ffffff", letterSpacing: "-0.02em", lineHeight: 1 }}>!</span>
+          <sup style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.45rem", verticalAlign: "super", color: "#b8f55a", fontWeight: 400, marginLeft: 1 }}>®</sup>
         </div>
 
         {/* Progress */}
@@ -397,7 +397,7 @@ function OnboardingFlow({ user }: { user: User }) {
           <div>
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Passo 4 de {usage === "shared" ? 5 : 4}</p>
             <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.15, marginBottom: 8 }}>
-              Como vai usar<br />o Fincheck Pro?
+              Como vai usar<br />o Salvô!?
             </h1>
             <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
               Isso nos ajuda a deixar o painel mais útil pra você desde o início.

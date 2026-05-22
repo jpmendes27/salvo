@@ -12,7 +12,7 @@ export default function TermsPage() {
 
       <h2>1. Uso do produto</h2>
       <p>
-        O Fincheck Pro ajuda voce a registrar lancamentos financeiros, acompanhar meses e
+        O Salvô! ajuda voce a registrar lancamentos financeiros, acompanhar meses e
         gerar resumos. O app nao substitui consultoria financeira, contabil, juridica ou
         recomendacao de investimento.
       </p>
@@ -32,7 +32,7 @@ export default function TermsPage() {
 
       <h2>4. Responsabilidades</h2>
       <p>
-        Voce deve inserir informacoes verdadeiras e usar o produto de forma licita. O Fincheck
+        Voce deve inserir informacoes verdadeiras e usar o produto de forma licita. O Salvô!
         Pro pode bloquear acessos abusivos, fraudulentos ou que comprometam a seguranca do app.
       </p>
 

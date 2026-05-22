@@ -13,14 +13,14 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Fincheck Pro · Controle financeiro",
+  title: "Salvô! · Controle financeiro",
   description: "Importe o PDF do banco, veja para onde seu dinheiro foi e planeje o próximo mês — sem planilha, sem surpresa no fechamento.",
   manifest: `${BASE}/manifest.json`,
   icons: {
     icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8f564'/><text x='50%25' y='72%25' font-family='sans-serif' font-weight='700' font-size='20' fill='%23111410' text-anchor='middle'>F</text></svg>"
   },
   openGraph: {
-    title: "Fincheck Pro | O amigo rico que você nunca teve",
+    title: "Salvô! | O amigo rico que você nunca teve",
     description: "Um app que olha sua vida financeira do jeito que ela é, te fala a verdade na cara e te mostra um caminho real pra sair do sufoco. Sem planilha. Sem palavra difícil. Sem promessa furada.",
     url: "https://jpmendes.com/fincheck-pro",
     type: "website",

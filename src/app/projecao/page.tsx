@@ -1,7 +1,7 @@
 "use client";
 
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { ArrowLeft, TrendingUp } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthUser } from "@/app/auth-provider";
@@ -10,15 +10,17 @@ import { formatCurrency } from "@/lib/money";
 import type { RecurringItem, Transaction } from "@/lib/types";
 
 const G = "#b8f55a";
+const RED = "#ff5c5c";
 
 const MONTH_NAMES = [
-  "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
-  "Jul", "Ago", "Set", "Out", "Nov", "Dez"
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
 ];
+const MONTH_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 
 function Shell({ text }: { text: string }) {
   return (
-    <div style={{ minHeight: "100vh", background: "#09090b", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.4)", fontSize: 14 }}>
+    <div style={{ minHeight: "100vh", background: "#050505", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.4)", fontSize: 14, fontFamily: "var(--font-ui)" }}>
       {text}
     </div>
   );
@@ -110,7 +112,6 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
         expense = actualExpense;
         hasData = monthTxs.length > 0;
       } else if (isCurrent) {
-        // Projetado = max(real, recorrente) — o que já entrou + o que ainda falta segundo recorrências
         income = Math.max(actualIncome, recurringIncome > 0 ? recurringIncome : actualIncome);
         expense = Math.max(actualExpense, recurringExpense > 0 ? recurringExpense : actualExpense);
         hasData = true;
@@ -123,10 +124,10 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
       const balance = income - expense;
       accumulated += balance;
 
-      const date = new Date(currentYear, m - 1, 1);
-      const label = new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(date);
-
-      return { monthKey, label, shortLabel: MONTH_NAMES[i], isPast, isCurrent, isFuture, income, expense, balance, accumulated, hasData };
+      return {
+        monthKey, label: MONTH_NAMES[i], shortLabel: MONTH_SHORT[i],
+        isPast, isCurrent, isFuture, income, expense, balance, accumulated, hasData
+      };
     });
   }, [transactions, recurringItems, currentYear, currentMonthKey, recurringIncome, recurringExpense]);
 
@@ -134,43 +135,82 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
   const totalExpense = months.reduce((s, m) => s + m.expense, 0);
   const endBalance = months[11]?.accumulated ?? 0;
   const positiveMonths = months.filter(m => m.balance > 0).length;
-
   const maxBar = Math.max(...months.map(m => Math.max(m.income, m.expense)), 1);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#09090b", color: "#fff", fontFamily: "var(--font-dm-sans, sans-serif)" }}>
-      {/* Header */}
-      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "rgba(9,9,11,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "14px 24px", display: "flex", alignItems: "center", gap: 16 }}>
-        <button onClick={() => router.push("/home")} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: 0 }}>
-          <ArrowLeft size={16} /> Voltar
+    <div style={{ minHeight: "100vh", background: "#050505", color: "#fff", fontFamily: "var(--font-ui)" }}>
+      <style>{`
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .proj-month-card { transition: border-color .18s, background .18s; }
+        .proj-month-card:hover { background: rgba(255,255,255,0.035) !important; }
+      `}</style>
+
+      {/* Topbar */}
+      <div style={{
+        position: "sticky", top: 0, zIndex: 10,
+        background: "rgba(5,5,5,0.92)", backdropFilter: "blur(18px)",
+        borderBottom: "1px solid rgba(255,255,255,0.07)",
+        padding: "0 24px", height: 56,
+        display: "flex", alignItems: "center", gap: 16
+      }}>
+        <button
+          onClick={() => router.push("/home")}
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: "6px 0", fontFamily: "var(--font-ui)" }}
+        >
+          <ArrowLeft size={15} /> Voltar
         </button>
         <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: 15, fontWeight: 800 }}>Projeção {currentYear}</h1>
+          <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "var(--font-ui)", letterSpacing: "-0.01em" }}>
+            Projeção {currentYear}
+          </span>
         </div>
-        <TrendingUp size={16} color={G} />
+        <span style={{
+          fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 400,
+          color: G, letterSpacing: "0.12em", textTransform: "uppercase",
+          background: "rgba(184,245,90,0.08)", border: "1px solid rgba(184,245,90,0.2)",
+          borderRadius: 5, padding: "3px 8px"
+        }}>
+          MISSÃO {currentYear}
+        </span>
       </div>
 
-      <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 20px" }}>
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 16px 60px" }}>
         {loading ? (
-          <div style={{ textAlign: "center", padding: "64px 0", color: "rgba(255,255,255,0.28)", fontSize: 13 }}>Carregando...</div>
+          <div style={{ textAlign: "center", padding: "64px 0", color: "rgba(255,255,255,0.25)", fontSize: 13, fontFamily: "var(--font-mono)" }}>
+            Carregando...
+          </div>
         ) : (
           <>
-            {/* Summary cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 32 }}>
-              <SummaryCard label="Entradas no ano" value={formatCurrency(totalIncome)} color={G} />
-              <SummaryCard label="Saídas no ano" value={formatCurrency(totalExpense)} color="#ff8080" />
-              <SummaryCard label="Saldo projetado" value={formatCurrency(endBalance)} color={endBalance >= 0 ? G : "#ff8080"} />
-              <SummaryCard label="Meses positivos" value={`${positiveMonths} de 12`} color={positiveMonths >= 9 ? G : positiveMonths >= 6 ? "#facc15" : "#ff8080"} />
+            {/* Hero stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 28 }}>
+              <HeroCard label="Entradas no ano" value={formatCurrency(totalIncome)} color={G} />
+              <HeroCard label="Saídas no ano" value={formatCurrency(totalExpense)} color={RED} />
+              <HeroCard
+                label="Saldo projetado"
+                value={formatCurrency(endBalance)}
+                color={endBalance >= 0 ? G : RED}
+                highlight
+              />
+              <HeroCard
+                label="Meses positivos"
+                value={`${positiveMonths} de 12`}
+                color={positiveMonths >= 9 ? G : positiveMonths >= 6 ? "#facc15" : RED}
+              />
             </div>
 
             {recurringItems.length === 0 && (
-              <div style={{ background: "rgba(250,204,21,0.06)", border: "1px solid rgba(250,204,21,0.15)", borderRadius: 12, padding: "12px 16px", marginBottom: 20, fontSize: 12.5, color: "rgba(250,204,21,0.8)", lineHeight: 1.6 }}>
-                Sem recorrências cadastradas — os meses futuros aparecem zerados. Adicione receitas e despesas fixas na aba de Plano do Mês para ver a projeção completa.
+              <div style={{
+                background: "rgba(250,204,21,0.05)", border: "1px solid rgba(250,204,21,0.14)",
+                borderRadius: 10, padding: "11px 15px", marginBottom: 22,
+                fontSize: 12, color: "rgba(250,204,21,0.75)", lineHeight: 1.6,
+                fontFamily: "var(--font-ui)"
+              }}>
+                Sem recorrências cadastradas — meses futuros aparecem zerados. Adicione receitas e despesas fixas no Plano do Mês para ver a projeção completa.
               </div>
             )}
 
             {/* Month list */}
-            <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "grid", gap: 7, animation: "fadeUp .4s ease both" }}>
               {months.map((m) => (
                 <MonthCard key={m.monthKey} month={m} maxBar={maxBar} />
               ))}
@@ -182,11 +222,22 @@ function ProjectionView({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function SummaryCard({ label, value, color }: { label: string; value: string; color: string }) {
+function HeroCard({ label, value, color, highlight }: { label: string; value: string; color: string; highlight?: boolean }) {
   return (
-    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px 18px" }}>
-      <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 6 }}>{label}</p>
-      <p style={{ fontSize: 18, fontWeight: 800, color, letterSpacing: "-0.03em" }}>{value}</p>
+    <div style={{
+      background: highlight ? "rgba(184,245,90,0.04)" : "#111111",
+      border: `1px solid ${highlight ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.07)"}`,
+      borderRadius: 12, padding: "16px 18px"
+    }}>
+      <p style={{
+        fontFamily: "var(--font-ui)", fontSize: 10, color: "rgba(255,255,255,0.35)",
+        textTransform: "uppercase", letterSpacing: "0.11em", fontWeight: 700, marginBottom: 8
+      }}>
+        {label}
+      </p>
+      <p style={{ fontFamily: "var(--font-mono)", fontSize: 19, fontWeight: 500, color, letterSpacing: "-0.02em" }}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -195,63 +246,73 @@ function MonthCard({ month: m, maxBar }: { month: MonthRow; maxBar: number }) {
   const incomeW = maxBar > 0 ? (m.income / maxBar) * 100 : 0;
   const expenseW = maxBar > 0 ? (m.expense / maxBar) * 100 : 0;
   const isPositive = m.balance >= 0;
+  const isEmpty = !m.hasData && m.isFuture;
 
-  const badge = m.isCurrent
-    ? { label: "em andamento", color: "#facc15", bg: "rgba(250,204,21,0.10)" }
-    : m.isPast
-    ? { label: "realizado", color: "rgba(255,255,255,0.35)", bg: "rgba(255,255,255,0.05)" }
-    : { label: "projetado", color: "rgba(184,245,90,0.5)", bg: "rgba(184,245,90,0.06)" };
+  const statusLabel = m.isCurrent ? "• em andamento" : m.isPast ? "realizado" : "projetado";
+  const statusColor = m.isCurrent ? "#facc15" : m.isPast ? "rgba(255,255,255,0.3)" : "rgba(184,245,90,0.45)";
 
   return (
-    <div style={{
-      background: m.isCurrent ? "rgba(184,245,90,0.03)" : "rgba(255,255,255,0.02)",
-      border: `1px solid ${m.isCurrent ? "rgba(184,245,90,0.12)" : "rgba(255,255,255,0.06)"}`,
-      borderRadius: 12,
-      padding: "14px 16px",
-    }}>
+    <div
+      className="proj-month-card"
+      style={{
+        background: m.isCurrent ? "rgba(184,245,90,0.08)" : "#111111",
+        border: `1px solid ${m.isCurrent ? "rgba(184,245,90,0.30)" : "rgba(255,255,255,0.07)"}`,
+        borderRadius: 12,
+        padding: "14px 16px",
+        opacity: isEmpty ? 0.45 : 1,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
         {/* Month label */}
-        <div style={{ flexShrink: 0, width: 36, paddingTop: 2 }}>
-          <p style={{ fontSize: 13, fontWeight: 800, color: m.isCurrent ? G : m.isPast ? "#e8e9ec" : "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{m.shortLabel}</p>
-          <span style={{ fontSize: 9.5, fontWeight: 700, color: badge.color, background: badge.bg, padding: "2px 5px", borderRadius: 4, display: "inline-block", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>{badge.label}</span>
+        <div style={{ flexShrink: 0, width: 44 }}>
+          <p style={{
+            fontFamily: "var(--font-display)", fontSize: 14,
+            color: m.isCurrent ? G : m.isPast ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.38)",
+            marginBottom: 4
+          }}>
+            {m.shortLabel}
+          </p>
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 9, color: statusColor,
+            letterSpacing: "0.04em", display: "block"
+          }}>
+            {statusLabel}
+          </span>
         </div>
 
-        {/* Bars + values */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-            {/* Income bar */}
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>Entradas</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: G }}>{formatCurrency(m.income)}</span>
-              </div>
-              <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${incomeW}%`, background: G, borderRadius: 2, opacity: m.isFuture ? 0.45 : 0.9, transition: "width .4s ease" }} />
-              </div>
+        {/* Bars */}
+        <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 7 }}>
+          {/* Income */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "rgba(255,255,255,0.28)", fontWeight: 600 }}>Entradas</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: G, fontWeight: 500 }}>{formatCurrency(m.income)}</span>
+            </div>
+            <div style={{ height: 5, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${incomeW}%`, background: G, borderRadius: 3, opacity: m.isFuture ? 0.5 : 1, transition: "width .5s ease" }} />
             </div>
           </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {/* Expense bar */}
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>Saídas</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#ff8080" }}>{formatCurrency(m.expense)}</span>
-              </div>
-              <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${expenseW}%`, background: "#ff8080", borderRadius: 2, opacity: m.isFuture ? 0.45 : 0.9, transition: "width .4s ease" }} />
-              </div>
+          {/* Expense */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "rgba(255,255,255,0.28)", fontWeight: 600 }}>Saídas</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: RED, fontWeight: 500 }}>{formatCurrency(m.expense)}</span>
+            </div>
+            <div style={{ height: 5, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${expenseW}%`, background: RED, borderRadius: 3, opacity: m.isFuture ? 0.5 : 1, transition: "width .5s ease" }} />
             </div>
           </div>
         </div>
 
-        {/* Balance + accumulated */}
-        <div style={{ flexShrink: 0, textAlign: "right", minWidth: 90 }}>
-          <p style={{ fontSize: 13, fontWeight: 800, color: isPositive ? G : "#ff8080", letterSpacing: "-0.02em" }}>
-            {isPositive ? "+" : ""}{formatCurrency(m.balance)}
+        {/* Delta + accumulated */}
+        <div style={{ flexShrink: 0, textAlign: "right", minWidth: 86 }}>
+          <p style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 500, color: isPositive ? G : RED, letterSpacing: "-0.02em", marginBottom: 4 }}>
+            {isPositive ? "+" : "−"}{formatCurrency(Math.abs(m.balance))}
           </p>
-          <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.28)", marginTop: 3 }}>
-            acum. {formatCurrency(m.accumulated)}
+          <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "rgba(255,255,255,0.25)", letterSpacing: "-0.01em" }}>
+            {formatCurrency(m.accumulated)}
           </p>
+          <p style={{ fontFamily: "var(--font-ui)", fontSize: 9, color: "rgba(255,255,255,0.2)", marginTop: 1 }}>acum.</p>
         </div>
       </div>
     </div>

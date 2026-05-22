@@ -12,7 +12,7 @@ export default function PrivacyPage() {
 
       <h2>1. Quem somos</h2>
       <p>
-        O Fincheck Pro e uma aplicacao de gestao financeira pessoal e compartilhavel.
+        O Salvô! e uma aplicacao de gestao financeira pessoal e compartilhavel.
         Tratamos dados como controladores para entregar o app, manter sua conta e proteger
         sua experiencia.
       </p>
@@ -43,7 +43,7 @@ export default function PrivacyPage() {
       <h2>5. Fornecedores</h2>
       <p>
         Usamos Firebase e Google para autenticacao, banco de dados e hospedagem. Esses
-        fornecedores processam dados para viabilizar o funcionamento do Fincheck Pro.
+        fornecedores processam dados para viabilizar o funcionamento do Salvô!.
       </p>
 
       <h2>6. Open Finance e WhatsApp</h2>

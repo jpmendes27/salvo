@@ -153,42 +153,9 @@ function GlassCard({
 function Logo() {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 0 }}>
-      <span
-        style={{
-          fontFamily: "'DM Serif Display', serif",
-          fontWeight: 700,
-          fontSize: "1.15rem",
-          color: G,
-          letterSpacing: "-0.02em",
-          lineHeight: 1
-        }}
-      >
-        fincheck
-      </span>
-      <span
-        style={{
-          fontFamily: "'DM Serif Display', serif",
-          fontWeight: 700,
-          fontSize: "1.15rem",
-          color: "#fff",
-          letterSpacing: "-0.02em",
-          lineHeight: 1
-        }}
-      >
-        pro
-      </span>
-      <sup
-        style={{
-          fontFamily: "'DM Mono', monospace",
-          fontSize: "0.45rem",
-          verticalAlign: "super",
-          color: G,
-          fontWeight: 400,
-          marginLeft: 1
-        }}
-      >
-        ®
-      </sup>
+      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#b8f55a", letterSpacing: "-0.02em", lineHeight: 1 }}>Salvô</span>
+      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#ffffff", letterSpacing: "-0.02em", lineHeight: 1 }}>!</span>
+      <sup style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.45rem", verticalAlign: "super", color: "#b8f55a", fontWeight: 400, marginLeft: 1 }}>®</sup>
     </div>
   );
 }
@@ -465,7 +432,7 @@ function LegalGate({ onAccept }: { onAccept: () => Promise<void> }) {
     <CenteredCard>
       <h1>Antes de abrir seu workspace</h1>
       <p className="muted">
-        O Fincheck Pro guarda apenas os dados necessarios para sua gestao financeira. Se voce
+        O Salvô! guarda apenas os dados necessarios para sua gestao financeira. Se voce
         convidar alguem, essa pessoa vera os dados do workspace compartilhado.
       </p>
       <label style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
@@ -1165,8 +1132,7 @@ function WorkspaceApp({
   return (
     <div style={D.shell}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800;900&family=DM+Serif+Display&family=DM+Mono:wght@400;500&display=swap');
-        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
         .ws-tx-row:hover{background:rgba(255,255,255,0.03)!important}
@@ -2240,7 +2206,7 @@ function PlanCard({
             lineHeight: 1.55
           }}
         >
-          Adicione salario, aluguel, cartao ou qualquer conta prevista para o Fincheck mostrar o que ainda falta e quanto deve sobrar.
+          Adicione salario, aluguel, cartao ou qualquer conta prevista para o Salvô! mostrar o que ainda falta e quanto deve sobrar.
         </div>
       ) : (
         <>

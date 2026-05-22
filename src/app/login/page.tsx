@@ -179,42 +179,9 @@ function FInput({
 function Logo() {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 0 }}>
-      <span
-        style={{
-          fontFamily: "'DM Serif Display', serif",
-          fontWeight: 700,
-          fontSize: "1.15rem",
-          color: G,
-          letterSpacing: "-0.02em",
-          lineHeight: 1
-        }}
-      >
-        fincheck
-      </span>
-      <span
-        style={{
-          fontFamily: "'DM Serif Display', serif",
-          fontWeight: 700,
-          fontSize: "1.15rem",
-          color: "#fff",
-          letterSpacing: "-0.02em",
-          lineHeight: 1
-        }}
-      >
-        pro
-      </span>
-      <sup
-        style={{
-          fontFamily: "'DM Mono', monospace",
-          fontSize: "0.45rem",
-          verticalAlign: "super",
-          color: G,
-          fontWeight: 400,
-          marginLeft: 1
-        }}
-      >
-        ®
-      </sup>
+      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#b8f55a", letterSpacing: "-0.02em", lineHeight: 1 }}>Salvô</span>
+      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.15rem", color: "#ffffff", letterSpacing: "-0.02em", lineHeight: 1 }}>!</span>
+      <sup style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.45rem", verticalAlign: "super", color: "#b8f55a", fontWeight: 400, marginLeft: 1 }}>®</sup>
     </div>
   );
 }
