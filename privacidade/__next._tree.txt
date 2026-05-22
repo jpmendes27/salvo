@@ -1,2 +1,2 @@
-:HL["/fincheck-pro/_next/static/chunks/0q06sdzp79dfs.css","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"privacidade","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"BLy-bp6nkRo2IM8y2noL5"}
+:HL["/fincheck-pro/_next/static/chunks/12yz1f9s-vkj8.css","style"]
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"privacidade","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"IFVsj5vTlAktAieW7Ehs8"}
