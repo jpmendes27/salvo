@@ -212,7 +212,7 @@ function SliderInput({ value, max, onChange }: { value: number; max: number; onC
         />
       </div>
       <div style={{ textAlign: "center", marginTop: 10 }}>
-        <span style={{ fontSize: "clamp(32px, 5vw, 56px)", fontWeight: 900, letterSpacing: "-0.03em", color: "#fff", fontFamily: FONT_UI }}>
+        <span className="proj-slider-value" style={{ fontSize: "clamp(32px, 5vw, 56px)", fontWeight: 900, letterSpacing: "-0.03em", color: "#fff", fontFamily: FONT_UI }}>
           {formatCurrency(value)}
         </span>
         <span style={{ fontSize: 12.5, color: C_MUTED, marginLeft: 10 }}>
@@ -543,6 +543,16 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
           .proj-month-row { grid-template-columns: 1fr !important; gap: 12px !important; }
           .proj-mobile-bottom { display: flex !important; justify-content: space-between !important; align-items: flex-end !important; }
           .proj-sim-card { padding: 24px 18px !important; }
+          .proj-traj-headline { font-size: 18px !important; }
+          .proj-traj-label { font-size: 9px !important; }
+          .proj-traj-value { font-size: 24px !important; }
+          .proj-month-name { font-size: 16px !important; }
+          .proj-month-status { font-size: 8px !important; }
+          .proj-month-delta { font-size: 18px !important; }
+          .proj-month-acc-label { font-size: 8px !important; }
+          .proj-month-acc-value { font-size: 13px !important; }
+          .proj-sim-title { font-size: 18px !important; }
+          .proj-slider-value { font-size: 28px !important; }
         }
       `}</style>
 
@@ -623,7 +633,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
                 <p style={{ ...LABEL_STYLE, margin: "0 0 8px" }}>
                   SIMULADOR
                 </p>
-                <p style={{ fontSize: 28, fontWeight: 900, margin: "0 0 4px", fontFamily: FONT_UI }}>
+                <p className="proj-sim-title" style={{ fontSize: 28, fontWeight: 900, margin: "0 0 4px", fontFamily: FONT_UI }}>
                   E se você cortasse um gasto?
                 </p>
                 <p style={{ fontSize: 12.5, color: C_SEC, margin: "0 0 24px" }}>
@@ -749,14 +759,14 @@ function TrajectoryCard({ months, endBalance, currentMonth }: { months: MonthRow
   return (
     <div style={{ background: CARD_BG, border: CARD_BORDER, borderRadius: CARD_RADIUS, padding: "20px 22px 16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
-        <p style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.2, maxWidth: "55%", margin: 0, fontFamily: FONT_UI }}>
+        <p className="proj-traj-headline" style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.2, maxWidth: "55%", margin: 0, fontFamily: FONT_UI }}>
           Se mantiver o ritmo, você chega em{" "}
           <span style={{ color: endBalance >= 0 ? G : RED }}>{endLabel}</span>{" "}
           em dezembro.
         </p>
         <div style={{ textAlign: "right" }}>
-          <p style={LABEL_STYLE}>Você está aqui</p>
-          <p style={{ fontSize: "clamp(32px, 5vw, 56px)", fontWeight: 900, letterSpacing: "-0.03em", color: G, margin: "6px 0 0", fontFamily: FONT_UI }}>
+          <p className="proj-traj-label" style={LABEL_STYLE}>Você está aqui</p>
+          <p className="proj-traj-value" style={{ fontSize: "clamp(32px, 5vw, 56px)", fontWeight: 900, letterSpacing: "-0.03em", color: G, margin: "6px 0 0", fontFamily: FONT_UI }}>
             {formatCurrency(currentAccumulated)}
           </p>
         </div>
@@ -819,10 +829,10 @@ function MonthCard({ month: m, maxBar, simulatorDelta = 0 }: { month: MonthRow; 
       }}
     >
       <div>
-        <p style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1, color: m.isCurrent ? G : m.isPast ? "#ffffff" : C_MUTED, margin: 0 }}>
+        <p className="proj-month-name" style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1, color: m.isCurrent ? G : m.isPast ? "#ffffff" : C_MUTED, margin: 0 }}>
           {m.shortLabel}
         </p>
-        <p style={{ ...LABEL_STYLE, color: statusColor, margin: "5px 0 0" }}>
+        <p className="proj-month-status" style={{ ...LABEL_STYLE, color: statusColor, margin: "5px 0 0" }}>
           {statusLabel}
         </p>
       </div>
@@ -845,7 +855,7 @@ function MonthCard({ month: m, maxBar, simulatorDelta = 0 }: { month: MonthRow; 
       </div>
 
       <div className="proj-mobile-bottom" style={{ textAlign: "right" }}>
-        <p style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: isPositive ? G : RED, margin: 0 }}>
+        <p className="proj-month-delta" style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: isPositive ? G : RED, margin: 0 }}>
           {isPositive ? "+" : "−"}{formatCurrency(Math.abs(m.balance))}
         </p>
         <p style={{ fontSize: 12.5, color: C_SEC, margin: "5px 0 0" }}>{deltaLabel}</p>
@@ -857,8 +867,8 @@ function MonthCard({ month: m, maxBar, simulatorDelta = 0 }: { month: MonthRow; 
       </div>
 
       <div className="proj-mobile-bottom" style={{ textAlign: "right" }}>
-        <p style={{ ...LABEL_STYLE, color: C_SEC }}>Acumulado</p>
-        <p style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em", color: "#ffffff", margin: "5px 0 0" }}>
+        <p className="proj-month-acc-label" style={{ ...LABEL_STYLE, color: C_SEC }}>Acumulado</p>
+        <p className="proj-month-acc-value" style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em", color: "#ffffff", margin: "5px 0 0" }}>
           {formatCurrency(m.accumulated)}
         </p>
       </div>
