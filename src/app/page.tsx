@@ -4,7 +4,7 @@ import { LandingEffects } from "./landing-effects";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const metadata: Metadata = {
-  title: "fincheck pro | o amigo rico que você nunca teve",
+  title: "Salvô! | o amigo rico que você nunca teve",
   description: "Um app que olha sua vida financeira do jeito que ela é, te fala a verdade na cara e te mostra um caminho real pra sair do sufoco. Sem planilha. Sem palavra difícil. Sem promessa furada.",
 };
 
@@ -188,8 +188,8 @@ export default function LandingPage() {
 
       <nav className="top">
         <div className="wrap inner">
-          <a href="#" className="logo" aria-label="fincheckpro">
-            <span className="fc">fincheck</span><span className="pro">pro</span><span className="reg">®</span>
+          <a href="#" className="logo" aria-label="salvô">
+            <span className="fc">Salvô</span><span className="pro">!</span><span className="reg">®</span>
           </a>
           <div className="links">
             <a href="#dor">A real</a>
@@ -327,7 +327,7 @@ export default function LandingPage() {
                 <span>· honesto</span>
               </div>
               <h3>A verdade na cara. <em>Sem filtro.</em></h3>
-              <p className="fdesc">A IA do Fincheck olha pros seus gastos, identifica padrões e te conta o que você precisa ouvir — não o que você quer ouvir. Direto, popular, igual amigo de boteco que estudou finanças.</p>
+              <p className="fdesc">A IA do Salvô! olha pros seus gastos, identifica padrões e te conta o que você precisa ouvir — não o que você quer ouvir. Direto, popular, igual amigo de boteco que estudou finanças.</p>
               <div className="vstage">
                 <div className="diag-head">
                   <span>Diagnóstico · março/2026</span>
@@ -335,7 +335,7 @@ export default function LandingPage() {
                 </div>
                 <div className="diag-msg">
                   Cara, você gastou <em>R$ 612 só em iFood</em> esse mês. Isso é mais do que a sua conta de luz e a internet juntas. Bora cozinhar de domingo?
-                  <span className="from">— Fincheck IA</span>
+                  <span className="from">— Salvô! IA</span>
                 </div>
               </div>
             </div>
@@ -396,7 +396,7 @@ export default function LandingPage() {
       <section className="manifesto" id="manifesto">
         <div className="wrap" style={{ position: "relative" }}>
           <p className="quote reveal">A gente não veio te ensinar a <em>investir.</em><br />Veio te ajudar a parar de fazer <em>merda</em> com o seu dinheiro.</p>
-          <div className="sig reveal d1">manifesto fincheck pro</div>
+          <div className="sig reveal d1">manifesto salvô!</div>
         </div>
       </section>
 
@@ -411,7 +411,7 @@ export default function LandingPage() {
       <footer>
         <div className="wrap row">
           <a href="#" className="logo" style={{ fontSize: "18px" }}>
-            <span className="fc">fincheck</span><span className="pro">pro</span><span className="reg">®</span>
+            <span className="fc">Salvô</span><span className="pro">!</span><span className="reg">®</span>
           </a>
           <div className="flinks">
             <a href="#dor">A real</a>

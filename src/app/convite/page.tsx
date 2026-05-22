@@ -95,9 +95,9 @@ function errMsg(err: unknown): string {
 function Logo() {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 0 }}>
-      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.1rem", color: G, letterSpacing: "-0.02em", lineHeight: 1 }}>fincheck</span>
-      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.1rem", color: "#fff", letterSpacing: "-0.02em", lineHeight: 1 }}>pro</span>
-      <sup style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.42rem", verticalAlign: "super", color: G, fontWeight: 400, marginLeft: 1 }}>®</sup>
+      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.1rem", color: "#b8f55a", letterSpacing: "-0.02em", lineHeight: 1 }}>Salvô</span>
+      <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: "1.1rem", color: "#ffffff", letterSpacing: "-0.02em", lineHeight: 1 }}>!</span>
+      <sup style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.42rem", verticalAlign: "super", color: "#b8f55a", fontWeight: 400, marginLeft: 1 }}>®</sup>
     </div>
   );
 }
@@ -117,7 +117,7 @@ function InviteShell({ error }: { error?: string }) {
               onClick={() => { window.location.href = `${BASE}/login`; }}
               style={{ width: "100%", padding: "14px", borderRadius: 12, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", fontSize: "0.9rem", fontWeight: 600 }}
             >
-              Ir para o Fincheck Pro
+              Ir para o Salvô!
             </button>
           </>
         ) : (
@@ -623,7 +623,7 @@ function InviteAcceptFlow({ invite }: { invite: Invite }) {
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 8 }}>Qual é o seu CPF?</h1>
             <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 24 }}>
-              Usamos para identificar se você já tem uma conta no Fincheck Pro.
+              Usamos para identificar se você já tem uma conta no Salvô!.
             </p>
             <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>CPF</p>
             <input

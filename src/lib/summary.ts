@@ -51,7 +51,7 @@ export function buildMonthlySummary(
   }
 
   const shareText = [
-    `📊 Resumo Fincheck Pro — ${monthLabel(monthKey)}`,
+    `📊 Resumo Salvô! — ${monthLabel(monthKey)}`,
     ``,
     `💰 Entradas:  ${formatCurrency(income)}`,
     `💸 Saídas:    ${formatCurrency(expense)}`,

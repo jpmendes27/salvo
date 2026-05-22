@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "fincheck pro | metas",
+  title: "Salvô! | metas",
 };
 
 export default function MetasLayout({ children }: { children: React.ReactNode }) {
