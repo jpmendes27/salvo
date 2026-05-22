@@ -517,7 +517,6 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
           cursor: pointer; border: 2px solid #111;
         }
         @media (max-width: 767px) {
-          .proj-hero-grid { grid-template-columns: repeat(2,1fr) !important; }
           .proj-month-row { grid-template-columns: 1fr !important; gap: 12px !important; }
           .proj-mobile-bottom { display: flex !important; justify-content: space-between !important; align-items: flex-end !important; }
           .proj-sim-card { padding: 24px 18px !important; }
@@ -564,7 +563,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
         ) : (
           <>
             {/* ── MOMENTO 1 · REALIDADE AGORA ─────────────────────────────── */}
-            <div className="proj-hero-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+            <div className="proj-hero-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
               <HeroCard label="Entradas no ano" value={formatCurrency(totalIncome)} color={G} sub={`${months.filter(m => m.income > 0).length} meses com entrada`} />
               <HeroCard label="Saídas no ano" value={formatCurrency(totalExpense)} color={RED} sub={`${months.filter(m => m.expense > 0).length} meses com saída`} />
               <HeroCard label="Saldo projetado" value={formatCurrency(endBalance)} color={endBalance >= 0 ? G : RED} sub="acumulado em dezembro" highlight />
