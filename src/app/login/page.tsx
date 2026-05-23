@@ -8,6 +8,7 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   type User
 } from "firebase/auth";
@@ -275,6 +276,21 @@ function AuthScreen() {
   async function handleGoogle() {
     setError("");
     setBusy(true);
+    // iOS PWA standalone mode blocks signInWithPopup (popup can't communicate back).
+    // Detect standalone and fall back to redirect flow instead.
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as { standalone?: boolean }).standalone === true;
+    if (standalone) {
+      try {
+        await signInWithRedirect(auth, googleProvider, browserPopupRedirectResolver);
+        // Page navigates away — busy state is irrelevant from here
+      } catch (err) {
+        setError(errorMessage(err));
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const result = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
       const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
@@ -642,9 +658,16 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    // Explicitly process and clear any stale redirect state left by previous
-    // signInWithRedirect attempts (resolver is no longer set globally in initializeAuth).
-    getRedirectResult(auth, browserPopupRedirectResolver).catch(() => {});
+    // Process redirect result from signInWithRedirect (used in PWA standalone mode).
+    // Also clears any stale redirect state from previous sessions.
+    getRedirectResult(auth, browserPopupRedirectResolver)
+      .then((result) => {
+        if (result) {
+          const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
+          track(isNew ? "sign_up" : "login", { method: "google" });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
