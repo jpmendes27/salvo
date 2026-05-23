@@ -582,7 +582,7 @@ function WorkspaceApp({
   const [prevTransactions, setPrevTransactions] = useState<Transaction[]>([]);
 
   useEffect(() => {
-    let retried = false;
+    let attempt = 0;
     let cancelled = false;
     let unsub: (() => void) | null = null;
 
@@ -603,9 +603,9 @@ function WorkspaceApp({
         (err) => {
           if (cancelled) return;
           const code = (err as { code?: string }).code;
-          if (code === "permission-denied" && !retried) {
-            retried = true;
-            setTimeout(() => { if (!cancelled) subscribe(); }, 1500);
+          if (code === "permission-denied" && attempt < 3) {
+            attempt++;
+            setTimeout(() => { if (!cancelled) subscribe(); }, 300 * attempt);
             return;
           }
           if (code !== "permission-denied") setError(errorMessage(err));
