@@ -8,7 +8,6 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signInWithRedirect,
   signOut,
   type User
 } from "firebase/auth";
@@ -276,19 +275,14 @@ function AuthScreen() {
   async function handleGoogle() {
     setError("");
     setBusy(true);
-    // iOS PWA standalone mode blocks signInWithPopup (popup can't communicate back).
-    // Detect standalone and fall back to redirect flow instead.
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (window.navigator as { standalone?: boolean }).standalone === true;
-    if (standalone) {
-      try {
-        await signInWithRedirect(auth, googleProvider, browserPopupRedirectResolver);
-        // Page navigates away — busy state is irrelevant from here
-      } catch (err) {
-        setError(errorMessage(err));
-        setBusy(false);
-      }
+    // iOS standalone (PWA): Google OAuth is structurally broken — the OAuth
+    // redirect exits the PWA to Safari, and iOS isolates storage between
+    // them, so the auth result never makes it back to the PWA context.
+    // Best option: show a clear message instead of hanging or crashing.
+    const isIOSStandalone = (window.navigator as { standalone?: boolean }).standalone === true;
+    if (isIOSStandalone) {
+      setBusy(false);
+      setError("No app instalado no iPhone, o Google requer o Safari. Abra jpmendes.com/salvo/login no Safari para entrar com Google — ou use e-mail e senha aqui mesmo.");
       return;
     }
     try {
