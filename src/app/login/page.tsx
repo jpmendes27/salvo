@@ -197,6 +197,12 @@ function AuthScreen() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  // Hide Google Sign-In in any PWA standalone mode (iOS or Android) —
+  // OAuth redirect/popup is broken in standalone due to storage isolation.
+  const [isPWA] = useState(() =>
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (window.navigator as { standalone?: boolean }).standalone === true
+  );
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -275,16 +281,6 @@ function AuthScreen() {
   async function handleGoogle() {
     setError("");
     setBusy(true);
-    // iOS standalone (PWA): Google OAuth is structurally broken — the OAuth
-    // redirect exits the PWA to Safari, and iOS isolates storage between
-    // them, so the auth result never makes it back to the PWA context.
-    // Best option: show a clear message instead of hanging or crashing.
-    const isIOSStandalone = (window.navigator as { standalone?: boolean }).standalone === true;
-    if (isIOSStandalone) {
-      setBusy(false);
-      setError("No app instalado no iPhone, o Google requer o Safari. Abra jpmendes.com/salvo/login no Safari para entrar com Google — ou use e-mail e senha aqui mesmo.");
-      return;
-    }
     try {
       const result = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
       const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
@@ -434,28 +430,32 @@ function AuthScreen() {
             Comece em menos de 1 minuto
           </p>
 
-          <button
-            type="button"
-            disabled={busy}
-            onClick={handleGoogle}
-            style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", color: "#111", fontSize: 14, fontWeight: 700, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 16, transition: "opacity .2s,transform .15s", letterSpacing: "-0.01em" }}
-            onMouseEnter={(event) => { event.currentTarget.style.opacity = ".91"; event.currentTarget.style.transform = "scale(1.01)"; }}
-            onMouseLeave={(event) => { event.currentTarget.style.opacity = "1"; event.currentTarget.style.transform = "scale(1)"; }}
-          >
-            <svg width={17} height={17} viewBox="0 0 18 18">
-              <path d="M17.64 9.2a10.34 10.34 0 0 0-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92A8.78 8.78 0 0 0 17.64 9.2z" fill="#4285F4" />
-              <path d="M9 18a8.6 8.6 0 0 0 5.96-2.18l-2.92-2.26a5.43 5.43 0 0 1-8.07-2.85H.96v2.33A9 9 0 0 0 9 18z" fill="#34A853" />
-              <path d="M3.97 10.71A5.41 5.41 0 0 1 3.69 9c0-.59.1-1.17.28-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.04l3.01-2.33z" fill="#FBBC05" />
-              <path d="M9 3.58a4.86 4.86 0 0 1 3.44 1.35l2.58-2.58A8.64 8.64 0 0 0 9 0 9 9 0 0 0 .96 4.96l3.01 2.33A5.36 5.36 0 0 1 9 3.58z" fill="#EA4335" />
-            </svg>
-            Continuar com Google
-          </button>
+          {!isPWA && (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleGoogle}
+                style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", color: "#111", fontSize: 14, fontWeight: 700, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 16, transition: "opacity .2s,transform .15s", letterSpacing: "-0.01em" }}
+                onMouseEnter={(event) => { event.currentTarget.style.opacity = ".91"; event.currentTarget.style.transform = "scale(1.01)"; }}
+                onMouseLeave={(event) => { event.currentTarget.style.opacity = "1"; event.currentTarget.style.transform = "scale(1)"; }}
+              >
+                <svg width={17} height={17} viewBox="0 0 18 18">
+                  <path d="M17.64 9.2a10.34 10.34 0 0 0-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92A8.78 8.78 0 0 0 17.64 9.2z" fill="#4285F4" />
+                  <path d="M9 18a8.6 8.6 0 0 0 5.96-2.18l-2.92-2.26a5.43 5.43 0 0 1-8.07-2.85H.96v2.33A9 9 0 0 0 9 18z" fill="#34A853" />
+                  <path d="M3.97 10.71A5.41 5.41 0 0 1 3.69 9c0-.59.1-1.17.28-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.04l3.01-2.33z" fill="#FBBC05" />
+                  <path d="M9 3.58a4.86 4.86 0 0 1 3.44 1.35l2.58-2.58A8.64 8.64 0 0 0 9 0 9 9 0 0 0 .96 4.96l3.01 2.33A5.36 5.36 0 0 1 9 3.58z" fill="#EA4335" />
+                </svg>
+                Continuar com Google
+              </button>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.20)" }}>ou</span>
-            <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
-          </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.20)" }}>ou</span>
+                <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
+              </div>
+            </>
+          )}
 
           {error && (
             <div style={{ background: "rgba(255,80,80,0.12)", border: "1px solid rgba(255,80,80,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#ff8080", lineHeight: 1.5 }}>
