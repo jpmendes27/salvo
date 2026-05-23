@@ -4,38 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Salvô!</title>
-  <style>
-    html, body { margin: 0; padding: 0; background: #050505; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    p { color: rgba(255,255,255,0.35); font-family: system-ui, sans-serif; font-size: 13px; }
-  </style>
+  <script>window.location.replace('/salvo/');</script>
 </head>
-<body>
-  <script>
-    // This page handles two cases:
-    // 1. Firebase OAuth callback at /__/auth/handler — load Firebase and let SDK process it
-    // 2. Any other missing URL — redirect to the app
-    if (window.location.pathname.indexOf('/__/auth/') !== 0) {
-      window.location.replace('/salvo/');
-    }
-  </script>
-  <p>Autenticando…</p>
-  <!-- Firebase compat SDK: auto-detects /__/auth/handler path and processes OAuth callback -->
-  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-  <script>
-    firebase.initializeApp({
-      apiKey:            "AIzaSyBK0VTx0WaqPym2IKWAG2ko6yiYEICHs-I",
-      authDomain:        "jpmendes.com",
-      projectId:         "fincheck-pro
-",
-      storageBucket:     "fincheck-pro.firebasestorage.app
-",
-      messagingSenderId: "865274653457",
-      appId:             "1:865274653457:web:e833134d8b6978df13bab0"
-    });
-    // Firebase auth SDK automatically handles /__/auth/handler on init:
-    // - popup mode  (window.opener exists): postMessages result back to opener
-    // - redirect mode (no opener):          stores auth state, redirects to app
-  </script>
-</body>
+<body></body>
 </html>
