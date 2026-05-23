@@ -147,6 +147,11 @@ service cloud.firestore {
         allow delete: if isMember(workspaceId);
       }
 
+      match /goals/{goalId} {
+        allow read, create, update: if isMember(workspaceId);
+        allow delete: if isMember(workspaceId);
+      }
+
       match /openFinanceWaitlist/{waitlistId} {
         allow read: if isOwner(workspaceId);
         allow create: if isMember(workspaceId)

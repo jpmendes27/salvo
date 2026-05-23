@@ -386,6 +386,7 @@ function AddGoalModal({
   const [monthly, setMonthly]     = useState(initialMonthly ?? "");
   const [deadline, setDeadline]   = useState(initialPrazoMeses ? prazoToDeadline(initialPrazoMeses) : "");
   const [saving, setSaving]       = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const displayName =
     user.displayName || user.email?.split("@")[0] || "Usuário";
@@ -393,6 +394,7 @@ function AddGoalModal({
   const handleSave = async () => {
     if (!title.trim() || !target || Number(target) <= 0) return;
     setSaving(true);
+    setSaveError("");
     try {
       await addDoc(collection(db, "workspaces", workspaceId, "goals"), {
         title: title.trim(),
@@ -408,6 +410,8 @@ function AddGoalModal({
         updatedAt: serverTimestamp(),
       });
       onClose();
+    } catch {
+      setSaveError("Não foi possível salvar. Tente novamente.");
     } finally {
       setSaving(false);
     }
@@ -504,6 +508,11 @@ function AddGoalModal({
             </div>
           </div>
 
+          {saveError && (
+            <p style={{ fontSize: 12.5, color: "#f87171", textAlign: "center", margin: "0 0 4px" }}>
+              {saveError}
+            </p>
+          )}
           <button
             onClick={handleSave}
             disabled={saving || !title.trim() || !target || Number(target) <= 0}
