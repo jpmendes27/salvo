@@ -8,8 +8,8 @@ import {
 import {
   ArrowLeft, CreditCard, Plane, Plus, Shield, Target, TrendingUp, X
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { useAuthUser } from "@/app/auth-provider";
 import { db } from "@/lib/firebase";
 import { formatCurrency } from "@/lib/money";
@@ -47,7 +47,11 @@ export default function MetasPage() {
   const workspaceId = typeof window !== "undefined" ? localStorage.getItem("fincheck_workspace") ?? "" : "";
   if (!workspaceId) { router.replace("/"); return null; }
 
-  return <MetasView workspaceId={workspaceId} user={user} />;
+  return (
+    <Suspense fallback={<Shell text="Carregando..." />}>
+      <MetasView workspaceId={workspaceId} user={user} />
+    </Suspense>
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -69,9 +73,19 @@ function estimatedDate(months: number): string {
 
 function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const prefill = {
+    tipo:   searchParams.get("tipo") as GoalType | null,
+    valor:  searchParams.get("valor"),
+    mensal: searchParams.get("mensal"),
+    prazo:  searchParams.get("prazo") ? Number(searchParams.get("prazo")) : null,
+    titulo: searchParams.get("titulo"),
+  };
+  const hasPrefill = !!(prefill.tipo || prefill.valor);
+
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [addOpen, setAddOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(hasPrefill);
   const [depositGoal, setDepositGoal] = useState<Goal | null>(null);
 
   useEffect(() => {
@@ -206,6 +220,11 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
           workspaceId={workspaceId}
           user={user}
           onClose={() => setAddOpen(false)}
+          initialType={prefill.tipo ?? undefined}
+          initialTarget={prefill.valor ?? undefined}
+          initialMonthly={prefill.mensal ?? undefined}
+          initialPrazoMeses={prefill.prazo ?? undefined}
+          initialTitle={prefill.titulo ?? undefined}
         />
       )}
 
@@ -335,21 +354,37 @@ function GoalCard({
 
 // ─── Add goal modal ───────────────────────────────────────────────────────────
 
+function prazoToDeadline(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 function AddGoalModal({
   workspaceId,
   user,
   onClose,
+  initialType,
+  initialTarget,
+  initialMonthly,
+  initialPrazoMeses,
+  initialTitle,
 }: {
   workspaceId: string;
   user: User;
   onClose: () => void;
+  initialType?: GoalType;
+  initialTarget?: string;
+  initialMonthly?: string;
+  initialPrazoMeses?: number;
+  initialTitle?: string;
 }) {
-  const [title, setTitle] = useState("");
-  const [type, setType]   = useState<GoalType>("reserva");
-  const [target, setTarget]       = useState("");
+  const [title, setTitle] = useState(initialTitle ?? "");
+  const [type, setType]   = useState<GoalType>(initialType ?? "reserva");
+  const [target, setTarget]       = useState(initialTarget ?? "");
   const [current, setCurrent]     = useState("");
-  const [monthly, setMonthly]     = useState("");
-  const [deadline, setDeadline]   = useState("");
+  const [monthly, setMonthly]     = useState(initialMonthly ?? "");
+  const [deadline, setDeadline]   = useState(initialPrazoMeses ? prazoToDeadline(initialPrazoMeses) : "");
   const [saving, setSaving]       = useState(false);
 
   const displayName =
@@ -464,7 +499,7 @@ function AddGoalModal({
             </div>
             <div>
               <label style={LABEL}>Prazo (opcional)</label>
-              <input type="month" style={INPUT} value={deadline}
+              <input type="month" style={INPUT} value={deadline.slice(0, 7)}
                 onChange={(e) => setDeadline(e.target.value ? e.target.value + "-01" : "")} />
             </div>
           </div>

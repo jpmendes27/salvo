@@ -233,7 +233,7 @@ function GoalCard({ goal, router }: { goal: GoalSuggestion; router: ReturnType<t
     : titulo.includes("invest") ? "investimento"
     : "outro";
 
-  const href = `${BASE}/metas?tipo=${tipo}&valor=${goal.valorMeta}&mensal=${goal.valorMensal}&prazo=${goal.prazoMeses}`;
+  const href = `/metas?tipo=${tipo}&valor=${goal.valorMeta}&mensal=${goal.valorMensal}&prazo=${goal.prazoMeses}&titulo=${encodeURIComponent(goal.titulo)}`;
 
   return (
     <div style={{
