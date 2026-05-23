@@ -582,23 +582,40 @@ function WorkspaceApp({
   const [prevTransactions, setPrevTransactions] = useState<Transaction[]>([]);
 
   useEffect(() => {
-    setTxLoading(true);
-    const txQuery = query(
-      collection(db, "workspaces", workspace.id, "transactions"),
-      where("monthKey", "==", monthKey),
-      orderBy("date", "desc")
-    );
-    return onSnapshot(
-      txQuery,
-      (snap) => {
-        setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction));
-        setTxLoading(false);
-      },
-      (err) => {
-        if ((err as { code?: string }).code !== "permission-denied") setError(errorMessage(err));
-        setTxLoading(false);
-      }
-    );
+    let retried = false;
+    let cancelled = false;
+    let unsub: (() => void) | null = null;
+
+    function subscribe() {
+      setTxLoading(true);
+      const txQuery = query(
+        collection(db, "workspaces", workspace.id, "transactions"),
+        where("monthKey", "==", monthKey),
+        orderBy("date", "desc")
+      );
+      unsub = onSnapshot(
+        txQuery,
+        (snap) => {
+          if (cancelled) return;
+          setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction));
+          setTxLoading(false);
+        },
+        (err) => {
+          if (cancelled) return;
+          const code = (err as { code?: string }).code;
+          if (code === "permission-denied" && !retried) {
+            retried = true;
+            setTimeout(() => { if (!cancelled) subscribe(); }, 1500);
+            return;
+          }
+          if (code !== "permission-denied") setError(errorMessage(err));
+          setTxLoading(false);
+        }
+      );
+    }
+
+    subscribe();
+    return () => { cancelled = true; unsub?.(); };
   }, [workspace.id, monthKey]);
 
   useEffect(() => {
