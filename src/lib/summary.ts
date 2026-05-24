@@ -1,29 +1,43 @@
 import type { MonthlySummary, Transaction } from "./types";
 import { formatCurrency, monthLabel } from "./money";
 
+function inferSource(sourceLabel?: string): "account" | "card" | undefined {
+  if (!sourceLabel) return undefined;
+  if (/cartão|fatura|card/i.test(sourceLabel)) return "card";
+  return "account";
+}
+
 export function buildMonthlySummary(
   transactions: Transaction[],
   monthKey: string
 ): MonthlySummary {
-  const income = transactions
-    .filter((item) => item.type === "income")
-    .reduce((total, item) => total + item.amount, 0);
-  const expense = transactions
-    .filter((item) => item.type === "expense")
-    .reduce((total, item) => total + item.amount, 0);
-  const balance = income - expense;
-  const savingsRate = income > 0 ? Math.round((balance / income) * 100) : 0;
+  const enriched = transactions.map((t) => ({
+    ...t,
+    source: (t.source === "account" || t.source === "card") ? t.source : inferSource(t.sourceLabel),
+  }));
+
+  const accountTxs = enriched.filter((t) => t.source !== "card");
+  const cardTxs    = enriched.filter((t) => t.source === "card");
+
+  const accountIncome  = accountTxs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const accountExpense = accountTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const cardExpense    = cardTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+
+  const income  = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expense = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+
+  const balance     = accountIncome - accountExpense;
+  const savingsRate = accountIncome > 0 ? Math.round((balance / accountIncome) * 100) : null;
 
   const categoryTotals = transactions
-    .filter((item) => item.type === "expense")
-    .reduce<Record<string, number>>((acc, item) => {
-      acc[item.category] = (acc[item.category] || 0) + item.amount;
+    .filter((t) => t.type === "expense")
+    .reduce<Record<string, number>>((acc, t) => {
+      acc[t.category] = (acc[t.category] || 0) + t.amount;
       return acc;
     }, {});
 
-  const [topCategory, topCategoryAmount] = Object.entries(categoryTotals).sort(
-    (a, b) => b[1] - a[1]
-  )[0] || [undefined, undefined];
+  const [topCategory, topCategoryAmount] =
+    Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0] || [undefined, undefined];
 
   const insights: string[] = [];
 
@@ -35,17 +49,15 @@ export function buildMonthlySummary(
     insights.push(`Seu mês fechou negativo em ${formatCurrency(Math.abs(balance))}.`);
   }
 
-  if (income > 0) {
-    insights.push(`Você comprometeu ${Math.max(0, 100 - savingsRate)}% das suas entradas.`);
+  if (accountIncome > 0) {
+    insights.push(`Você comprometeu ${Math.max(0, 100 - (savingsRate ?? 0))}% das suas entradas.`);
   }
 
   if (topCategory && topCategoryAmount) {
-    insights.push(
-      `${topCategory} foi sua maior categoria de gastos, com ${formatCurrency(topCategoryAmount)}.`
-    );
+    insights.push(`${topCategory} foi sua maior categoria de gastos, com ${formatCurrency(topCategoryAmount)}.`);
   }
 
-  const contributors = new Set(transactions.map((item) => item.createdByName));
+  const contributors = new Set(transactions.map((t) => t.createdByName));
   if (contributors.size > 1) {
     insights.push("Este resumo considera lançamentos de mais de uma pessoa no workspace.");
   }
@@ -57,7 +69,7 @@ export function buildMonthlySummary(
     `💸 Saídas:    ${formatCurrency(expense)}`,
     `📈 Saldo:     ${formatCurrency(balance)}`,
     ``,
-    insights[0] || ""
+    insights[0] || "",
   ]
     .filter((l, i) => i < 5 || l !== "")
     .join("\n");
@@ -67,9 +79,11 @@ export function buildMonthlySummary(
     expense,
     balance,
     savingsRate,
+    accountExpense,
+    cardExpense,
     topCategory,
     topCategoryAmount,
     insights,
-    shareText
+    shareText,
   };
 }

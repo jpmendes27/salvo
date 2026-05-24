@@ -41,6 +41,7 @@ export type Transaction = {
   createdBy: string;
   createdByName: string;
   sourceLabel?: string;
+  source?: "account" | "card";
   createdAt?: unknown;
   updatedAt?: unknown;
 };
@@ -82,7 +83,9 @@ export type MonthlySummary = {
   income: number;
   expense: number;
   balance: number;
-  savingsRate: number;
+  savingsRate: number | null;
+  accountExpense: number;
+  cardExpense: number;
   topCategory?: string;
   topCategoryAmount?: number;
   insights: string[];
