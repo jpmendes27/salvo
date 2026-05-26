@@ -515,7 +515,6 @@ function WorkspaceApp({
   const [txFilter, setTxFilter] = useState<"all" | "income" | "expense">("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [importState, setImportState] = useState<ImportState | null>(null);
-  const [importSource, setImportSource] = useState<"account" | "card" | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
@@ -729,7 +728,6 @@ function WorkspaceApp({
     const ext = files[0]?.name.split(".").pop()?.toLowerCase() ?? "unknown";
     track("file_import", { file_type: ext, file_count: files.length });
     const rows: ParsedWithMeta[] = [];
-    const currentSource = importSource;
 
     for (const file of files) {
       const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -740,7 +738,7 @@ function WorkspaceApp({
           let csvTxs: ParsedTransaction[] = [];
           try { csvTxs = parseCSV(text, file.name); } catch { /* fallback pra IA */ }
           if (csvTxs.length >= 3) {
-            csvTxs.forEach((t) => rows.push({ ...t, source: currentSource ?? undefined, _id: crypto.randomUUID(), selected: true }));
+            csvTxs.forEach((t) => rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true }));
           } else {
             const resp = await fetch(PARSE_FUNCTION_URL, {
               method: "POST",
@@ -762,7 +760,7 @@ function WorkspaceApp({
                 amount: Math.abs(t.amount ?? 0),
                 category: categorizeTransaction(t.description ?? "", type),
                 sourceLabel: csvLabel,
-                source: currentSource ?? undefined,
+                source: inferSource(csvLabel),
                 _id: crypto.randomUUID(),
                 selected: true
               });
@@ -771,7 +769,7 @@ function WorkspaceApp({
         } else if (ext === "ofx" || ext === "qfx" || mime.includes("ofx")) {
           const text = await file.text();
           parseOFX(text, file.name).forEach((t) =>
-            rows.push({ ...t, source: currentSource ?? undefined, _id: crypto.randomUUID(), selected: true })
+            rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
           );
         } else if (ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf")) {
           const pdfCandidates = profile.cpf
@@ -796,7 +794,7 @@ function WorkspaceApp({
 
             if (bankTxs.length >= 3) {
               bankTxs.forEach((t) =>
-                rows.push({ ...t, source: currentSource ?? undefined, _id: crypto.randomUUID(), selected: true })
+                rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
               );
             } else {
               const resp = await fetch(PARSE_FUNCTION_URL, {
@@ -824,7 +822,7 @@ function WorkspaceApp({
                   amount: Math.abs(t.amount ?? 0),
                   category: categorizeTransaction(t.description ?? "", type),
                   sourceLabel: claudeLabel,
-                  source: currentSource ?? undefined,
+                  source: inferSource(claudeLabel),
                   _id: crypto.randomUUID(),
                   selected: true
                 });
@@ -858,7 +856,7 @@ function WorkspaceApp({
                 amount: Math.abs(t.amount ?? 0),
                 category: categorizeTransaction(t.description ?? "", type),
                 sourceLabel: claudeLabel,
-                source: currentSource ?? undefined,
+                source: inferSource(claudeLabel),
                 _id: crypto.randomUUID(),
                 selected: true
               });
@@ -887,7 +885,7 @@ function WorkspaceApp({
               amount: Math.abs(t.amount ?? 0),
               category: categorizeTransaction(t.description ?? "", type),
               sourceLabel: imageLabel,
-              source: currentSource ?? undefined,
+              source: inferSource(imageLabel),
               _id: crypto.randomUUID(),
               selected: true
             });
@@ -1406,8 +1404,6 @@ function WorkspaceApp({
             <UploadZone
               onFiles={handleFiles}
               onAddManual={() => setAddOpen(true)}
-              importSource={importSource}
-              onSourceChange={setImportSource}
             />
 
             {/* View tabs */}
@@ -1815,7 +1811,7 @@ function WorkspaceApp({
         </div>
 
         {/* 4. Importar extrato */}
-        <UploadZone onFiles={handleFiles} onAddManual={() => setAddOpen(true)} importSource={importSource} onSourceChange={setImportSource} />
+        <UploadZone onFiles={handleFiles} onAddManual={() => setAddOpen(true)} />
 
         {/* 5. Plano do mês */}
         <PlanCard
@@ -2609,28 +2605,20 @@ function BalanceHeader({
 function UploadZone({
   onFiles,
   onAddManual,
-  importSource,
-  onSourceChange,
 }: {
   onFiles: (files: File[]) => void;
   onAddManual: () => void;
-  importSource: "account" | "card" | null;
-  onSourceChange: (s: "account" | "card") => void;
 }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const accept = ".pdf,.csv,.ofx,.qfx,image/*";
 
-  const onDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    if (importSource) setDragging(true);
-  };
+  const onDragOver = (e: DragEvent) => { e.preventDefault(); setDragging(true); };
   const onDragLeave = () => setDragging(false);
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    if (!importSource) return;
     const files = Array.from(e.dataTransfer.files);
     if (files.length) onFiles(files);
   };
@@ -2640,54 +2628,16 @@ function UploadZone({
     e.target.value = "";
   };
 
-  const sourceBtn = (type: "account" | "card", icon: string, label: string) => {
-    const active = importSource === type;
-    return (
-      <button
-        key={type}
-        onClick={() => onSourceChange(type)}
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 7,
-          padding: "9px 12px",
-          borderRadius: 10,
-          border: `1.5px solid ${active ? G : "rgba(255,255,255,0.12)"}`,
-          background: active ? G_10 : "rgba(255,255,255,0.03)",
-          color: active ? G : "rgba(255,255,255,0.55)",
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: "pointer",
-          transition: "all .15s",
-        }}
-      >
-        <span>{icon}</span> {label}
-      </button>
-    );
-  };
-
   return (
     <div>
-      {/* Source selector */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        {sourceBtn("card", "💳", "Cartão de crédito")}
-        {sourceBtn("account", "🏦", "Conta corrente")}
-      </div>
-      <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", textAlign: "center", marginBottom: 10 }}>
-        Isso ajuda o Salvô! a calcular seu diagnóstico corretamente
-      </p>
-
       <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        onClick={() => importSource && inputRef.current?.click()}
+        onClick={() => inputRef.current?.click()}
         style={{
-          border: `1.5px dashed ${dragging ? G : importSource ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.07)"}`,
-          opacity: importSource ? 1 : 0.5,
-          cursor: importSource ? "pointer" : "not-allowed",
+          border: `1.5px dashed ${dragging ? G : "rgba(255,255,255,0.14)"}`,
+          cursor: "pointer",
           borderRadius: 14,
           padding: "28px 24px",
           display: "flex",
