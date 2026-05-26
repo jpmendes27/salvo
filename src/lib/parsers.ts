@@ -327,21 +327,79 @@ function parseBRNumber(raw: string): number {
   return negative ? -num : num;
 }
 
+export function detectCardSuffix(text: string): string | null {
+  const m = text.match(
+    /(?:[•·*.]{2,4}[\s-]?(\d{4}))|(?:final[\s:]+(\d{4}))|(?:terminad[ao]\s+em\s+(\d{4}))/i
+  );
+  return m ? (m[1] || m[2] || m[3]) : null;
+}
+
+const COMPE_BANKS: Record<string, string> = {
+  "001": "Banco do Brasil", "033": "Santander",     "041": "Banrisul",
+  "070": "BRB",             "077": "Inter",          "104": "Caixa",
+  "208": "BTG Pactual",     "212": "Banco Original", "237": "Bradesco",
+  "260": "Nubank",          "290": "PagBank",        "323": "Mercado Pago",
+  "336": "C6 Bank",         "341": "Itaú",           "380": "PicPay",
+  "422": "Safra",           "637": "Sofisa",         "655": "Votorantim",
+  "735": "Neon",            "748": "Sicredi",        "756": "Sicoob",
+};
+
+const ISPB_BANKS: Record<string, string> = {
+  "00000000": "Banco do Brasil", "00360305": "Caixa",
+  "00416968": "Inter",           "18236120": "Nubank",
+  "31872495": "C6 Bank",         "60701190": "Itaú",
+  "60746948": "Bradesco",        "90400888": "Santander",
+  "22896431": "PicPay",          "10573521": "Mercado Pago",
+};
+
+const LABEL_ALIASES: [RegExp, string][] = [
+  [/^nu\b/i, "Nubank"],   [/^nub\b/i, "Nubank"],
+  [/^bb\b/i, "Banco do Brasil"], [/^cef\b/i, "Caixa"],
+  [/^pag\b/i, "PagBank"],
+];
+
+export function normalizeSourceLabel(label: string): string {
+  let s = label
+    .replace(/\b\d{2}[A-ZÁÉÍÓÚÇ]{3}\d{4}\b/gi, "")
+    .replace(/\b\d{8}\b/g, "")
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, "")
+    .replace(/\b(extrato|fatura|statement|export|download)\b/gi, "")
+    .replace(/[•·*]{2,4}/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  for (const [pattern, name] of LABEL_ALIASES) {
+    if (pattern.test(s)) { s = s.replace(pattern, name).trim(); break; }
+  }
+
+  const suffixMatch = label.match(/[•·*]{2,}\s*(\d{4})/);
+  if (suffixMatch) {
+    s = s.replace(/\b\d{4}\b/, "").replace(/\s{2,}/g, " ").trim();
+    if (!/^Cartão/i.test(s)) s = `Cartão ${s}`;
+    s = `${s} ${suffixMatch[1]}`.trim();
+  }
+
+  return s || "Importação";
+}
+
 export function sourceLabelFromFilename(filename: string): string {
   const base = filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").trim();
-  const lower = base.toLowerCase();
-  if (lower.includes("nubank")) return "Nubank";
-  if (lower.includes("picpay")) return "PicPay";
-  if (lower.includes("afinz")) return "Afinz";
-  if (lower.includes("inter")) return "Banco Inter";
-  if (lower.includes("itau") || lower.includes("itaú")) return "Itaú";
-  if (lower.includes("bradesco")) return "Bradesco";
+  const lower = base.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+  if (lower.includes("nubank"))    return "Nubank";
+  if (lower.includes("picpay"))    return "PicPay";
+  if (lower.includes("afinz"))     return "Afinz";
+  if (lower.includes("inter"))     return "Inter";
+  if (lower.includes("itau"))      return "Itaú";
+  if (lower.includes("bradesco"))  return "Bradesco";
   if (lower.includes("santander")) return "Santander";
-  if (lower.includes("caixa")) return "Caixa";
+  if (lower.includes("caixa"))     return "Caixa";
   if (lower.includes("bb") || lower.includes("banco do brasil")) return "Banco do Brasil";
-  if (lower.includes("c6")) return "C6 Bank";
-  if (lower.includes("xp")) return "XP";
-  return base.slice(0, 32) || "Importação";
+  if (lower.includes("c6"))        return "C6 Bank";
+  if (/\bxp\b/.test(lower))        return "XP";
+  if (lower.includes("noh"))       return "Noh";
+
+  return normalizeSourceLabel(base) || "Importação";
 }
 
 export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
@@ -449,6 +507,32 @@ export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
 export function parseOFX(text: string, filename = ""): ParsedTransaction[] {
   const result: ParsedTransaction[] = [];
 
+  // Resolve banco a partir de FID (COMPE = 3 dígitos, ISPB = 8 dígitos) ou ORG
+  const fidMatch  = text.match(/<FID>\s*(\d+)/i);
+  const orgMatch  = text.match(/<ORG>\s*([^<\n\r]+)/i);
+  const acctMatch = text.match(/<ACCTTYPE>\s*([^<\n\r]+)/i);
+
+  let bankFromFid: string | null = null;
+  if (fidMatch) {
+    const fid = fidMatch[1].trim();
+    bankFromFid = fid.length === 8
+      ? (ISPB_BANKS[fid] ?? null)
+      : (COMPE_BANKS[fid.padStart(3, "0")] ?? null);
+  }
+  const bankFromOrg = orgMatch ? orgMatch[1].trim() : null;
+  const bankName    = bankFromFid ?? bankFromOrg ?? null;
+  const isCredit    = /credit/i.test(acctMatch?.[1] ?? "");
+  const cardSuffix  = detectCardSuffix(text);
+
+  let ofxSourceLabel: string;
+  if (bankName) {
+    ofxSourceLabel = isCredit
+      ? (cardSuffix ? `Cartão ${bankName} ${cardSuffix}` : `Cartão ${bankName}`)
+      : bankName;
+  } else {
+    ofxSourceLabel = sourceLabelFromFilename(filename);
+  }
+
   const extractField = (block: string, tag: string): string =>
     block.match(new RegExp(`<${tag}>([^<\n\r]+)`, "i"))?.[1]?.trim() ?? "";
 
@@ -475,7 +559,7 @@ export function parseOFX(text: string, filename = ""): ParsedTransaction[] {
         monthKey: monthKeyFromDate(date),
         category: categorizeTransaction(description, type),
         dedupKey: makeDedupKey(date, description, amount),
-        sourceLabel: sourceLabelFromFilename(filename)
+        sourceLabel: ofxSourceLabel
       });
     }
     return result;
@@ -503,7 +587,7 @@ export function parseOFX(text: string, filename = ""): ParsedTransaction[] {
       monthKey: monthKeyFromDate(date),
       category: categorizeTransaction(description, type),
       dedupKey: makeDedupKey(date, description, amount),
-      sourceLabel: sourceLabelFromFilename(filename)
+      sourceLabel: ofxSourceLabel
     });
   }
 

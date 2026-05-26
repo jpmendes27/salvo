@@ -64,7 +64,7 @@ import { buildMonthlyPlanSummary } from "@/lib/planning";
 import { buildMonthlySummary } from "@/lib/summary";
 import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction, TransactionType, Workspace } from "@/lib/types";
 import { defaultCategories, demoTransactions } from "@/lib/demo";
-import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
+import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, normalizeSourceLabel, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
@@ -752,7 +752,7 @@ function WorkspaceApp({
               throw new Error(errJson.error || `Erro ao processar ${file.name}`);
             }
             const data = await resp.json();
-            const csvLabel: string = data.sourceLabel || sourceLabelFromFilename(file.name);
+            const csvLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
             (data.transactions ?? []).forEach((t: ParsedTransaction) => {
               if (Math.abs(t.amount ?? 0) === 0) return;
               if (isStopDescription(t.description ?? "")) return;
@@ -813,7 +813,7 @@ function WorkspaceApp({
                 throw new Error(errJson.error || `Erro ao processar ${file.name}`);
               }
               const data = await resp.json();
-              const claudeLabel: string = data.sourceLabel || bankLabel;
+              const claudeLabel: string = data.sourceLabel ? normalizeSourceLabel(data.sourceLabel) : bankLabel;
               (data.transactions ?? []).forEach((t: ParsedTransaction) => {
                 if (Math.abs(t.amount ?? 0) === 0) return;
                 if (isStopDescription(t.description ?? "")) return;
@@ -847,7 +847,7 @@ function WorkspaceApp({
               throw new Error(errJson.error || `Erro ao processar ${file.name}`);
             }
             const data = await resp.json();
-            const claudeLabel: string = data.sourceLabel || sourceLabelFromFilename(file.name);
+            const claudeLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
             (data.transactions ?? []).forEach((t: ParsedTransaction) => {
               if (Math.abs(t.amount ?? 0) === 0) return;
               if (isStopDescription(t.description ?? "")) return;
@@ -876,7 +876,7 @@ function WorkspaceApp({
             throw new Error(errJson.error || `Erro ao processar ${file.name}`);
           }
           const data = await resp.json();
-          const imageLabel: string = data.sourceLabel || "Comprovante";
+          const imageLabel: string = normalizeSourceLabel(data.sourceLabel || "Comprovante");
           (data.transactions ?? []).forEach((t: ParsedTransaction) => {
             if (Math.abs(t.amount ?? 0) === 0) return;
             if (isStopDescription(t.description ?? "")) return;

@@ -1,5 +1,5 @@
 import type { ParsedTransaction } from "./parsers";
-import { categorizeTransaction } from "./parsers";
+import { categorizeTransaction, detectCardSuffix, sourceLabelFromFilename } from "./parsers";
 
 // ─── Date / value utilities ────────────────────────────────────────────────────
 
@@ -106,14 +106,31 @@ function tx(
 
 // ─── Bank detection ────────────────────────────────────────────────────────────
 
+const BANK_NAMES: Record<string, string> = {
+  nubank: "Nubank", picpay: "PicPay", afinz: "Afinz",
+  inter: "Inter", itau: "Itaú", bradesco: "Bradesco",
+  santander: "Santander", caixa: "Caixa", bb: "Banco do Brasil",
+  c6: "C6 Bank", xp: "XP", noh: "Noh",
+};
+
 export function detectBank(
   text: string,
   filename: string
-): "nubank" | "picpay" | "afinz" | "generic" {
-  const t = (text + filename).toLowerCase();
-  if (t.includes("nubank")) return "nubank";
-  if (t.includes("picpay")) return "picpay";
-  if (t.includes("afinz")) return "afinz";
+): "nubank" | "picpay" | "afinz" | "inter" | "itau" | "bradesco" |
+   "santander" | "caixa" | "bb" | "c6" | "xp" | "noh" | "generic" {
+  const t = (text + " " + filename).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (t.includes("nubank"))                                              return "nubank";
+  if (t.includes("picpay"))                                              return "picpay";
+  if (t.includes("afinz"))                                               return "afinz";
+  if (t.includes("banco inter") || /\binter\b/.test(t))                 return "inter";
+  if (t.includes("itau") || t.includes("itau"))                         return "itau";
+  if (t.includes("bradesco"))                                            return "bradesco";
+  if (t.includes("santander"))                                           return "santander";
+  if (t.includes("caixa economica") || /\bcef\b/.test(t) || t.includes("caixa federal")) return "caixa";
+  if (t.includes("banco do brasil") || /\bbb\b/.test(t))                return "bb";
+  if (t.includes("c6 bank") || /\bc6\b/.test(t))                        return "c6";
+  if (/\bxp\b/.test(t) || t.includes("xp investimentos"))               return "xp";
+  if (t.includes("noh"))                                                 return "noh";
   return "generic";
 }
 
@@ -301,25 +318,16 @@ function detectDocumentYear(text: string): number | undefined {
   return undefined;
 }
 
-// Extrai o último bloco de 4 dígitos de cartão mascarado ("•••• 3640", "**** 3640")
-function detectCardSuffix(text: string): string | null {
-  const m = text.match(/[•·\*\.]{2,4}\s*(\d{4})/);
-  return m ? m[1] : null;
-}
-
 function buildSourceLabel(bank: string, text: string, filename: string, isFatura: boolean): string {
-  const cardSuffix = detectCardSuffix(text);
-
-  if (bank === "nubank") {
-    if (isFatura) return cardSuffix ? `Nubank •••• ${cardSuffix}` : "Nubank Fatura";
-    return "Nubank Conta";
+  const bankName = BANK_NAMES[bank];
+  if (!bankName) {
+    return sourceLabelFromFilename(filename) || "Importação";
   }
-  if (bank === "picpay") return "PicPay";
-  if (bank === "afinz") return cardSuffix ? `Afinz •••• ${cardSuffix}` : "Afinz";
-
-  // Genérico: tenta extrair do filename
-  const base = filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").trim();
-  return base.slice(0, 32) || "Importação";
+  if (isFatura) {
+    const suffix = detectCardSuffix(text);
+    return suffix ? `Cartão ${bankName} ${suffix}` : `Cartão ${bankName}`;
+  }
+  return bankName;
 }
 
 export function parseBankText(

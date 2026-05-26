@@ -48,15 +48,18 @@ Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras 
   ]
 }
 
-Regras para sourceLabel:
-- Identifique o banco/instituição e tipo do documento
-- Para fatura de cartão de crédito: "NomeBanco •••• XXXX" (últimos 4 dígitos do cartão, se visível; senão "NomeBanco Cartão")
-- Para extrato/tela de conta corrente, poupança ou conta digital: "NomeBanco Conta"
-- Para carteira digital (PicPay, Mercado Pago): nome da carteira
-- Exemplos: "Nubank •••• 3640", "Nubank Conta", "Nubank Cartão", "PicPay", "Itaú •••• 1234", "Bradesco Conta", "Inter Conta"
-- Se vir o logo/nome Nubank e a tela mostrar PIX, transferências, débitos em conta → "Nubank Conta"
-- Se vir o logo/nome Nubank e a tela mostrar compras no crédito, fatura → "Nubank Cartão" ou "Nubank •••• XXXX"
-- NUNCA retorne "Extrato" se conseguir identificar o banco — só use "Extrato" como último recurso absoluto
+Regras para sourceLabel — CRÍTICO seguir exatamente:
+- Fatura de cartão de crédito COM últimos 4 dígitos visíveis: "Cartão [Banco] [4 dígitos]"
+  Exemplos: "Cartão Nubank 1234", "Cartão Itaú 5678", "Cartão Bradesco 9012"
+- Fatura de cartão SEM dígitos visíveis: "Cartão [Banco]"
+  Exemplos: "Cartão Santander", "Cartão Caixa"
+- Extrato / conta corrente / conta digital / poupança: apenas o nome do banco
+  Exemplos: "Nubank", "Inter", "Bradesco", "Caixa"
+- Carteira digital: nome da carteira — "PicPay", "Mercado Pago"
+- NUNCA inclua datas, períodos, números de agência ou conta no sourceLabel
+- SEMPRE tente extrair os últimos 4 dígitos do cartão — aparecem como •••• 1234, **** 1234, "final 1234", "terminado em 1234" ou similares
+- "extrato" no documento → é conta, não cartão → label = só nome do banco
+- Se não conseguir identificar o banco: "Importação"
 
 Regras para transações:
 - Débitos, saídas, compras, tarifas, IOF = "expense"
