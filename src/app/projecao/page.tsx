@@ -335,6 +335,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
   const [goalSuggestion, setGoalSuggestion] = useState<GoalSuggestion | null>(null);
   const [goalLoading, setGoalLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const goalCacheRef = useRef<Map<string, GoalSuggestion>>(new Map());
 
   // Tour
   const [tourSeen, setTourSeen] = useState<boolean | null>(null);
@@ -491,6 +492,15 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
       return;
     }
 
+    const goalCacheKey = `${Math.round(currentMonth?.income ?? 0)}|${Math.round(currentMonth?.expense ?? 0)}|${Math.round(cut)}|${vilaoCategory?.nome ?? "null"}`;
+    const cached = goalCacheRef.current.get(goalCacheKey);
+    if (cached) {
+      setGoalSuggestion(cached);
+      setGoalLoading(false);
+      if (tourSeen === false && tourStep <= 1) setTourStep(2);
+      return;
+    }
+
     setGoalLoading(true);
     debounceRef.current = setTimeout(async () => {
       try {
@@ -508,6 +518,7 @@ function ProjectionView({ workspaceId, userId }: { workspaceId: string; userId: 
         });
         if (!resp.ok) throw new Error("api error");
         const data: GoalSuggestion = await resp.json();
+        if (data.titulo) goalCacheRef.current.set(goalCacheKey, data);
         setGoalSuggestion(data.titulo ? data : null);
         setGoalLoading(false);
         if (tourSeen === false && tourStep <= 1) setTourStep(2);

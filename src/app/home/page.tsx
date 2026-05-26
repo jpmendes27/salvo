@@ -70,6 +70,7 @@ import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
 import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
+import { buildDiagFingerprint, readDiagCache, writeDiagCache, type DiagPayload, type DiagResult } from "@/lib/claude-cache";
 
 type Profile = {
   uid: string;
@@ -1070,9 +1071,9 @@ function WorkspaceApp({
     return m;
   }, [prevTransactions]);
 
-  // Mobile diagnosis — same AI fetch + fallback as InsightsView
-  const [mobAiDiag, setMobAiDiag] = useState<{ narrativa: string; bullet1: string | null; bullet2: string | null; scoreLabel: string } | null>(null);
-  const [mobDiagLoading, setMobDiagLoading] = useState(false);
+  // Diagnosis state — shared between mobile view and InsightsView (desktop)
+  const [sharedAiDiag, setSharedAiDiag] = useState<DiagResult | null>(null);
+  const [sharedDiagLoading, setSharedDiagLoading] = useState(false);
   const mobScoreColor = mobScore === null ? G : mobScore >= 8 ? G : mobScore >= 6 ? "#facc15" : "#ff8080";
   const mobScoreRgb = mobScoreColor === G ? "184,245,90" : mobScoreColor === "#facc15" ? "250,204,21" : "255,128,128";
   const mobScoreLabel = mobScore === null ? "—" : mobScore >= 8 ? "Arrasando 💪" : mobScore >= 6 ? "Dá pra melhorar" : "Tá pesado.";
@@ -1095,10 +1096,8 @@ function WorkspaceApp({
 
   useEffect(() => {
     if (!mobExpenses.length || mobScore === null) return;
-    let cancelled = false;
-    setMobDiagLoading(true);
-    setMobAiDiag(null);
-    const payload = {
+    const effectiveMonthKey = showDemo ? "2026-04" : monthKey;
+    const payload: DiagPayload = {
       totalGasto: mobTotalGasto,
       totalEntradas: mobTotalEntradas,
       comprometimento: mobComprometimento,
@@ -1114,20 +1113,34 @@ function WorkspaceApp({
         nome: CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat,
         valor: val
       })),
-      monthLabel: monthLabel(showDemo ? "2026-04" : monthKey)
     };
+    const fp = buildDiagFingerprint(payload);
+    const cached = readDiagCache(workspace.id, effectiveMonthKey, fp);
+    if (cached) {
+      setSharedAiDiag(cached);
+      setSharedDiagLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSharedDiagLoading(true);
+    setSharedAiDiag(null);
     fetch(GENERATE_DIAGNOSIS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ ...payload, monthLabel: monthLabel(effectiveMonthKey) })
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
-      .then((data) => { if (!cancelled) setMobAiDiag(data); })
+      .then((data: DiagResult) => {
+        if (!cancelled) {
+          setSharedAiDiag(data);
+          writeDiagCache(workspace.id, effectiveMonthKey, fp, data);
+        }
+      })
       .catch(() => {})
-      .finally(() => { if (!cancelled) setMobDiagLoading(false); });
+      .finally(() => { if (!cancelled) setSharedDiagLoading(false); });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthKey, mobTotalGasto, mobTotalEntradas, mobScore]);
+  }, [monthKey, mobTotalGasto, mobTotalEntradas, mobScore, workspace.id]);
 
   const D = {
     shell: {
@@ -1516,6 +1529,8 @@ function WorkspaceApp({
                   workspaceId={workspace.id}
                   renda={monthlyIncome}
                   onRendaChange={handleRendaChange}
+                  aiDiag={sharedAiDiag}
+                  diagLoading={sharedDiagLoading}
                 />
               )}
             </WsCard>
@@ -1740,24 +1755,24 @@ function WorkspaceApp({
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: 10.5, color: `rgba(${mobScoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
                   Diagnóstico do mês
-                  {mobDiagLoading && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: `rgba(${mobScoreRgb},0.5)`, animation: "pulse 1.2s ease-in-out infinite" }} />}
+                  {sharedDiagLoading && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: `rgba(${mobScoreRgb},0.5)`, animation: "pulse 1.2s ease-in-out infinite" }} />}
                 </p>
                 <p style={{ fontSize: 24, fontWeight: 900, color: mobScoreColor, letterSpacing: "-0.03em", marginBottom: 10, lineHeight: 1.1 }}>
-                  {mobAiDiag?.scoreLabel ?? mobScoreLabel}
+                  {sharedAiDiag?.scoreLabel ?? mobScoreLabel}
                 </p>
-                <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65, marginBottom: ((mobAiDiag?.bullet1 ?? mobBullet1) || (mobAiDiag?.bullet2 ?? mobBullet2)) ? 10 : 0, transition: "opacity .4s", opacity: mobDiagLoading ? 0.5 : 1 }}>
-                  {mobAiDiag?.narrativa ?? mobNarrativa}
+                <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.42)", lineHeight: 1.65, marginBottom: ((sharedAiDiag?.bullet1 ?? mobBullet1) || (sharedAiDiag?.bullet2 ?? mobBullet2)) ? 10 : 0, transition: "opacity .4s", opacity: sharedDiagLoading ? 0.5 : 1 }}>
+                  {sharedAiDiag?.narrativa ?? mobNarrativa}
                 </p>
-                {((mobAiDiag?.bullet1 ?? mobBullet1) || (mobAiDiag?.bullet2 ?? mobBullet2)) && (
+                {((sharedAiDiag?.bullet1 ?? mobBullet1) || (sharedAiDiag?.bullet2 ?? mobBullet2)) && (
                   <div style={{ display: "grid", gap: 5 }}>
-                    {(mobAiDiag?.bullet1 ?? mobBullet1) && (
-                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${mobScoreRgb},0.55)`, transition: "opacity .4s", opacity: mobDiagLoading ? 0.5 : 1 }}>
-                        <span style={{ flexShrink: 0, marginTop: 1 }}>↗</span>{mobAiDiag?.bullet1 ?? mobBullet1}
+                    {(sharedAiDiag?.bullet1 ?? mobBullet1) && (
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${mobScoreRgb},0.55)`, transition: "opacity .4s", opacity: sharedDiagLoading ? 0.5 : 1 }}>
+                        <span style={{ flexShrink: 0, marginTop: 1 }}>↗</span>{sharedAiDiag?.bullet1 ?? mobBullet1}
                       </div>
                     )}
-                    {(mobAiDiag?.bullet2 ?? mobBullet2) && (
-                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${mobScoreRgb},0.55)`, transition: "opacity .4s", opacity: mobDiagLoading ? 0.5 : 1 }}>
-                        <span style={{ flexShrink: 0, marginTop: 1 }}>{mobExpenseChange !== null && mobExpenseChange < 0 ? "↘" : "↗"}</span>{mobAiDiag?.bullet2 ?? mobBullet2}
+                    {(sharedAiDiag?.bullet2 ?? mobBullet2) && (
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${mobScoreRgb},0.55)`, transition: "opacity .4s", opacity: sharedDiagLoading ? 0.5 : 1 }}>
+                        <span style={{ flexShrink: 0, marginTop: 1 }}>{mobExpenseChange !== null && mobExpenseChange < 0 ? "↘" : "↗"}</span>{sharedAiDiag?.bullet2 ?? mobBullet2}
                       </div>
                     )}
                   </div>
@@ -2745,7 +2760,9 @@ function InsightsView({
   monthKey,
   workspaceId,
   renda,
-  onRendaChange
+  onRendaChange,
+  aiDiag,
+  diagLoading,
 }: {
   transactions: Transaction[];
   prevTransactions: Transaction[];
@@ -2753,12 +2770,12 @@ function InsightsView({
   workspaceId: string;
   renda: number;
   onRendaChange: (v: number) => void;
+  aiDiag: DiagResult | null;
+  diagLoading: boolean;
 }) {
   const router = useRouter();
   const [editingRenda, setEditingRenda] = useState(false);
   const [rendaText, setRendaText] = useState("");
-  const [aiDiag, setAiDiag] = useState<{ narrativa: string; bullet1: string | null; bullet2: string | null; scoreLabel: string } | null>(null);
-  const [diagLoading, setDiagLoading] = useState(false);
 
   const expenses = transactions.filter((t) => t.type === "expense");
   const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
@@ -2834,44 +2851,6 @@ function InsightsView({
   const expenseChange = prevTotalGasto > 0 ? Math.round(((totalGasto - prevTotalGasto) / prevTotalGasto) * 100) : null;
   const topCat = byCategory[0] ?? null;
   const net = totalEntradas - totalGasto;
-
-  useEffect(() => {
-    if (!expenses.length || score === null) return;
-    let cancelled = false;
-    setDiagLoading(true);
-    setAiDiag(null);
-    const payload = {
-      totalGasto,
-      totalEntradas,
-      comprometimento,
-      net,
-      score,
-      topCat: topCat
-        ? {
-            nome: CATEGORY_LABELS[topCat[0] as keyof typeof CATEGORY_LABELS] ?? topCat[0],
-            valor: topCat[1],
-            percentual: Math.round((topCat[1] / totalGasto) * 100)
-          }
-        : null,
-      expenseChange,
-      byCategory: byCategory.slice(0, 5).map(([cat, val]) => ({
-        nome: CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat,
-        valor: val
-      })),
-      monthLabel: monthLabel(monthKey)
-    };
-    fetch(GENERATE_DIAGNOSIS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
-      .then((data) => { if (!cancelled) setAiDiag(data); })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setDiagLoading(false); });
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthKey, totalGasto, totalEntradas, score]);
 
   if (!expenses.length) {
     return (
