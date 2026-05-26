@@ -90,6 +90,17 @@ const css = `
   .pain-item .line em{font-style:normal;color:var(--accent);font-weight:700}
   .pain-item .foot{margin-top:auto;color:var(--muted);font-size:14px;line-height:1.5}
   @media(max-width:880px){.pain-grid{grid-template-columns:1fr}.pain-item{border-right:0;border-bottom:1px solid var(--line);min-height:auto;padding:44px 22px}.pain-item:last-child{border-bottom:0}}
+  .pain-data{border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+  .pain-data-item{padding:40px 36px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:16px}
+  .pain-data-item:last-child{border-right:0}
+  .pain-data-item .source{font-size:12px;color:var(--muted)}
+  .pain-data-item .stat{font-family:'Inter Tight','Inter',system-ui,sans-serif;font-weight:700;font-size:clamp(32px,4vw,48px);line-height:1.05;letter-spacing:-0.03em}
+  .pain-data-item .stat em{font-style:normal;color:var(--accent);font-weight:700}
+  .pain-data-item .stat.neg em{color:#ff7a59}
+  .pain-data-item .foot{margin-top:auto;color:var(--muted);font-size:14px;line-height:1.5}
+  .pain-data-item .foot strong{color:#fff;font-weight:600}
+  @media(max-width:880px){.pain-data{grid-template-columns:repeat(2,1fr)}.pain-data-item{border-right:0;border-bottom:1px solid var(--line)}.pain-data-item:nth-child(odd){border-right:1px solid var(--line)}.pain-data-item:last-child{border-bottom:0}}
+  @media(max-width:480px){.pain-data{grid-template-columns:1fr}.pain-data-item{border-right:0!important}}
 
   .how-head{display:flex;align-items:flex-end;justify-content:space-between;gap:40px;flex-wrap:wrap}
   .steps{margin-top:64px;display:grid;grid-template-columns:repeat(3,1fr);gap:24px;position:relative}
@@ -253,6 +264,28 @@ export default function LandingPage() {
             <div className="num">03</div>
             <div className="line">Ninguém nunca te ensinou — e <em>tá tudo bem.</em></div>
             <div className="foot">Educação financeira é coisa que escola não deu. A gente parte do zero, na sua linguagem, sem te julgar por nada.</div>
+          </div>
+        </div>
+        <div className="pain-data">
+          <div className="pain-data-item reveal">
+            <span className="source">CNC · Peic · Mar/2026</span>
+            <div className="stat"><em>80%</em></div>
+            <p className="foot">das famílias brasileiras estão endividadas — <strong>recorde histórico</strong>. Entre quem ganha até 3 salários mínimos, sobe pra <strong>82%</strong>.</p>
+          </div>
+          <div className="pain-data-item reveal d1">
+            <span className="source">FEBRABAN · I-SFB</span>
+            <div className="stat"><em>32%</em></div>
+            <p className="foot">dos brasileiros conseguiriam pagar uma <strong>despesa inesperada grande sem se endividar</strong>. E 67% não se sentem seguros com o próprio futuro financeiro.</p>
+          </div>
+          <div className="pain-data-item reveal d2">
+            <span className="source">Serasa · Nov/2024</span>
+            <div className="stat neg"><em>73M</em></div>
+            <p className="foot">de brasileiros com <strong>nome sujo</strong>. Cada negativado deve em média <strong>R$5.558</strong>. São R$274 bilhões em dívidas.</p>
+          </div>
+          <div className="pain-data-item reveal d3">
+            <span className="source">Datafolha · 2025</span>
+            <div className="stat"><em>31%</em></div>
+            <p className="foot">dos brasileiros <strong>não têm reserva de emergência</strong>. Dos que guardaram em 2024, <strong>45% usou parte ou tudo</strong> no início de 2025.</p>
           </div>
         </div>
         <div style={{ height: "80px" }} />
