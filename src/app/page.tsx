@@ -91,14 +91,16 @@ const css = `
   .pain-item .foot{margin-top:auto;color:var(--muted);font-size:14px;line-height:1.5}
   @media(max-width:880px){.pain-grid{grid-template-columns:1fr}.pain-item{border-right:0;border-bottom:1px solid var(--line);min-height:auto;padding:44px 22px}.pain-item:last-child{border-bottom:0}}
   .pain-data{border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);gap:0}
-  .pain-data-item{padding:40px 36px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:16px}
+  .pain-data-item{padding:40px 36px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:16px;align-items:center;text-align:center}
   .pain-data-item:last-child{border-right:0}
-  .pain-data-item .source{font-size:12px;color:var(--muted)}
-  .pain-data-item .stat{font-family:'Inter Tight','Inter',system-ui,sans-serif;font-weight:700;font-size:clamp(32px,4vw,48px);line-height:1.05;letter-spacing:-0.03em}
+  .pain-data-item .stat{font-family:'Inter Tight','Inter',system-ui,sans-serif;font-weight:700;font-size:clamp(48px,5.5vw,72px);line-height:1;letter-spacing:-0.03em}
   .pain-data-item .stat em{font-style:normal;color:var(--accent);font-weight:700}
   .pain-data-item .stat.neg em{color:#ff7a59}
-  .pain-data-item .foot{margin-top:auto;color:var(--muted);font-size:14px;line-height:1.5}
+  .pain-data-item .foot{color:var(--muted);font-size:14px;line-height:1.5}
   .pain-data-item .foot strong{color:#fff;font-weight:600}
+  .pain-data-item .source{font-size:12px;color:var(--muted);margin-top:auto;display:flex;align-items:center;gap:4px}
+  .pain-data-item .source a{color:var(--muted);text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.12);line-height:1.3;transition:color .2s,border-color .2s}
+  .pain-data-item .source a:hover{color:#fff;border-color:rgba(255,255,255,0.4)}
   @media(max-width:880px){.pain-data{grid-template-columns:repeat(2,1fr)}.pain-data-item{border-right:0;border-bottom:1px solid var(--line)}.pain-data-item:nth-child(odd){border-right:1px solid var(--line)}.pain-data-item:last-child{border-bottom:0}}
   @media(max-width:480px){.pain-data{grid-template-columns:1fr}.pain-data-item{border-right:0!important}}
 
@@ -268,24 +270,24 @@ export default function LandingPage() {
         </div>
         <div className="pain-data">
           <div className="pain-data-item reveal">
-            <span className="source">CNC · Peic · Mar/2026</span>
             <div className="stat"><em>80%</em></div>
             <p className="foot">das famílias brasileiras estão endividadas — <strong>recorde histórico</strong>. Entre quem ganha até 3 salários mínimos, sobe pra <strong>82%</strong>.</p>
+            <span className="source">Fonte: <a href="https://portaldocomercio.org.br/publicacoes_posts/pesquisa-de-endividamento-e-inadimplencia-do-consumidor-peic-marco-de-2026/" target="_blank" rel="noopener noreferrer">CNC · Peic. Mar/2026 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d1">
-            <span className="source">FEBRABAN · I-SFB</span>
             <div className="stat"><em>32%</em></div>
             <p className="foot">dos brasileiros conseguiriam pagar uma <strong>despesa inesperada grande sem se endividar</strong>. E 67% não se sentem seguros com o próprio futuro financeiro.</p>
+            <span className="source">Fonte: <a href="https://portal.febraban.org.br/noticia/4204/pt-br" target="_blank" rel="noopener noreferrer">FEBRABAN · I-SFB. 2024 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d2">
-            <span className="source">Serasa · Nov/2024</span>
             <div className="stat neg"><em>73M</em></div>
             <p className="foot">de brasileiros com <strong>nome sujo</strong>. Cada negativado deve em média <strong>R$5.558</strong>. São R$274 bilhões em dívidas.</p>
+            <span className="source">Fonte: <a href="https://www.serasa.com.br/limpa-nome-online/blog/mapa-da-inadimplencia-e-renogociacao-de-dividas-no-brasil/" target="_blank" rel="noopener noreferrer">Serasa Experian. Nov/2024 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d3">
-            <span className="source">Datafolha · 2025</span>
             <div className="stat"><em>31%</em></div>
             <p className="foot">dos brasileiros <strong>não têm reserva de emergência</strong>. Dos que guardaram em 2024, <strong>45% usou parte ou tudo</strong> no início de 2025.</p>
+            <span className="source">Fonte: <a href="https://www.anbima.com.br/pt_br/noticias/anbima-lanca-a-nona-edicao-do-raio-x-do-investidor-brasileiro-36-da-populacao-aplica-em-produtos-financeiros.htm" target="_blank" rel="noopener noreferrer">Anbima · Datafolha. 2025 ↗</a></span>
           </div>
         </div>
         <div style={{ height: "80px" }} />
