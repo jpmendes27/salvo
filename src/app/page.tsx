@@ -93,9 +93,9 @@ const css = `
   .pain-data{border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);gap:0}
   .pain-data-item{padding:40px 36px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:16px;align-items:center;text-align:center}
   .pain-data-item:last-child{border-right:0}
-  .pain-data-item .stat{font-family:'Inter Tight','Inter',system-ui,sans-serif;font-weight:700;font-size:clamp(48px,5.5vw,72px);line-height:1;letter-spacing:-0.03em}
-  .pain-data-item .stat em{font-style:normal;color:var(--accent);font-weight:700}
-  .pain-data-item .stat.neg em{color:#ff7a59}
+  .pain-data-item .pain-stat{font-family:'Inter Tight','Inter',system-ui,sans-serif;font-weight:700;font-size:clamp(48px,5.5vw,72px);line-height:1;letter-spacing:-0.03em}
+  .pain-data-item .pain-stat em{font-style:normal;color:var(--accent);font-weight:700}
+  .pain-data-item .pain-stat.neg em{color:#ff7a59}
   .pain-data-item .foot{color:var(--muted);font-size:14px;line-height:1.5}
   .pain-data-item .foot strong{color:#fff;font-weight:600}
   .pain-data-item .source{font-size:12px;color:var(--muted);margin-top:auto;display:flex;align-items:center;gap:4px}
@@ -270,22 +270,22 @@ export default function LandingPage() {
         </div>
         <div className="pain-data">
           <div className="pain-data-item reveal">
-            <div className="stat"><em>80%</em></div>
+            <div className="pain-stat"><em>80%</em></div>
             <p className="foot">das famílias brasileiras estão endividadas — <strong>recorde histórico</strong>. Entre quem ganha até 3 salários mínimos, sobe pra <strong>82%</strong>.</p>
             <span className="source">Fonte: <a href="https://portaldocomercio.org.br/publicacoes_posts/pesquisa-de-endividamento-e-inadimplencia-do-consumidor-peic-marco-de-2026/" target="_blank" rel="noopener noreferrer">CNC · Peic. Mar/2026 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d1">
-            <div className="stat"><em>32%</em></div>
+            <div className="pain-stat"><em>32%</em></div>
             <p className="foot">dos brasileiros conseguiriam pagar uma <strong>despesa inesperada grande sem se endividar</strong>. E 67% não se sentem seguros com o próprio futuro financeiro.</p>
             <span className="source">Fonte: <a href="https://portal.febraban.org.br/noticia/4204/pt-br" target="_blank" rel="noopener noreferrer">FEBRABAN · I-SFB. 2024 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d2">
-            <div className="stat neg"><em>73M</em></div>
+            <div className="pain-stat neg"><em>73M</em></div>
             <p className="foot">de brasileiros com <strong>nome sujo</strong>. Cada negativado deve em média <strong>R$5.558</strong>. São R$274 bilhões em dívidas.</p>
             <span className="source">Fonte: <a href="https://www.serasa.com.br/limpa-nome-online/blog/mapa-da-inadimplencia-e-renogociacao-de-dividas-no-brasil/" target="_blank" rel="noopener noreferrer">Serasa Experian. Nov/2024 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d3">
-            <div className="stat"><em>31%</em></div>
+            <div className="pain-stat"><em>31%</em></div>
             <p className="foot">dos brasileiros <strong>não têm reserva de emergência</strong>. Dos que guardaram em 2024, <strong>45% usou parte ou tudo</strong> no início de 2025.</p>
             <span className="source">Fonte: <a href="https://www.anbima.com.br/pt_br/noticias/anbima-lanca-a-nona-edicao-do-raio-x-do-investidor-brasileiro-36-da-populacao-aplica-em-produtos-financeiros.htm" target="_blank" rel="noopener noreferrer">Anbima · Datafolha. 2025 ↗</a></span>
           </div>
