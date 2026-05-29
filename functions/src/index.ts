@@ -320,7 +320,7 @@ export const sendInviteEmail = onRequest(
     secrets: ["RESEND_API_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
-    memory: "256MiB"
+    memory: "256MiB",
   },
   async (req, res) => {
     if (req.method === "OPTIONS") {
@@ -415,7 +415,7 @@ export const sendVerificationCode = onRequest(
     secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "VERIFICATION_HMAC_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
-    memory: "256MiB"
+    memory: "256MiB",
   },
   async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");

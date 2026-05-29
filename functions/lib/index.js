@@ -85,15 +85,18 @@ Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras 
   ]
 }
 
-Regras para sourceLabel:
-- Identifique o banco/instituição e tipo do documento
-- Para fatura de cartão de crédito: "NomeBanco •••• XXXX" (últimos 4 dígitos do cartão, se visível; senão "NomeBanco Cartão")
-- Para extrato/tela de conta corrente, poupança ou conta digital: "NomeBanco Conta"
-- Para carteira digital (PicPay, Mercado Pago): nome da carteira
-- Exemplos: "Nubank •••• 3640", "Nubank Conta", "Nubank Cartão", "PicPay", "Itaú •••• 1234", "Bradesco Conta", "Inter Conta"
-- Se vir o logo/nome Nubank e a tela mostrar PIX, transferências, débitos em conta → "Nubank Conta"
-- Se vir o logo/nome Nubank e a tela mostrar compras no crédito, fatura → "Nubank Cartão" ou "Nubank •••• XXXX"
-- NUNCA retorne "Extrato" se conseguir identificar o banco — só use "Extrato" como último recurso absoluto
+Regras para sourceLabel — CRÍTICO seguir exatamente:
+- Fatura de cartão de crédito COM últimos 4 dígitos visíveis: "Cartão [Banco] [4 dígitos]"
+  Exemplos: "Cartão Nubank 1234", "Cartão Itaú 5678", "Cartão Bradesco 9012"
+- Fatura de cartão SEM dígitos visíveis: "Cartão [Banco]"
+  Exemplos: "Cartão Santander", "Cartão Caixa"
+- Extrato / conta corrente / conta digital / poupança: apenas o nome do banco
+  Exemplos: "Nubank", "Inter", "Bradesco", "Caixa"
+- Carteira digital: nome da carteira — "PicPay", "Mercado Pago"
+- NUNCA inclua datas, períodos, números de agência ou conta no sourceLabel
+- SEMPRE tente extrair os últimos 4 dígitos do cartão — aparecem como •••• 1234, **** 1234, "final 1234", "terminado em 1234" ou similares
+- "extrato" no documento → é conta, não cartão → label = só nome do banco
+- Se não conseguir identificar o banco: "Importação"
 
 Regras para transações:
 - Débitos, saídas, compras, tarifas, IOF = "expense"
@@ -306,7 +309,7 @@ exports.sendInviteEmail = (0, https_1.onRequest)({
     secrets: ["RESEND_API_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
-    memory: "256MiB"
+    memory: "256MiB",
 }, async (req, res) => {
     if (req.method === "OPTIONS") {
         res.set("Access-Control-Allow-Origin", "*");
@@ -333,7 +336,7 @@ exports.sendInviteEmail = (0, https_1.onRequest)({
     const senderName = fromName || "Alguém";
     try {
         const { data, error } = await resend.emails.send({
-            from: `${senderName} via Fincheck Pro <onboarding@resend.dev>`,
+            from: `${senderName} via Salvô! <convites@jpmendes.com>`,
             to: [to],
             subject: `${senderName} quer gerir as finanças com você`,
             html: `
@@ -385,7 +388,7 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
     secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "VERIFICATION_HMAC_KEY"],
     maxInstances: 10,
     timeoutSeconds: 30,
-    memory: "256MiB"
+    memory: "256MiB",
 }, async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
     if (req.method === "OPTIONS") {
@@ -430,7 +433,7 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
                 throw new Error("RESEND_API_KEY not configured");
             const resend = new resend_1.Resend(apiKey);
             const { error } = await resend.emails.send({
-                from: "Fincheck Pro <onboarding@resend.dev>",
+                from: "Salvô! <noreply@jpmendes.com>",
                 to: [email],
                 subject: `${code} é o seu código de verificação`,
                 html: `
