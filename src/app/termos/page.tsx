@@ -1,51 +1,76 @@
-import Link from "next/link";
+"use client";
+
+import { useRouter } from "next/navigation";
 import { TERMS_VERSION } from "@/lib/legal";
 
 export default function TermsPage() {
+  const router = useRouter();
+
+  function handleBack() {
+    if (typeof window !== "undefined" && window.history.length <= 1) {
+      router.push("/login");
+    } else {
+      router.back();
+    }
+  }
+
   return (
     <main className="page legal-doc">
-      <Link className="btn secondary" href="/">
+      <button className="btn secondary" onClick={handleBack}>
         Voltar
-      </Link>
+      </button>
       <h1>Termos de Uso</h1>
-      <p className="muted">Versao {TERMS_VERSION}</p>
+      <p className="muted">Versão {TERMS_VERSION}</p>
 
       <h2>1. Uso do produto</h2>
       <p>
-        O Salvô! ajuda voce a registrar lancamentos financeiros, acompanhar meses e
-        gerar resumos. O app nao substitui consultoria financeira, contabil, juridica ou
-        recomendacao de investimento.
+        O Salvô! ajuda você a registrar lançamentos financeiros, acompanhar meses e
+        gerar resumos. O app não substitui consultoria financeira, contábil, jurídica ou
+        recomendação de investimento.
+      </p>
+      <p>
+        As informações exibidas no app são organizadas a partir dos dados inseridos pelo
+        próprio usuário. O Salvô! não se responsabiliza por decisões financeiras tomadas
+        com base nessas informações. A responsabilidade pelas escolhas é sempre do usuário.
       </p>
 
-      <h2>2. Conta e seguranca</h2>
+      <h2>2. Conta e segurança</h2>
       <p>
-        Voce pode entrar com Google ou e-mail e senha. Contas criadas por e-mail precisam
-        confirmar o e-mail antes de acessar dados reais. Voce e responsavel por manter suas
+        Você pode entrar com Google ou e-mail e senha. Contas criadas por e-mail precisam
+        confirmar o e-mail antes de acessar dados reais. Você é responsável por manter suas
         credenciais protegidas.
+      </p>
+
+      <h2>2a. Seus dados são seus</h2>
+      <p>
+        Os dados financeiros inseridos no Salvô! pertencem ao usuário. O Salvô! não vende,
+        não aluga e não usa seus dados para fins publicitários.
       </p>
 
       <h2>3. Workspaces compartilhados</h2>
       <p>
         Dados financeiros pertencem ao workspace. Ao criar link de convite, o owner autoriza
-        que outra pessoa entre como editor, podendo ver e editar lancamentos e resumos.
+        que outra pessoa entre como editor, podendo ver e editar lançamentos e resumos.
       </p>
 
       <h2>4. Responsabilidades</h2>
       <p>
-        Voce deve inserir informacoes verdadeiras e usar o produto de forma licita. O Salvô!
-        Pro pode bloquear acessos abusivos, fraudulentos ou que comprometam a seguranca do app.
+        Você deve inserir informações verdadeiras e usar o produto de forma lícita. O Salvô!
+        pode bloquear acessos abusivos, fraudulentos ou que comprometam a segurança do app.
+        O app pode conter erros de categorização automática ou de leitura de extratos. Sempre
+        confira os dados importados antes de tomar decisões com base neles.
       </p>
 
       <h2>5. Recursos futuros</h2>
       <p>
-        Open Finance, WhatsApp API, planos pagos e automacoes podem ser adicionados no futuro
-        mediante termos, avisos ou consentimentos especificos quando necessario.
+        Open Finance, WhatsApp API, planos pagos e automações podem ser adicionados no futuro
+        mediante termos, avisos ou consentimentos específicos quando necessário.
       </p>
 
-      <h2>6. Exclusao</h2>
+      <h2>6. Exclusão</h2>
       <p>
-        Owners podem excluir workspaces. Em workspaces compartilhados, a exclusao remove dados
-        usados por outros membros, por isso a v1 exige confirmacao forte antes dessa acao.
+        Owners podem excluir workspaces. Em workspaces compartilhados, a exclusão remove dados
+        usados por outros membros, por isso a v1 exige confirmação forte antes dessa ação.
       </p>
     </main>
   );
