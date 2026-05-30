@@ -675,8 +675,13 @@ export default function LoginPage() {
           (!snap.exists() && !u.emailVerified);
         if (notVerified) { window.location.replace(`${BASE}/verify`); return; }
 
-        // Google users (emailVerified): always run re-link so member docs are guaranteed
-        // to exist for this UID. Idempotent — safe to call even when already linked.
+        // Existing onboarded users: skip relink (already done on first login) → home instantly
+        if (u.emailVerified && data?.acceptedTermsVersion) {
+          window.location.replace(`${BASE}/home`);
+          return;
+        }
+
+        // First Google login or invited-by-email user: run re-link to wire UID to member docs
         if (u.emailVerified) {
           try {
             const fns = getFunctions(app, "us-central1");
