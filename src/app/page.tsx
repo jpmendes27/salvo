@@ -279,9 +279,9 @@ export default function LandingPage() {
             <span className="source">Fonte: <a href="https://portal.febraban.org.br/noticia/4204/pt-br" target="_blank" rel="noopener noreferrer">FEBRABAN · I-SFB. 2024 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d2">
-            <div className="pain-stat neg"><em>73M</em></div>
-            <p className="foot">de brasileiros com <strong>nome sujo</strong>. Cada negativado deve em média <strong>R$5.558</strong>. São R$404 bilhões em dívidas.</p>
-            <span className="source">Fonte: <a href="https://www.serasa.com.br/limpa-nome-online/blog/mapa-da-inadimplencia-e-renogociacao-de-dividas-no-brasil/" target="_blank" rel="noopener noreferrer">Serasa Experian. Nov/2024 ↗</a></span>
+            <div className="pain-stat neg"><em>81,7M</em></div>
+            <p className="foot">de brasileiros com <strong>nome sujo</strong> — recorde histórico. Cada um deve em média <strong>R$6.598</strong>. E quase metade ganha até um salário mínimo.</p>
+            <span className="source">Fonte: <a href="https://www.serasa.com.br/imprensa/10-anos-do-mapa-de-inadimplencia/" target="_blank" rel="noopener noreferrer">Serasa Experian · Mapa da Inadimplência. Fev/2026 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d3">
             <div className="pain-stat"><em>31%</em></div>
@@ -368,7 +368,7 @@ export default function LandingPage() {
                   <span className="live"><span className="d" /> ao vivo</span>
                 </div>
                 <div className="diag-msg">
-                  Você gastou <em>R$ 612 só em iFood</em> esse mês. Isso é mais do que a sua conta de luz e a internet juntas. Bora cozinhar de domingo?
+                  Você gastou <em>R$ 612 só em iFood</em> esse mês. Isso é mais do que a sua conta de luz e a internet juntas. Bora cozinhar nesse domingo?
                   <span className="from">— Salvô! IA</span>
                 </div>
               </div>
