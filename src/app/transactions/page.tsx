@@ -9,7 +9,8 @@ import {
   orderBy,
   query,
   updateDoc,
-  where
+  where,
+  writeBatch,
 } from "firebase/firestore";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -83,6 +84,8 @@ function TransactionList({
   const [loading, setLoading] = useState(true);
   const [txFilter, setTxFilter] = useState<"all" | "income" | "expense">("all");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLoading(true);
@@ -110,6 +113,38 @@ function TransactionList({
 
   const income = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const expense = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+
+  function toggleSelectMode() {
+    setSelectMode((v) => !v);
+    setSelected(new Set());
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelected(new Set(filtered.map((t) => t.id)));
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  async function deleteSelected() {
+    if (selected.size === 0) return;
+    const batch = writeBatch(db);
+    selected.forEach((id) => {
+      batch.delete(doc(db, "workspaces", workspaceId, "transactions", id));
+    });
+    await batch.commit();
+    setSelected(new Set());
+    setSelectMode(false);
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#09090b", color: "#fff", fontFamily: "var(--font-dm-sans, sans-serif)" }}>
@@ -145,8 +180,8 @@ function TransactionList({
 
       <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 20px" }}>
         {/* Filters */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          {(["all", "income", "expense"] as const).map((f) => (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {!selectMode && (["all", "income", "expense"] as const).map((f) => (
             <button
               key={f}
               onClick={() => setTxFilter(f)}
@@ -162,7 +197,7 @@ function TransactionList({
             </button>
           ))}
 
-          {sources.length > 1 && (
+          {!selectMode && sources.length > 1 && (
             <>
               <div style={{ width: 1, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
               {(["all", ...sources] as const).map((s) => (
@@ -182,7 +217,73 @@ function TransactionList({
               ))}
             </>
           )}
+
+          <div style={{ marginLeft: "auto" }}>
+            <button
+              onClick={toggleSelectMode}
+              style={{
+                fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 999,
+                border: `1px solid ${selectMode ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
+                background: selectMode ? "rgba(255,255,255,0.10)" : "transparent",
+                color: selectMode ? "#fff" : "rgba(255,255,255,0.38)",
+                cursor: "pointer"
+              }}
+            >
+              {selectMode ? "Cancelar" : "Selecionar"}
+            </button>
+          </div>
         </div>
+
+        {/* Bulk action bar */}
+        {selectMode && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
+            padding: "8px 12px", borderRadius: 10,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.07)"
+          }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", flex: 1 }}>
+              {selected.size === 0 ? "Nenhuma selecionada" : `${selected.size} selecionada${selected.size !== 1 ? "s" : ""}`}
+            </span>
+            {selected.size < filtered.length ? (
+              <button
+                onClick={selectAll}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.12)", background: "transparent",
+                  color: "rgba(255,255,255,0.5)", cursor: "pointer"
+                }}
+              >
+                Selecionar todas
+              </button>
+            ) : (
+              <button
+                onClick={clearSelection}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.12)", background: "transparent",
+                  color: "rgba(255,255,255,0.5)", cursor: "pointer"
+                }}
+              >
+                Limpar seleção
+              </button>
+            )}
+            <button
+              onClick={deleteSelected}
+              disabled={selected.size === 0}
+              style={{
+                fontSize: 12, fontWeight: 700, padding: "4px 12px", borderRadius: 999,
+                border: "1px solid rgba(255,80,80,0.35)",
+                background: selected.size > 0 ? "rgba(255,80,80,0.15)" : "transparent",
+                color: selected.size > 0 ? "#ff8080" : "rgba(255,80,80,0.3)",
+                cursor: selected.size > 0 ? "pointer" : "default",
+                transition: "all .15s"
+              }}
+            >
+              Excluir {selected.size > 0 ? `(${selected.size})` : ""}
+            </button>
+          </div>
+        )}
 
         {/* Count */}
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", marginBottom: 12 }}>
@@ -206,6 +307,9 @@ function TransactionList({
                 tx={tx}
                 workspaceId={workspaceId}
                 onDelete={() => deleteDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id))}
+                selectMode={selectMode}
+                isSelected={selected.has(tx.id)}
+                onToggleSelect={() => toggleSelect(tx.id)}
               />
             ))}
           </div>
@@ -217,7 +321,14 @@ function TransactionList({
 
 const ALL_CATEGORIES = Object.entries(CATEGORY_LABELS) as [string, string][];
 
-function TxRow({ tx, workspaceId, onDelete }: { tx: Transaction; workspaceId: string; onDelete: () => void }) {
+function TxRow({ tx, workspaceId, onDelete, selectMode, isSelected, onToggleSelect }: {
+  tx: Transaction;
+  workspaceId: string;
+  onDelete: () => void;
+  selectMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+}) {
   const [hov, setHov] = useState(false);
   const [editingCat, setEditingCat] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -245,10 +356,13 @@ function TxRow({ tx, workspaceId, onDelete }: { tx: Transaction; workspaceId: st
   return (
     <div
       ref={containerRef}
+      onClick={selectMode ? onToggleSelect : undefined}
       style={{
         borderRadius: 10,
-        background: hov || editingCat ? "rgba(255,255,255,0.04)" : "transparent",
-        transition: "background .15s"
+        background: isSelected ? "rgba(184,245,90,0.06)" : hov || editingCat ? "rgba(255,255,255,0.04)" : "transparent",
+        transition: "background .15s",
+        cursor: selectMode ? "pointer" : "default",
+        outline: isSelected ? "1px solid rgba(184,245,90,0.18)" : "none",
       }}
     >
       <div
@@ -256,12 +370,27 @@ function TxRow({ tx, workspaceId, onDelete }: { tx: Transaction; workspaceId: st
         onMouseLeave={() => setHov(false)}
         style={{
           display: "grid",
-          gridTemplateColumns: "8px 1fr auto auto",
+          gridTemplateColumns: selectMode ? "20px 8px 1fr auto" : "8px 1fr auto auto",
           gap: "0 14px",
           alignItems: "center",
           padding: "11px 12px",
         }}
       >
+        {selectMode && (
+          <div style={{
+            width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+            border: `2px solid ${isSelected ? G : "rgba(255,255,255,0.2)"}`,
+            background: isSelected ? G : "transparent",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "all .12s"
+          }}>
+            {isSelected && (
+              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                <path d="M1 4l3 3 5-6" stroke="#09090b" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </div>
+        )}
         <div style={{
           width: 8, height: 8, borderRadius: "50%",
           background: categoryColor(tx.category),
@@ -277,7 +406,7 @@ function TxRow({ tx, workspaceId, onDelete }: { tx: Transaction; workspaceId: st
           </p>
           <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
             <button
-              onClick={() => setEditingCat((v) => !v)}
+              onClick={(e) => { if (selectMode) return; e.stopPropagation(); setEditingCat((v) => !v); }}
               style={{
                 background: "none", border: "none", padding: 0, cursor: "pointer",
                 fontSize: 11.5, fontWeight: editingCat ? 700 : 400,
@@ -296,21 +425,23 @@ function TxRow({ tx, workspaceId, onDelete }: { tx: Transaction; workspaceId: st
         }}>
           {isIncome ? "+" : "−"}{formatCurrency(tx.amount)}
         </span>
-        <button
-          onClick={onDelete}
-          style={{
-            opacity: hov || editingCat ? 1 : 0,
-            background: "transparent", border: "none", cursor: "pointer",
-            color: "rgba(255,80,80,0.65)", padding: 4, borderRadius: 6,
-            display: "flex", alignItems: "center",
-            transition: "opacity .15s"
-          }}
-        >
-          <Trash2 size={14} />
-        </button>
+        {!selectMode && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            style={{
+              opacity: hov || editingCat ? 1 : 0,
+              background: "transparent", border: "none", cursor: "pointer",
+              color: "rgba(255,80,80,0.65)", padding: 4, borderRadius: 6,
+              display: "flex", alignItems: "center",
+              transition: "opacity .15s"
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
 
-      {editingCat && (
+      {!selectMode && editingCat && (
         <div style={{ padding: "0 12px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
           {ALL_CATEGORIES.map(([key, label]) => {
             const active = key === tx.category;
