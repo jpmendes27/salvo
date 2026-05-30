@@ -97,6 +97,7 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(hasPrefill);
   const [depositGoal, setDepositGoal] = useState<Goal | null>(null);
+  const [deleteGoal, setDeleteGoal] = useState<Goal | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -205,10 +206,7 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
                 goal={goal}
                 workspaceId={workspaceId}
                 onDeposit={() => setDepositGoal(goal)}
-                onDelete={() => {
-                  if (window.confirm(`Excluir a meta "${goal.title}"? Essa ação não pode ser desfeita.`))
-                    deleteDoc(doc(db, "workspaces", workspaceId, "goals", goal.id));
-                }}
+                onDelete={() => setDeleteGoal(goal)}
               />
             ))}
           </div>
@@ -227,10 +225,7 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
                   goal={goal}
                   workspaceId={workspaceId}
                   onDeposit={() => {}}
-                  onDelete={() => {
-                    if (window.confirm(`Excluir a meta "${goal.title}"? Essa ação não pode ser desfeita.`))
-                      deleteDoc(doc(db, "workspaces", workspaceId, "goals", goal.id));
-                  }}
+                  onDelete={() => setDeleteGoal(goal)}
                 />
               ))}
             </div>
@@ -257,6 +252,40 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
           workspaceId={workspaceId}
           onClose={() => setDepositGoal(null)}
         />
+      )}
+
+      {deleteGoal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          onClick={() => setDeleteGoal(null)}
+        >
+          <div
+            style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: "24px", width: "100%", maxWidth: 380 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Excluir meta</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, marginBottom: 24 }}>
+              Tem certeza que quer excluir <strong style={{ color: "#fff" }}>{deleteGoal.title}</strong>? Essa ação não pode ser desfeita.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setDeleteGoal(null)}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  await deleteDoc(doc(db, "workspaces", workspaceId, "goals", deleteGoal.id));
+                  setDeleteGoal(null);
+                }}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: "rgba(255,60,60,0.18)", border: "1px solid rgba(255,60,60,0.3)", color: "#ff8080", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+              >
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
