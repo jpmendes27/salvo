@@ -282,7 +282,7 @@ exports.sendInviteWhatsApp = (0, https_1.onRequest)({
         return;
     }
     const sender = fromName || "Alguém";
-    const message = `${sender} te chamou pro Fincheck Pro 👊\n\nVocês vão acompanhar entradas, gastos e o plano do mês juntos — em tempo real, sem ninguém ter que ficar perguntando "ué, gastou onde isso?".\n\nBora entrar?\n${inviteLink}`;
+    const message = `${sender} te chamou pro Salvô! 👊\n\nVocês vão acompanhar entradas, gastos e o plano do mês juntos — em tempo real, sem ninguém ter que ficar perguntando "ué, gastou onde isso?".\n\nBora entrar?\n${inviteLink}`;
     try {
         const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
             method: "POST",
@@ -348,10 +348,10 @@ exports.sendInviteEmail = (0, https_1.onRequest)({
     <tr><td align="center">
       <table width="100%" style="max-width:520px;background:#111214;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden">
         <tr><td style="padding:36px 36px 32px">
-          <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.28)">FINCHECK PRO</p>
+          <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.28)">SALVÔ!</p>
           <h1 style="margin:0 0 24px;font-size:24px;font-weight:800;color:#fff;line-height:1.3">Oi! 👋</h1>
           <p style="margin:0 0 12px;font-size:15px;color:rgba(255,255,255,0.75);line-height:1.7">
-            <strong style="color:#fff">${senderName}</strong> te convidou para acompanhar e gerir as finanças juntos no Fincheck Pro.
+            <strong style="color:#fff">${senderName}</strong> te convidou para acompanhar e gerir as finanças juntos no Salvô!.
           </p>
           <p style="margin:0 0 28px;font-size:15px;color:rgba(255,255,255,0.55);line-height:1.7">
             No painel de vocês dá pra ver em tempo real o que entrou, o que saiu e o que ainda está por vir — sem surpresa no fim do mês.
@@ -421,7 +421,7 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
                 body: JSON.stringify({
                     number: phone,
                     options: { delay: 500 },
-                    textMessage: { text: `Seu código de verificação do Fincheck Pro: *${code}*\n\nEle expira em 10 minutos. Não compartilhe com ninguém.` }
+                    textMessage: { text: `Seu código de verificação do Salvô!: *${code}*\n\nEle expira em 10 minutos. Não compartilhe com ninguém.` }
                 })
             });
             if (!resp.ok)
@@ -445,7 +445,7 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
     <tr><td align="center">
       <table width="100%" style="max-width:480px;background:#111214;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden">
         <tr><td style="padding:36px 36px 32px;text-align:center">
-          <p style="margin:0 0 28px;font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.28)">FINCHECK PRO</p>
+          <p style="margin:0 0 28px;font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.28)">SALVÔ!</p>
           <p style="margin:0 0 16px;font-size:15px;color:rgba(255,255,255,0.6);line-height:1.6">Seu código de verificação</p>
           <div style="background:rgba(184,245,90,0.08);border:1px solid rgba(184,245,90,0.2);border-radius:12px;padding:24px;margin:0 0 24px;display:inline-block">
             <span style="font-size:36px;font-weight:800;letter-spacing:0.25em;color:#b8f55a;font-family:'Courier New',monospace">${code}</span>
