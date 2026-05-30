@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.suggestGoal = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = void 0;
+exports.requestAccountDeletion = exports.suggestGoal = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const resend_1 = require("resend");
@@ -775,6 +775,79 @@ Retorna APENAS JSON válido:
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("suggestGoal error:", msg);
+        res.status(500).json({ error: msg });
+    }
+});
+exports.requestAccountDeletion = (0, https_1.onRequest)({
+    cors: true,
+    secrets: ["RESEND_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+}, async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+        res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+        res.set("Access-Control-Allow-Headers", "Content-Type");
+        res.status(204).send("");
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method Not Allowed" });
+        return;
+    }
+    const { userId, email, displayName, workspaceId } = req.body;
+    if (!userId || !email) {
+        res.status(400).json({ error: "Missing userId or email" });
+        return;
+    }
+    try {
+        try {
+            await admin.firestore().doc(`users/${userId}`).set({
+                deletionRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
+                status: "deletion_requested",
+            }, { merge: true });
+        }
+        catch (fsErr) {
+            console.error("requestAccountDeletion: firestore write failed (non-fatal):", fsErr);
+        }
+        const apiKey = process.env.RESEND_API_KEY;
+        if (!apiKey)
+            throw new Error("RESEND_API_KEY not configured");
+        const resend = new resend_1.Resend(apiKey);
+        const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+        await resend.emails.send({
+            from: "Salvô! <salvo@jpmendes.com>",
+            to: ["salvo@jpmendes.com"],
+            subject: "[Salvô!] Solicitação de exclusão de conta",
+            html: `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"></head>
+<body style="font-family:monospace;background:#09090b;color:#e0e0e0;padding:32px;max-width:560px;margin:0 auto">
+  <p style="font-size:13px;color:#b8f55a;font-weight:700;margin:0 0 20px">[SALVÔ!] SOLICITAÇÃO DE EXCLUSÃO DE CONTA</p>
+  <p style="font-size:13px;margin:0 0 8px">Nova solicitação de exclusão de conta recebida.</p>
+  <hr style="border:none;border-top:1px solid #333;margin:20px 0"/>
+  <table style="font-size:13px;line-height:2;border-collapse:collapse">
+    <tr><td style="color:#999;padding-right:16px">Usuário:</td><td>${displayName || "—"}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">E-mail:</td><td>${email}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">User ID:</td><td>${userId}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Workspace ID:</td><td>${workspaceId || "—"}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Data:</td><td>${now}</td></tr>
+  </table>
+  <hr style="border:none;border-top:1px solid #333;margin:20px 0"/>
+  <p style="font-size:12px;color:#666;line-height:1.7">Para excluir manualmente, acesse o Firebase Console e remova:<br>
+  • Authentication &gt; Users &gt; ${userId}<br>
+  • Firestore &gt; users/${userId}<br>
+  • Firestore &gt; workspaces/${workspaceId || "—"}</p>
+</body>
+</html>`,
+        });
+        res.json({ success: true });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("requestAccountDeletion error:", msg);
         res.status(500).json({ error: msg });
     }
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import {
   collection,
   deleteDoc,
@@ -28,6 +28,10 @@ const SEND_EMAIL_FUNCTION_URL =
 const SEND_WA_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_WA_URL ||
   "https://sendinvitewhatsapp-ihalwtxjpq-uc.a.run.app";
+
+const REQUEST_ACCOUNT_DELETION_URL =
+  process.env.NEXT_PUBLIC_REQUEST_ACCOUNT_DELETION_URL ||
+  "https://requestaccountdeletion-ihalwtxjpq-uc.a.run.app";
 
 type Profile = { displayName: string; email: string };
 
@@ -76,6 +80,10 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
   const [inviteModal, setInviteModal] = useState<"whatsapp" | "email" | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -171,6 +179,24 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
       leftAt: serverTimestamp()
     });
     window.location.replace(`${BASE}/home`);
+  }
+
+  async function handleDeleteAccount() {
+    setDeleteLoading(true);
+    try {
+      await fetch(REQUEST_ACCOUNT_DELETION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.uid,
+          email: user.email || profile?.email || "",
+          displayName: profile?.displayName || user.displayName || "",
+          workspaceId,
+        }),
+      });
+    } catch (_) { /* best effort — signOut regardless */ }
+    await signOut(auth);
+    window.location.replace(`${BASE}/login`);
   }
 
   function goBack() {
@@ -347,7 +373,7 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
             {isOwner ? (
               <button
                 disabled={busy}
-                onClick={handleDelete}
+                onClick={() => { setDeleteStep(1); setDeleteConfirmText(""); setDeleteAccountOpen(true); }}
                 style={{
                   width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
                   fontWeight: 700, fontSize: 13, color: "#ff8080",
@@ -355,7 +381,7 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
                   borderRadius: 10, padding: "11px 0", cursor: "pointer"
                 }}
               >
-                <Trash2 size={14} /> Excluir workspace
+                <Trash2 size={14} /> Excluir minha conta
               </button>
             ) : (
               <button
@@ -405,6 +431,20 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
         </div>
       )}
 
+      {/* Delete account modal */}
+      {deleteAccountOpen && (
+        <DeleteAccountModal
+          step={deleteStep}
+          confirmText={deleteConfirmText}
+          loading={deleteLoading}
+          onConfirmTextChange={setDeleteConfirmText}
+          onNextStep={() => setDeleteStep(2)}
+          onBack={() => setDeleteStep(1)}
+          onClose={() => setDeleteAccountOpen(false)}
+          onConfirm={handleDeleteAccount}
+        />
+      )}
+
       {/* Invite modal */}
       {inviteModal && (
         <InviteModal
@@ -416,6 +456,149 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
           onClose={() => setInviteModal(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Delete account modal ─────────────────────────────────────────────────────
+
+function DeleteAccountModal({
+  step,
+  confirmText,
+  loading,
+  onConfirmTextChange,
+  onNextStep,
+  onBack,
+  onClose,
+  onConfirm,
+}: {
+  step: 1 | 2;
+  confirmText: string;
+  loading: boolean;
+  onConfirmTextChange: (v: string) => void;
+  onNextStep: () => void;
+  onBack: () => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const canConfirm = confirmText.trim().toLowerCase() === "excluir";
+
+  const benefits = [
+    "Ver pra onde vai cada real do seu dinheiro",
+    "Descobrir quais gastos estão te pesando mais",
+    "Planejar os próximos 12 meses com clareza",
+    "Compartilhar as finanças com quem você mora",
+    "Importar extratos do banco em segundos",
+  ];
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)",
+        backdropFilter: "blur(8px)", zIndex: 300,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+      onClick={step === 1 ? onClose : undefined}
+    >
+      <div
+        style={{
+          background: "#0e0f11", border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 18, width: "100%", maxWidth: 400,
+          padding: "32px 28px 28px",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {step === 1 ? (
+          <>
+            <div style={{ textAlign: "center", marginBottom: 24 }}>
+              <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 16 }}>😢</div>
+              <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>Vai embora?</h2>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
+                Com o Salvô! você consegue...
+              </p>
+            </div>
+
+            <ul style={{ listStyle: "none", padding: 0, margin: "0 0 28px", display: "flex", flexDirection: "column", gap: 12 }}>
+              {benefits.map((b) => (
+                <li key={b} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>
+                  <span style={{ color: G, fontWeight: 800, flexShrink: 0, marginTop: 1 }}>✓</span>
+                  {b}
+                </li>
+              ))}
+            </ul>
+
+            <button
+              onClick={onClose}
+              style={{
+                width: "100%", padding: "13px 0", borderRadius: 10,
+                background: G, border: "none", color: "#000",
+                fontSize: 14, fontWeight: 800, cursor: "pointer", marginBottom: 12,
+              }}
+            >
+              Quero continuar usando o Salvô!
+            </button>
+
+            <button
+              onClick={onNextStep}
+              style={{
+                width: "100%", padding: "10px 0", borderRadius: 10,
+                background: "none", border: "none",
+                color: "rgba(255,255,255,0.45)", fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              Quero excluir minha conta
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ textAlign: "center", marginBottom: 24 }}>
+              <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 14 }}>⚠️</div>
+              <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Excluir minha conta</h2>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
+                Seus dados serão removidos permanentemente. Essa ação não pode ser desfeita.
+              </p>
+            </div>
+
+            <input
+              value={confirmText}
+              onChange={(e) => onConfirmTextChange(e.target.value)}
+              placeholder='Digite "excluir" para confirmar'
+              style={{
+                width: "100%", boxSizing: "border-box",
+                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8, color: "#fff", fontSize: 14, padding: "10px 12px",
+                outline: "none", marginBottom: 16,
+              }}
+            />
+
+            <button
+              onClick={onBack}
+              style={{
+                background: "none", border: "none", color: "rgba(255,255,255,0.45)",
+                fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 12, display: "block",
+              }}
+            >
+              ← Voltar
+            </button>
+
+            <button
+              onClick={onConfirm}
+              disabled={!canConfirm || loading}
+              style={{
+                width: "100%", padding: "13px 0", borderRadius: 10,
+                background: canConfirm ? "#ff5c5c" : "rgba(255,92,92,0.15)",
+                border: "none", color: canConfirm ? "#fff" : "rgba(255,255,255,0.25)",
+                fontSize: 14, fontWeight: 700,
+                cursor: canConfirm && !loading ? "pointer" : "not-allowed",
+                transition: "background 0.15s, color 0.15s",
+              }}
+            >
+              {loading ? "Processando..." : "Excluir minha conta"}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
