@@ -437,6 +437,7 @@ function MembersApp({ user, workspaceId }: { user: User; workspaceId: string }) 
           step={deleteStep}
           confirmText={deleteConfirmText}
           loading={deleteLoading}
+          membersCount={members.length}
           onConfirmTextChange={setDeleteConfirmText}
           onNextStep={() => setDeleteStep(2)}
           onBack={() => setDeleteStep(1)}
@@ -466,6 +467,7 @@ function DeleteAccountModal({
   step,
   confirmText,
   loading,
+  membersCount,
   onConfirmTextChange,
   onNextStep,
   onBack,
@@ -475,6 +477,7 @@ function DeleteAccountModal({
   step: 1 | 2;
   confirmText: string;
   loading: boolean;
+  membersCount: number;
   onConfirmTextChange: (v: string) => void;
   onNextStep: () => void;
   onBack: () => void;
@@ -559,6 +562,16 @@ function DeleteAccountModal({
                 Seus dados serão removidos permanentemente. Essa ação não pode ser desfeita.
               </p>
             </div>
+
+            {membersCount > 1 && (
+              <div style={{
+                background: "rgba(255,92,92,0.08)", border: "1px solid rgba(255,92,92,0.25)",
+                borderRadius: 10, padding: "12px 14px", marginBottom: 16,
+                fontSize: 13, color: "#ff5c5c", lineHeight: 1.5,
+              }}>
+                ⚠️ Outras pessoas estão no seu workspace. Ao excluir sua conta, elas também perdem o acesso.
+              </div>
+            )}
 
             <input
               value={confirmText}

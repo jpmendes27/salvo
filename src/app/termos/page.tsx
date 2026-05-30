@@ -72,6 +72,30 @@ export default function TermsPage() {
         Owners podem excluir workspaces. Em workspaces compartilhados, a exclusão remove dados
         usados por outros membros, por isso a v1 exige confirmação forte antes dessa ação.
       </p>
+
+      <h2>7. Exclusão de conta e dados pessoais</h2>
+      <p>
+        Você pode solicitar a exclusão da sua conta a qualquer momento diretamente pelo app,
+        na tela de configurações da conta.
+      </p>
+      <p>Ao confirmar a exclusão:</p>
+      <ul>
+        <li>Seu acesso é encerrado imediatamente e você é desconectado do app.</li>
+        <li>Uma solicitação formal é registrada e enviada para nossa equipe.</li>
+        <li>
+          Seus dados (perfil, transações e workspace) são removidos permanentemente
+          do nosso sistema em até 30 dias corridos.
+        </li>
+        <li>
+          Todos os membros do workspace também perdem o acesso — o workspace
+          é excluído junto com a conta do owner.
+        </li>
+        <li>Após a exclusão, não é possível recuperar nenhuma informação.</li>
+      </ul>
+      <p>
+        Dúvidas sobre exclusão de dados? Fale com a gente:{" "}
+        <a href="mailto:salvo@jpmendes.com">salvo@jpmendes.com</a>
+      </p>
     </main>
   );
 }
