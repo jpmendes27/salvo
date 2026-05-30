@@ -4386,7 +4386,7 @@ function AddPlannedItemModal({
               style={{ display: "none" }}
             />
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Repetir todo mês</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Repetir</div>
               <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.38)", marginTop: 1 }}>
                 Lança automaticamente nos próximos meses
               </div>
