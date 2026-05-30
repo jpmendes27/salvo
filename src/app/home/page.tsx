@@ -1334,7 +1334,7 @@ function WorkspaceApp({
                     {
                       icon: <Crown size={15} color="rgba(255,255,255,0.45)" />,
                       label: "Meu plano",
-                      badge: "PRO",
+                      badge: "BETA",
                       onClick: () => setAvatarOpen(false)
                     }
                   ].map(({ icon, label, sub, badge, onClick }) => (
@@ -1731,7 +1731,7 @@ function WorkspaceApp({
                   } : null
                 },
                 {
-                  label: "Média/dia", value: formatCurrency(mobMediaDia), color: "rgba(255,255,255,0.75)",
+                  label: "Média de gastos/dia", value: formatCurrency(mobMediaDia), color: "rgba(255,255,255,0.75)",
                   badge: null, plain: `${mobExpenses.length} transações`
                 }
               ];
@@ -2960,10 +2960,10 @@ function InsightsView({
       {/* Métricas rápidas */}
       <div className="ins-metrics">
         {([
-          { label: "Mês anterior", value: prevTotalGasto > 0 ? formatCurrency(prevTotalGasto) : "—", accent: false },
+          { label: "Gastos no mês anterior", value: prevTotalGasto > 0 ? formatCurrency(prevTotalGasto) : "—", accent: false },
           { label: "Transações", value: String(expenses.length), accent: false },
-          { label: "Média/dia", value: formatCurrency(mediaGastoPorDia), accent: false },
-          { label: "% Comprometida", value: `${comprometimento}%`, accent: comprometimento > 75 }
+          { label: "Média de gastos/dia", value: formatCurrency(mediaGastoPorDia), accent: false },
+          { label: "% Renda comprometida", value: `${comprometimento}%`, accent: comprometimento > 75 }
         ] as { label: string; value: string; accent: boolean }[]).map(({ label, value, accent }) => (
           <div key={label} className={`ins-card${accent ? " ins-card-accent" : ""}`}>
             <p style={INS_LABEL}>{label}</p>
@@ -3743,7 +3743,7 @@ function AddTransactionModal({
       await addDoc(collection(db, "workspaces", workspaceId, "transactions"), {
         type,
         description,
-        amount: Number(amount),
+        amount: parseBRL(amount),
         category,
         date,
         monthKey,
@@ -3817,18 +3817,17 @@ function AddTransactionModal({
                 setType(t);
                 setCategory(t === "income" ? "Recebimentos" : "Alimentacao");
               }}
-              style={inputStyle}
+              style={selectStyle}
             >
               <option value="expense">Saída</option>
               <option value="income">Entrada</option>
             </select>
             <input
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="numeric"
               placeholder="Valor (R$)"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => setAmount(maskBRL(e.target.value))}
               required
               style={inputStyle}
             />
@@ -3844,7 +3843,7 @@ function AddTransactionModal({
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              style={inputStyle}
+              style={selectStyle}
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
@@ -4724,6 +4723,11 @@ const inputStyle: CSSProperties = {
   fontSize: 13,
   padding: "11px 13px",
   colorScheme: "dark"
+};
+
+const selectStyle: CSSProperties = {
+  ...inputStyle,
+  background: "#0e0f11",
 };
 
 function WsCard({

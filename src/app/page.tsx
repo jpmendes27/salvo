@@ -217,7 +217,6 @@ export default function LandingPage() {
       <header className="hero">
         <div className="grid-lines" />
         <div className="wrap" style={{ position: "relative" }}>
-          <span className="pill"><span className="dot" /> Em fase de teste</span>
           <h1 className="hero-h">O amigo rico que <em>você nunca teve.</em></h1>
           <p className="hero-sub">Um app que olha sua vida financeira do jeito que ela é, te fala a verdade na cara e te mostra um caminho real pra sair do sufoco. Sem planilha. Sem palavra difícil. Sem promessa furada.</p>
           <div className="hero-cta">
@@ -281,7 +280,7 @@ export default function LandingPage() {
           </div>
           <div className="pain-data-item reveal d2">
             <div className="pain-stat neg"><em>73M</em></div>
-            <p className="foot">de brasileiros com <strong>nome sujo</strong>. Cada negativado deve em média <strong>R$5.558</strong>. São R$274 bilhões em dívidas.</p>
+            <p className="foot">de brasileiros com <strong>nome sujo</strong>. Cada negativado deve em média <strong>R$5.558</strong>. São R$404 bilhões em dívidas.</p>
             <span className="source">Fonte: <a href="https://www.serasa.com.br/limpa-nome-online/blog/mapa-da-inadimplencia-e-renogociacao-de-dividas-no-brasil/" target="_blank" rel="noopener noreferrer">Serasa Experian. Nov/2024 ↗</a></span>
           </div>
           <div className="pain-data-item reveal d3">
@@ -369,7 +368,7 @@ export default function LandingPage() {
                   <span className="live"><span className="d" /> ao vivo</span>
                 </div>
                 <div className="diag-msg">
-                  Cara, você gastou <em>R$ 612 só em iFood</em> esse mês. Isso é mais do que a sua conta de luz e a internet juntas. Bora cozinhar de domingo?
+                  Você gastou <em>R$ 612 só em iFood</em> esse mês. Isso é mais do que a sua conta de luz e a internet juntas. Bora cozinhar de domingo?
                   <span className="from">— Salvô! IA</span>
                 </div>
               </div>
@@ -431,7 +430,7 @@ export default function LandingPage() {
       <section className="manifesto" id="manifesto">
         <div className="wrap" style={{ position: "relative" }}>
           <p className="quote reveal">A gente não veio te ensinar a <em>investir.</em><br />Veio te ajudar a parar de fazer <em>merda</em> com o seu dinheiro.</p>
-          <div className="sig reveal d1">manifesto salvô!</div>
+          <div className="sig reveal d1">Manifesto</div>
         </div>
       </section>
 
@@ -454,7 +453,7 @@ export default function LandingPage() {
             <a href="#features">Recursos</a>
             <a href={`${BASE}/login`}>Entrar no beta</a>
           </div>
-          <div className="small">© 2026 · feito pra quem ganha de 1,5k a 4k</div>
+          <div className="small">© 2026 · feito pra gente como a gente</div>
         </div>
       </footer>
     </>
