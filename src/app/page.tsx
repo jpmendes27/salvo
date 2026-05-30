@@ -237,8 +237,8 @@ export default function LandingPage() {
               <div className="v">Feito pra realidade financeira do brasileiro</div>
             </div>
             <div className="item">
-              <div className="k">WhatsApp</div>
-              <div className="v">Alertas no zap, no lugar onde você já vive o dia</div>
+              <div className="k">Diagnóstico</div>
+              <div className="v">A IA olha seus gastos e te conta a verdade, sem filtro</div>
             </div>
           </div>
         </div>
@@ -336,7 +336,7 @@ export default function LandingPage() {
                 <span className="badge">3</span>
               </div>
               <h3>Recebe um plano <em>do tamanho da sua vida.</em></h3>
-              <p>Meta real. Alcançável. Pensada pra quem ganha o que você ganha. E os lembretes chegam direto no seu WhatsApp.</p>
+              <p>Meta real. Alcançável. Pensada pra quem ganha o que você ganha.</p>
               <div className="visual">
                 <div className="chat">
                   <div className="bubble">Bora? Hoje é dia de pagar a fatura sem deixar virar bola de neve.</div>
@@ -414,7 +414,7 @@ export default function LandingPage() {
                 <span>· família/casal</span>
               </div>
               <h3>A casa toda <em>no mesmo barco.</em></h3>
-              <p className="fdesc">Casal, família, irmão dividindo aluguel — todo mundo vê o mesmo painel em tempo real. Acabou a fofoca de quem gastou o quê. E os recorrentes (aluguel, luz, internet) chegam no WhatsApp pra todo mundo.</p>
+              <p className="fdesc">Casal, família, irmão dividindo aluguel — todo mundo vê o mesmo painel em tempo real. Acabou a fofoca de quem gastou o quê.</p>
               <div className="vstage">
                 <div className="ws">
                   <div className="ws-row"><span className="av">M</span><span className="who">Maria <span>· mercado da semana</span></span><span className="amt neg">−R$ 142</span></div>
