@@ -225,11 +225,11 @@ export default function LandingPage() {
           </div>
           <div className="hero-meta">
             <div className="item">
-              <div className="k"><em>3 min</em></div>
+              <div className="k"><em>1 min</em></div>
               <div className="v">Pra entender pra onde tá indo o seu dinheiro de verdade</div>
             </div>
             <div className="item">
-              <div className="k">PDF · CSV · OFX</div>
+              <div className="k">PDF · CSV · OFX · PRINT</div>
               <div className="v">Joga o extrato do seu banco e a IA organiza tudo</div>
             </div>
             <div className="item">
