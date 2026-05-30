@@ -359,7 +359,7 @@ export const sendInviteEmail = onRequest(
 
     try {
       const { data, error } = await resend.emails.send({
-        from: `${senderName} via Salvô! <convites@jpmendes.com>`,
+        from: `${senderName} via Salvô! <salvo@jpmendes.com>`,
         to: [to],
         subject: `${senderName} quer gerir as finanças com você`,
         html: `
@@ -459,7 +459,7 @@ export const sendVerificationCode = onRequest(
         if (!apiKey) throw new Error("RESEND_API_KEY not configured");
         const resend = new Resend(apiKey);
         const { error } = await resend.emails.send({
-          from: "Salvô! <noreply@jpmendes.com>",
+          from: "Salvô! <salvo@jpmendes.com>",
           to: [email],
           subject: `${code} é o seu código de verificação`,
           html: `
