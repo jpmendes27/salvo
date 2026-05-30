@@ -2,11 +2,11 @@
 
 import { type User } from "firebase/auth";
 import {
-  addDoc, collection, doc, onSnapshot,
+  addDoc, collection, deleteDoc, doc, onSnapshot,
   orderBy, query, serverTimestamp, updateDoc
 } from "firebase/firestore";
 import {
-  ArrowLeft, CreditCard, Plane, Plus, Shield, Target, TrendingUp, X
+  ArrowLeft, CreditCard, Plane, Plus, Shield, Target, Trash2, TrendingUp, X
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -205,6 +205,10 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
                 goal={goal}
                 workspaceId={workspaceId}
                 onDeposit={() => setDepositGoal(goal)}
+                onDelete={() => {
+                  if (window.confirm(`Excluir a meta "${goal.title}"? Essa ação não pode ser desfeita.`))
+                    deleteDoc(doc(db, "workspaces", workspaceId, "goals", goal.id));
+                }}
               />
             ))}
           </div>
@@ -218,7 +222,16 @@ function MetasView({ workspaceId, user }: { workspaceId: string; user: User }) {
             </p>
             <div style={{ display: "grid", gap: 10 }}>
               {completed.map((goal) => (
-                <GoalCard key={goal.id} goal={goal} workspaceId={workspaceId} onDeposit={() => {}} />
+                <GoalCard
+                  key={goal.id}
+                  goal={goal}
+                  workspaceId={workspaceId}
+                  onDeposit={() => {}}
+                  onDelete={() => {
+                    if (window.confirm(`Excluir a meta "${goal.title}"? Essa ação não pode ser desfeita.`))
+                      deleteDoc(doc(db, "workspaces", workspaceId, "goals", goal.id));
+                  }}
+                />
               ))}
             </div>
           </div>
@@ -255,10 +268,12 @@ function GoalCard({
   goal,
   workspaceId,
   onDeposit,
+  onDelete,
 }: {
   goal: Goal;
   workspaceId: string;
   onDeposit: () => void;
+  onDelete: () => void;
 }) {
   const meta    = GOAL_META[goal.type];
   const pct     = goal.targetAmount > 0 ? Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)) : 0;
@@ -295,22 +310,35 @@ function GoalCard({
             <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.36)", marginTop: 2 }}>{meta.label}</p>
           </div>
         </div>
-        {isDone ? (
-          <span style={{ fontSize: 11, fontWeight: 700, color: G, background: "rgba(184,245,90,0.12)", border: "1px solid rgba(184,245,90,0.2)", borderRadius: 6, padding: "3px 8px", whiteSpace: "nowrap" }}>
-            ✓ Concluída
-          </span>
-        ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {isDone ? (
+            <span style={{ fontSize: 11, fontWeight: 700, color: G, background: "rgba(184,245,90,0.12)", border: "1px solid rgba(184,245,90,0.2)", borderRadius: 6, padding: "3px 8px", whiteSpace: "nowrap" }}>
+              ✓ Concluída
+            </span>
+          ) : (
+            <button
+              onClick={onDeposit}
+              style={{
+                background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8, color: "#fff", cursor: "pointer",
+                fontSize: 12, fontWeight: 700, padding: "6px 12px", whiteSpace: "nowrap"
+              }}
+            >
+              + Depositar
+            </button>
+          )}
           <button
-            onClick={onDeposit}
+            onClick={onDelete}
+            title="Excluir meta"
             style={{
-              background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 8, color: "#fff", cursor: "pointer",
-              fontSize: 12, fontWeight: 700, padding: "6px 12px", whiteSpace: "nowrap"
+              background: "rgba(255,80,80,0.08)", border: "1px solid rgba(255,80,80,0.16)",
+              borderRadius: 8, color: "rgba(255,100,100,0.7)", cursor: "pointer",
+              padding: "6px 8px", display: "flex", alignItems: "center"
             }}
           >
-            + Depositar
+            <Trash2 size={13} />
           </button>
-        )}
+        </div>
       </div>
 
       {/* Progress */}
