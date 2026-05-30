@@ -225,11 +225,11 @@ export default function LandingPage() {
           </div>
           <div className="hero-meta">
             <div className="item">
-              <div className="k"><em>1 min</em></div>
+              <div className="k"><em>3 min</em></div>
               <div className="v">Pra entender pra onde tá indo o seu dinheiro de verdade</div>
             </div>
             <div className="item">
-              <div className="k">PDF · CSV · OFX · PRINT</div>
+              <div className="k">PDF · CSV · OFX</div>
               <div className="v">Joga o extrato do seu banco e a IA organiza tudo</div>
             </div>
             <div className="item">
@@ -338,9 +338,11 @@ export default function LandingPage() {
               <h3>Recebe um plano <em>do tamanho da sua vida.</em></h3>
               <p>Meta real. Alcançável. Pensada pra quem ganha o que você ganha.</p>
               <div className="visual">
-                <div className="chat">
-                  <div className="bubble">Bora? Hoje é dia de pagar a fatura sem deixar virar bola de neve.</div>
-                  <div className="bubble me">Tô dentro 🙌</div>
+                <div style={{ background: "#0a0a0a", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", letterSpacing: "0.08em", color: "rgba(255,255,255,0.35)", textTransform: "uppercase", marginBottom: 2 }}>Plano de Maio</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "rgba(255,255,255,0.6)", fontFamily: "'DM Mono',monospace" }}><span>Entrou</span><span>R$ 2.400</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "rgba(255,255,255,0.6)", fontFamily: "'DM Mono',monospace" }}><span>Saiu</span><span>R$ 2.080</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 700, color: "#b8f55a", fontFamily: "'DM Mono',monospace", borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 8, marginTop: 2 }}><span>Sobra</span><span>R$ 320</span></div>
                 </div>
               </div>
             </div>
@@ -419,7 +421,6 @@ export default function LandingPage() {
                 <div className="ws">
                   <div className="ws-row"><span className="av">M</span><span className="who">Maria <span>· mercado da semana</span></span><span className="amt neg">−R$ 142</span></div>
                   <div className="ws-row"><span className="av b">J</span><span className="who">João <span>· transferiu pra poupança</span></span><span className="amt">+R$ 200</span></div>
-                  <div className="ws-row"><span className="av c">+1</span><span className="who">Lembrete <span>· aluguel vence em 3 dias</span></span><span className="amt neg">R$ 1.250</span></div>
                 </div>
               </div>
             </div>
@@ -452,6 +453,8 @@ export default function LandingPage() {
             <a href="#como">Como funciona</a>
             <a href="#features">Recursos</a>
             <a href={`${BASE}/login`}>Entrar no beta</a>
+            <a href={`${BASE}/termos`}>Termos de Uso</a>
+            <a href={`${BASE}/privacidade`}>Política de Privacidade</a>
           </div>
           <div className="small">© 2026 · feito pra gente como a gente</div>
         </div>
