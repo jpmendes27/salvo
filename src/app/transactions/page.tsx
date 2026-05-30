@@ -8,11 +8,12 @@ import {
   onSnapshot,
   orderBy,
   query,
+  updateDoc,
   where
 } from "firebase/firestore";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuthUser } from "@/app/auth-provider";
 import { db } from "@/lib/firebase";
@@ -203,6 +204,7 @@ function TransactionList({
               <TxRow
                 key={tx.id}
                 tx={tx}
+                workspaceId={workspaceId}
                 onDelete={() => deleteDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id))}
               />
             ))}
@@ -213,63 +215,125 @@ function TransactionList({
   );
 }
 
-function TxRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
+const ALL_CATEGORIES = Object.entries(CATEGORY_LABELS) as [string, string][];
+
+function TxRow({ tx, workspaceId, onDelete }: { tx: Transaction; workspaceId: string; onDelete: () => void }) {
   const [hov, setHov] = useState(false);
+  const [editingCat, setEditingCat] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const isIncome = tx.type === "income";
   const parts = tx.date.split("-");
   const dateLabel = parts.length === 3 ? `${parts[2]}/${parts[1]}` : tx.date;
 
+  useEffect(() => {
+    if (!editingCat) return;
+    function handleOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setEditingCat(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [editingCat]);
+
+  async function recategorize(newCat: string) {
+    if (newCat === tx.category) { setEditingCat(false); return; }
+    await updateDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id), { category: newCat });
+    setEditingCat(false);
+  }
+
   return (
     <div
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
+      ref={containerRef}
       style={{
-        display: "grid",
-        gridTemplateColumns: "8px 1fr auto auto",
-        gap: "0 14px",
-        alignItems: "center",
-        padding: "11px 12px",
         borderRadius: 10,
-        background: hov ? "rgba(255,255,255,0.04)" : "transparent",
+        background: hov || editingCat ? "rgba(255,255,255,0.04)" : "transparent",
         transition: "background .15s"
       }}
     >
-      <div style={{
-        width: 8, height: 8, borderRadius: "50%",
-        background: categoryColor(tx.category),
-        boxShadow: `0 0 8px ${categoryColor(tx.category)}66`,
-        flexShrink: 0
-      }} />
-      <div style={{ minWidth: 0 }}>
-        <p style={{
-          fontSize: 13.5, fontWeight: 600, color: "#e8e9ec",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-        }}>
-          {tx.description}
-        </p>
-        <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
-          {CATEGORY_LABELS[tx.category as keyof typeof CATEGORY_LABELS] ?? tx.category} · {dateLabel}
-          {tx.sourceLabel ? ` · ${tx.sourceLabel}` : ""}
-        </p>
-      </div>
-      <span style={{
-        fontSize: 14, fontWeight: 800, letterSpacing: "-0.02em",
-        color: isIncome ? G : "#ff8080", whiteSpace: "nowrap"
-      }}>
-        {isIncome ? "+" : "−"}{formatCurrency(tx.amount)}
-      </span>
-      <button
-        onClick={onDelete}
+      <div
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
         style={{
-          opacity: hov ? 1 : 0,
-          background: "transparent", border: "none", cursor: "pointer",
-          color: "rgba(255,80,80,0.65)", padding: 4, borderRadius: 6,
-          display: "flex", alignItems: "center",
-          transition: "opacity .15s"
+          display: "grid",
+          gridTemplateColumns: "8px 1fr auto auto",
+          gap: "0 14px",
+          alignItems: "center",
+          padding: "11px 12px",
         }}
       >
-        <Trash2 size={14} />
-      </button>
+        <div style={{
+          width: 8, height: 8, borderRadius: "50%",
+          background: categoryColor(tx.category),
+          boxShadow: `0 0 8px ${categoryColor(tx.category)}66`,
+          flexShrink: 0
+        }} />
+        <div style={{ minWidth: 0 }}>
+          <p style={{
+            fontSize: 13.5, fontWeight: 600, color: "#e8e9ec",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+          }}>
+            {tx.description}
+          </p>
+          <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
+            <button
+              onClick={() => setEditingCat((v) => !v)}
+              style={{
+                background: "none", border: "none", padding: 0, cursor: "pointer",
+                fontSize: 11.5, fontWeight: editingCat ? 700 : 400,
+                color: editingCat ? G : "rgba(255,255,255,0.32)",
+                textDecoration: hov && !editingCat ? "underline" : "none",
+              }}
+            >
+              {CATEGORY_LABELS[tx.category as keyof typeof CATEGORY_LABELS] ?? tx.category}
+            </button>
+            {" · "}{dateLabel}{tx.sourceLabel ? ` · ${tx.sourceLabel}` : ""}
+          </p>
+        </div>
+        <span style={{
+          fontSize: 14, fontWeight: 800, letterSpacing: "-0.02em",
+          color: isIncome ? G : "#ff8080", whiteSpace: "nowrap"
+        }}>
+          {isIncome ? "+" : "−"}{formatCurrency(tx.amount)}
+        </span>
+        <button
+          onClick={onDelete}
+          style={{
+            opacity: hov || editingCat ? 1 : 0,
+            background: "transparent", border: "none", cursor: "pointer",
+            color: "rgba(255,80,80,0.65)", padding: 4, borderRadius: 6,
+            display: "flex", alignItems: "center",
+            transition: "opacity .15s"
+          }}
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      {editingCat && (
+        <div style={{ padding: "0 12px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {ALL_CATEGORIES.map(([key, label]) => {
+            const active = key === tx.category;
+            return (
+              <button
+                key={key}
+                onClick={() => recategorize(key)}
+                style={{
+                  fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
+                  border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.09)"}`,
+                  background: active ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.03)",
+                  color: active ? "#fff" : "rgba(255,255,255,0.45)",
+                  cursor: active ? "default" : "pointer",
+                  display: "flex", alignItems: "center", gap: 5,
+                }}
+              >
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: categoryColor(key), flexShrink: 0 }} />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
