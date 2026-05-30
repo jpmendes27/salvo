@@ -33,6 +33,10 @@ export default function TermsPage() {
         próprio usuário. O Salvô! não se responsabiliza por decisões financeiras tomadas
         com base nessas informações. A responsabilidade pelas escolhas é sempre do usuário.
       </p>
+      <p>
+        O Salvô! é destinado a maiores de 18 anos. Ao criar uma conta, você declara ter
+        pelo menos 18 anos.
+      </p>
 
       <h2>2. Conta e segurança</h2>
       <p>
@@ -71,6 +75,8 @@ export default function TermsPage() {
       <p>
         Owners podem excluir workspaces. Em workspaces compartilhados, a exclusão remove dados
         usados por outros membros, por isso a v1 exige confirmação forte antes dessa ação.
+        Alterações relevantes nestes termos serão comunicadas por e-mail ou notificação no
+        app com pelo menos 10 dias de antecedência.
       </p>
 
       <h2>7. Exclusão de conta e dados pessoais</h2>

@@ -34,7 +34,8 @@ export default function PrivacyPage() {
         Coletamos nome, e-mail, identificador de autenticação, consentimentos, dados de
         workspace, membros convidados, categorias, lançamentos financeiros manuais e resumos
         gerados a partir desses lançamentos. Telefone e renda não fazem parte do onboarding
-        inicial.
+        inicial. Os dados financeiros coletados são tratados com nível elevado de proteção e
+        não são compartilhados com terceiros além dos fornecedores listados nesta política.
       </p>
 
       <h2>3. Finalidades e bases legais</h2>
@@ -51,12 +52,17 @@ export default function PrivacyPage() {
         financeiros daquele workspace como editor. O convite informa essa consequência antes
         do aceite.
       </p>
+      <p>
+        Ao sair de um workspace, seus dados de perfil são desassociados. Lançamentos inseridos
+        por você permanecem no workspace até que o owner o exclua.
+      </p>
 
       <h2>5. Fornecedores</h2>
       <p>
         Usamos Firebase e Google para autenticação, banco de dados e hospedagem. Usamos
-        Resend para envio de e-mails transacionais. Esses fornecedores processam dados para
-        viabilizar o funcionamento do Salvô!.
+        Resend para envio de e-mails transacionais — o Resend processa seu endereço de e-mail
+        em infraestrutura fora do Brasil. Esses fornecedores processam dados para viabilizar
+        o funcionamento do Salvô!.
       </p>
 
       <h2>5a. Uso de inteligência artificial</h2>
@@ -89,15 +95,22 @@ export default function PrivacyPage() {
         Você pode solicitar acesso, correção, exclusão, informações de compartilhamento,
         revogação de consentimento quando aplicável e demais direitos previstos na LGPD.
         Para isso, use a página de exclusão de conta ou entre em contato pelo e-mail{" "}
-        {/* TODO: substituir pelo email real */}
-        contato@salvô.app.
+        salvo@jpmendes.com. Respondemos solicitações em até 15 dias corridos, conforme o
+        Art. 18 da LGPD.
+      </p>
+
+      <h2>7a. Encarregado de dados</h2>
+      <p>
+        O encarregado pelo tratamento de dados pessoais é João Paulo Mendes da Silva,
+        acessível pelo e-mail salvo@jpmendes.com.
       </p>
 
       <h2>8. Retenção e exclusão</h2>
       <p>
         Mantemos dados enquanto sua conta ou workspace estiverem ativos, salvo obrigação legal
         ou necessidade de segurança. Owners podem excluir workspaces; membros podem sair de
-        workspaces compartilhados.
+        workspaces compartilhados. Alterações relevantes nesta política serão comunicadas por
+        e-mail ou notificação no app com pelo menos 10 dias de antecedência.
       </p>
     </main>
   );
