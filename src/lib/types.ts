@@ -65,6 +65,12 @@ export type PlannedItem = {
   updatedAt?: unknown;
 };
 
+export type RecorrenciaInfo = {
+  tipo: "infinita" | "parcelada";
+  totalMeses: number | null;
+  mesInicio: string;
+};
+
 export type RecurringItem = {
   id: string;
   type: TransactionType;
@@ -75,6 +81,7 @@ export type RecurringItem = {
   active: boolean;
   createdBy: string;
   createdByName: string;
+  recorrencia?: RecorrenciaInfo;
   createdAt?: unknown;
   updatedAt?: unknown;
 };

@@ -532,6 +532,7 @@ function WorkspaceApp({
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [renameWsOpen, setRenameWsOpen] = useState(false);
   const [renameWsValue, setRenameWsValue] = useState("");
+  const [editRecurringItem, setEditRecurringItem] = useState<RecurringItem | null>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -690,13 +691,26 @@ function WorkspaceApp({
     const existingRecurringIds = new Set(
       plannedItemsRef.current.filter((p) => p.recurringId).map((p) => p.recurringId!)
     );
-    const toCreate = recurringItems.filter((r) => !existingRecurringIds.has(r.id));
+    const toCreate = recurringItems.filter((r) => {
+      if (existingRecurringIds.has(r.id)) return false;
+      if (r.recorrencia?.tipo === "parcelada") {
+        const { mesInicio, totalMeses } = r.recorrencia;
+        if (!mesInicio || !totalMeses) return false;
+        const parcelaAtual = calcMonthDiff(mesInicio, monthKey) + 1;
+        if (parcelaAtual < 1 || parcelaAtual > totalMeses) return false;
+      }
+      return true;
+    });
     if (!toCreate.length) return;
 
     const batch = writeBatch(db);
     for (const r of toCreate) {
-      // Deterministic ID prevents duplicates on concurrent loads
       const docRef = doc(db, "workspaces", workspace.id, "plannedItems", `${r.id}_${monthKey}`);
+      const extra: Record<string, unknown> = {};
+      if (r.recorrencia?.tipo === "parcelada" && r.recorrencia.mesInicio && r.recorrencia.totalMeses) {
+        extra.parcelaAtual = calcMonthDiff(r.recorrencia.mesInicio, monthKey) + 1;
+        extra.totalParcelas = r.recorrencia.totalMeses;
+      }
       batch.set(docRef, {
         type: r.type,
         title: r.title,
@@ -708,6 +722,7 @@ function WorkspaceApp({
         createdBy: r.createdBy,
         createdByName: r.createdByName,
         recurringId: r.id,
+        ...extra,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -1602,6 +1617,7 @@ function WorkspaceApp({
                   updatedAt: serverTimestamp()
                 })
               }
+              onEditRecurring={(r) => setEditRecurringItem(r)}
             />
 
             {/* Projeção link */}
@@ -1839,6 +1855,7 @@ function WorkspaceApp({
           onStatusChange={updatePlannedStatus}
           onDelete={(item) => deleteDoc(doc(db, "workspaces", workspace.id, "plannedItems", item.id))}
           onDeactivateRecurring={(r) => updateDoc(doc(db, "workspaces", workspace.id, "recurringItems", r.id), { active: false, updatedAt: serverTimestamp() })}
+          onEditRecurring={(r) => setEditRecurringItem(r)}
         />
 
         {/* 6. Top categorias */}
@@ -2106,6 +2123,16 @@ function WorkspaceApp({
         />
       )}
 
+      {editRecurringItem && (
+        <EditRecurringModal
+          item={editRecurringItem}
+          monthKey={monthKey}
+          workspaceId={workspace.id}
+          onClose={() => setEditRecurringItem(null)}
+          onSaved={() => setEditRecurringItem(null)}
+        />
+      )}
+
       {settingsOpen && (
         <SettingsModal
           workspace={workspace}
@@ -2189,7 +2216,8 @@ function PlanCard({
   onAdd,
   onStatusChange,
   onDelete,
-  onDeactivateRecurring
+  onDeactivateRecurring,
+  onEditRecurring
 }: {
   monthKey: string;
   summary: ReturnType<typeof buildMonthlyPlanSummary>;
@@ -2200,6 +2228,7 @@ function PlanCard({
   onStatusChange: (item: PlannedItem, status: PlannedItemStatus) => Promise<void>;
   onDelete: (item: PlannedItem) => Promise<void>;
   onDeactivateRecurring: (r: RecurringItem) => Promise<void>;
+  onEditRecurring: (r: RecurringItem) => void;
 }) {
   const [showRecurring, setShowRecurring] = useState(false);
   const [showPaid, setShowPaid] = useState(false);
@@ -2353,47 +2382,74 @@ function PlanCard({
 
           {showRecurring && (
             <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-              {recurringItems.map((r) => (
-                <div
-                  key={r.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    padding: "7px 10px",
-                    borderRadius: 8,
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.06)"
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.title}
-                    </div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>
-                      dia {r.dueDay} · {formatCurrency(r.amount)}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onDeactivateRecurring(r)}
-                    title="Pausar recorrência"
+              {recurringItems.map((r) => {
+                const isParcelada = r.recorrencia?.tipo === "parcelada";
+                const parcelaAtualR = isParcelada && r.recorrencia?.mesInicio
+                  ? calcMonthDiff(r.recorrencia.mesInicio, monthKey) + 1
+                  : null;
+                const totalMesesR = isParcelada ? r.recorrencia?.totalMeses ?? null : null;
+                return (
+                  <div
+                    key={r.id}
                     style={{
-                      flexShrink: 0,
-                      background: "rgba(255,80,80,0.10)",
-                      border: "1px solid rgba(255,80,80,0.18)",
-                      borderRadius: 6,
-                      color: "#ff8080",
-                      cursor: "pointer",
-                      padding: "4px 8px",
-                      fontSize: 11,
-                      fontWeight: 600
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.06)"
                     }}
                   >
-                    Pausar
-                  </button>
-                </div>
-              ))}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.title}
+                      </div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>
+                        dia {r.dueDay} · {formatCurrency(r.amount)}
+                        {isParcelada && parcelaAtualR && totalMesesR
+                          ? ` · ${parcelaAtualR}/${totalMesesR} parcelas`
+                          : ""}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      <button
+                        onClick={() => onEditRecurring(r)}
+                        title="Editar recorrência"
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                          borderRadius: 6,
+                          color: "rgba(255,255,255,0.55)",
+                          cursor: "pointer",
+                          padding: "4px 8px",
+                          fontSize: 11,
+                          fontWeight: 600
+                        }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => onDeactivateRecurring(r)}
+                        title="Pausar recorrência"
+                        style={{
+                          background: "rgba(255,80,80,0.10)",
+                          border: "1px solid rgba(255,80,80,0.18)",
+                          borderRadius: 6,
+                          color: "#ff8080",
+                          cursor: "pointer",
+                          padding: "4px 8px",
+                          fontSize: 11,
+                          fontWeight: 600
+                        }}
+                      >
+                        Pausar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -3859,6 +3915,236 @@ function AddTransactionModal({
   );
 }
 
+// ─── Month diff helper ────────────────────────────────────────────────────────
+
+function calcMonthDiff(a: string, b: string): number {
+  const [ay, am] = a.split("-").map(Number);
+  const [by, bm] = b.split("-").map(Number);
+  return (by - ay) * 12 + (bm - am);
+}
+
+// ─── Edit recurring modal ─────────────────────────────────────────────────────
+
+function EditRecurringModal({
+  item,
+  monthKey,
+  workspaceId,
+  onClose,
+  onSaved
+}: {
+  item: RecurringItem;
+  monthKey: string;
+  workspaceId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(item.title);
+  const [amount, setAmount] = useState(String(item.amount));
+  const [category, setCategory] = useState(item.category);
+  const [recurringMode, setRecurringMode] = useState<"infinita" | "parcelada">(
+    item.recorrencia?.tipo ?? "infinita"
+  );
+  const [totalMeses, setTotalMeses] = useState(
+    item.recorrencia?.totalMeses ? String(item.recorrencia.totalMeses) : ""
+  );
+  const [busy, setBusy] = useState(false);
+  const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros").sort();
+  const categories = item.type === "income" ? ["Recebimentos"] : [...expenseCategories, "Outros"];
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      let mesInicio: string;
+      if (recurringMode === "infinita") {
+        mesInicio = item.recorrencia?.mesInicio ?? monthKey;
+      } else if (item.recorrencia?.tipo === "parcelada") {
+        // Editing parcelas of existing parcelada: keep original mesInicio
+        mesInicio = item.recorrencia.mesInicio;
+      } else {
+        // Switching from infinita → parcelada: mesInicio = now
+        mesInicio = monthKey;
+      }
+      await updateDoc(doc(db, "workspaces", workspaceId, "recurringItems", item.id), {
+        title,
+        amount: Number(amount),
+        category,
+        recorrencia: {
+          tipo: recurringMode,
+          totalMeses: recurringMode === "parcelada" ? Number(totalMeses) : null,
+          mesInicio,
+        },
+        updatedAt: serverTimestamp(),
+      });
+      onSaved();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)",
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: "#0e0f11",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 18,
+          width: "100%",
+          maxWidth: 440,
+          boxShadow: "0 40px 100px rgba(0,0,0,0.6)"
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.07)"
+          }}
+        >
+          <h2 style={{ fontSize: 16, fontWeight: 700 }}>Editar recorrência</h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.07)",
+              border: "none",
+              borderRadius: 8,
+              color: "rgba(255,255,255,0.55)",
+              cursor: "pointer",
+              padding: "6px 8px",
+              display: "flex"
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={submit} style={{ padding: 24, display: "grid", gap: 14 }}>
+          <input
+            placeholder="Nome"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            style={inputStyle}
+          />
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="Valor"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+            style={inputStyle}
+          />
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            style={inputStyle}
+          >
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c}
+              </option>
+            ))}
+          </select>
+          {/* Recorrência mode */}
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
+              Recorrência
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {(["infinita", "parcelada"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setRecurringMode(mode)}
+                  style={{
+                    flex: 1,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: "7px 0",
+                    borderRadius: 8,
+                    border: `1px solid ${recurringMode === mode ? "rgba(184,245,90,0.35)" : "rgba(255,255,255,0.09)"}`,
+                    background: recurringMode === mode ? "rgba(184,245,90,0.10)" : "rgba(255,255,255,0.03)",
+                    color: recurringMode === mode ? G : "rgba(255,255,255,0.45)",
+                    cursor: "pointer",
+                    transition: "all .15s"
+                  }}
+                >
+                  {mode === "infinita" ? "Todo mês" : "Por X meses"}
+                </button>
+              ))}
+            </div>
+            {recurringMode === "parcelada" && (
+              <input
+                type="number"
+                min="2"
+                max="360"
+                placeholder="Número de parcelas. Ex: 12, 24, 48"
+                value={totalMeses}
+                onChange={(e) => setTotalMeses(e.target.value)}
+                required
+                style={inputStyle}
+              />
+            )}
+          </div>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: -4 }}>
+            A alteração vale a partir do mês atual. Meses já gerados não são afetados.
+          </p>
+          <button
+            type="submit"
+            disabled={busy}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+              fontWeight: 800,
+              fontSize: 14,
+              color: "#000",
+              background: G,
+              border: "none",
+              borderRadius: 10,
+              padding: "13px 0",
+              cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.7 : 1
+            }}
+          >
+            {busy ? (
+              <div
+                style={{
+                  width: 16,
+                  height: 16,
+                  border: "2.5px solid rgba(0,0,0,0.3)",
+                  borderTopColor: "#000",
+                  borderRadius: "50%",
+                  animation: "spin .7s linear infinite"
+                }}
+              />
+            ) : (
+              "Salvar alterações"
+            )}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Add planned item modal ──────────────────────────────────────────────────
 
 function AddPlannedItemModal({
@@ -3882,6 +4168,8 @@ function AddPlannedItemModal({
   const [category, setCategory] = useState("Moradia");
   const [dueDay, setDueDay] = useState("10");
   const [recurring, setRecurring] = useState(false);
+  const [recurringMode, setRecurringMode] = useState<"infinita" | "parcelada">("infinita");
+  const [totalMeses, setTotalMeses] = useState("");
   const [busy, setBusy] = useState(false);
   const expenseCategories = CATEGORIES.filter((c) => c !== "Recebimentos" && c !== "Outros").sort();
   const categories = type === "income" ? ["Recebimentos"] : [...expenseCategories, "Outros"];
@@ -3903,6 +4191,11 @@ function AddPlannedItemModal({
           active: true,
           createdBy: user.uid,
           createdByName: profile.displayName,
+          recorrencia: {
+            tipo: recurringMode,
+            totalMeses: recurringMode === "parcelada" ? Number(totalMeses) : null,
+            mesInicio: monthKey,
+          },
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -4086,16 +4379,61 @@ function AddPlannedItemModal({
             <input
               type="checkbox"
               checked={recurring}
-              onChange={(e) => setRecurring(e.target.checked)}
+              onChange={(e) => {
+                setRecurring(e.target.checked);
+                if (!e.target.checked) setRecurringMode("infinita");
+              }}
               style={{ display: "none" }}
             />
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Repetir todo mês</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {recurring ? "Recorrência" : "Repetir todo mês"}
+              </div>
               <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.38)", marginTop: 1 }}>
                 Lança automaticamente nos próximos meses
               </div>
             </div>
           </label>
+
+          {recurring && (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", gap: 6 }}>
+                {(["infinita", "parcelada"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setRecurringMode(mode)}
+                    style={{
+                      flex: 1,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      padding: "7px 0",
+                      borderRadius: 8,
+                      border: `1px solid ${recurringMode === mode ? "rgba(184,245,90,0.35)" : "rgba(255,255,255,0.09)"}`,
+                      background: recurringMode === mode ? "rgba(184,245,90,0.10)" : "rgba(255,255,255,0.03)",
+                      color: recurringMode === mode ? G : "rgba(255,255,255,0.45)",
+                      cursor: "pointer",
+                      transition: "all .15s"
+                    }}
+                  >
+                    {mode === "infinita" ? "Todo mês" : "Por X meses"}
+                  </button>
+                ))}
+              </div>
+              {recurringMode === "parcelada" && (
+                <input
+                  type="number"
+                  min="2"
+                  max="360"
+                  placeholder="Número de parcelas. Ex: 12, 24, 48"
+                  value={totalMeses}
+                  onChange={(e) => setTotalMeses(e.target.value)}
+                  required
+                  style={inputStyle}
+                />
+              )}
+            </div>
+          )}
 
           <button
             type="submit"

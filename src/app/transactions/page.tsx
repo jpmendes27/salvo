@@ -20,9 +20,15 @@ import { useAuthUser } from "@/app/auth-provider";
 import { db } from "@/lib/firebase";
 import { formatCurrency, monthLabel } from "@/lib/money";
 import { CATEGORY_COLORS, CATEGORY_LABELS } from "@/lib/parsers";
-import type { Transaction } from "@/lib/types";
+import type { RecurringItem, Transaction } from "@/lib/types";
 
 const G = "#b8f55a";
+
+function monthDiff(a: string, b: string): number {
+  const [ay, am] = a.split("-").map(Number);
+  const [by, bm] = b.split("-").map(Number);
+  return (by - ay) * 12 + (bm - am);
+}
 
 function categoryColor(cat: string): string {
   return (CATEGORY_COLORS as Record<string, string>)[cat] ?? "#888";
@@ -86,6 +92,7 @@ function TransactionList({
   const [sourceFilter, setSourceFilter] = useState("all");
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -100,10 +107,27 @@ function TransactionList({
     });
   }, [workspaceId, monthKey]);
 
+  useEffect(() => {
+    return onSnapshot(
+      collection(db, "workspaces", workspaceId, "recurringItems"),
+      (snap) => setRecurringItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RecurringItem))
+    );
+  }, [workspaceId]);
+
   const sources = useMemo(() => {
     const labels = [...new Set(transactions.map((t) => t.sourceLabel).filter(Boolean))] as string[];
     return labels.sort();
   }, [transactions]);
+
+  const parceladaMap = useMemo(() => {
+    const map = new Map<string, RecurringItem>();
+    for (const r of recurringItems) {
+      if (r.recorrencia?.tipo === "parcelada" && r.recorrencia.mesInicio && r.recorrencia.totalMeses) {
+        map.set(r.title.toLowerCase().trim(), r);
+      }
+    }
+    return map;
+  }, [recurringItems]);
 
   const filtered = transactions.filter((t) => {
     const typeOk = txFilter === "all" || t.type === txFilter;
@@ -310,6 +334,7 @@ function TransactionList({
                 selectMode={selectMode}
                 isSelected={selected.has(tx.id)}
                 onToggleSelect={() => toggleSelect(tx.id)}
+                parceladaMap={parceladaMap}
               />
             ))}
           </div>
@@ -321,13 +346,14 @@ function TransactionList({
 
 const ALL_CATEGORIES = Object.entries(CATEGORY_LABELS) as [string, string][];
 
-function TxRow({ tx, workspaceId, onDelete, selectMode, isSelected, onToggleSelect }: {
+function TxRow({ tx, workspaceId, onDelete, selectMode, isSelected, onToggleSelect, parceladaMap }: {
   tx: Transaction;
   workspaceId: string;
   onDelete: () => void;
   selectMode: boolean;
   isSelected: boolean;
   onToggleSelect: () => void;
+  parceladaMap: Map<string, RecurringItem>;
 }) {
   const [hov, setHov] = useState(false);
   const [editingCat, setEditingCat] = useState(false);
@@ -335,6 +361,14 @@ function TxRow({ tx, workspaceId, onDelete, selectMode, isSelected, onToggleSele
   const isIncome = tx.type === "income";
   const parts = tx.date.split("-");
   const dateLabel = parts.length === 3 ? `${parts[2]}/${parts[1]}` : tx.date;
+
+  const parcelaSuffix = (() => {
+    const r = parceladaMap.get(tx.description.toLowerCase().trim());
+    if (!r?.recorrencia?.mesInicio || !r.recorrencia.totalMeses) return null;
+    const parcelaAtual = monthDiff(r.recorrencia.mesInicio, tx.monthKey) + 1;
+    if (parcelaAtual < 1 || parcelaAtual > r.recorrencia.totalMeses) return null;
+    return `(${parcelaAtual}/${r.recorrencia.totalMeses})`;
+  })();
 
   useEffect(() => {
     if (!editingCat) return;
@@ -402,7 +436,7 @@ function TxRow({ tx, workspaceId, onDelete, selectMode, isSelected, onToggleSele
             fontSize: 13.5, fontWeight: 600, color: "#e8e9ec",
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
           }}>
-            {tx.description}
+            {tx.description}{parcelaSuffix ? ` ${parcelaSuffix}` : ""}
           </p>
           <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
             <button
