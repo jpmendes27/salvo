@@ -209,6 +209,21 @@ function AuthScreen() {
     const ua = navigator.userAgent;
     return /Instagram|FBAN|FBAV|Twitter|BytedanceWebview|musical_ly|LinkedIn/i.test(ua);
   });
+
+  // Auto-redirect out of in-app browser to Chrome/Safari
+  useEffect(() => {
+    if (!isInAppBrowser) return;
+    const url = window.location.href;
+    const ua = navigator.userAgent;
+    if (/Android/i.test(ua)) {
+      // Android: open in Chrome via intent scheme
+      window.location.href = `intent://${window.location.host}${window.location.pathname}${window.location.search}#Intent;scheme=https;package=com.android.chrome;end`;
+    } else {
+      // iOS: try Chrome for iOS, falls back gracefully if not installed
+      window.location.href = url.replace(/^https/, "googlechrome");
+    }
+  }, [isInAppBrowser]);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -442,30 +457,13 @@ function AuthScreen() {
                 <div style={{
                   width: "100%", borderRadius: 12, marginBottom: 16, padding: "14px 16px",
                   background: "rgba(255,200,50,0.08)", border: "1px solid rgba(255,200,50,0.22)",
-                  display: "flex", flexDirection: "column", gap: 10
                 }}>
-                  <p style={{ fontSize: 13, color: "rgba(255,220,80,0.9)", fontWeight: 600, lineHeight: 1.4 }}>
-                    O Google bloqueia o login neste navegador. Abra o Salvô! no Safari ou Chrome para entrar com Google.
+                  <p style={{ fontSize: 13, color: "rgba(255,220,80,0.9)", fontWeight: 600, lineHeight: 1.5 }}>
+                    Abrindo no Chrome…
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = window.location.href;
-                      if (navigator.clipboard) {
-                        navigator.clipboard.writeText(url).then(() => alert("Link copiado! Cole no Safari ou Chrome."));
-                      } else {
-                        alert(`Copie esse link e abra no Safari ou Chrome:\n\n${url}`);
-                      }
-                    }}
-                    style={{
-                      alignSelf: "flex-start", fontSize: 12, fontWeight: 700,
-                      padding: "6px 12px", borderRadius: 8,
-                      background: "rgba(255,200,50,0.14)", border: "1px solid rgba(255,200,50,0.3)",
-                      color: "rgba(255,220,80,0.95)", cursor: "pointer"
-                    }}
-                  >
-                    Copiar link
-                  </button>
+                  <p style={{ fontSize: 12, color: "rgba(255,220,80,0.6)", marginTop: 4, lineHeight: 1.5 }}>
+                    Se não abrir, acesse o Salvô! direto no Chrome ou Safari.
+                  </p>
                 </div>
               ) : (
                 <button
