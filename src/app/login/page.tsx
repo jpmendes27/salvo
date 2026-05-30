@@ -203,6 +203,12 @@ function AuthScreen() {
     window.matchMedia("(display-mode: standalone)").matches ||
     (window.navigator as { standalone?: boolean }).standalone === true
   );
+
+  // Google OAuth is blocked by Google itself in in-app browsers (Instagram, Facebook, etc.)
+  const [isInAppBrowser] = useState(() => {
+    const ua = navigator.userAgent;
+    return /Instagram|FBAN|FBAV|Twitter|BytedanceWebview|musical_ly|LinkedIn/i.test(ua);
+  });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -432,22 +438,53 @@ function AuthScreen() {
 
           {!isPWA && (
             <>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handleGoogle}
-                style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", color: "#111", fontSize: 14, fontWeight: 700, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 16, transition: "opacity .2s,transform .15s", letterSpacing: "-0.01em" }}
-                onMouseEnter={(event) => { event.currentTarget.style.opacity = ".91"; event.currentTarget.style.transform = "scale(1.01)"; }}
-                onMouseLeave={(event) => { event.currentTarget.style.opacity = "1"; event.currentTarget.style.transform = "scale(1)"; }}
-              >
-                <svg width={17} height={17} viewBox="0 0 18 18">
-                  <path d="M17.64 9.2a10.34 10.34 0 0 0-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92A8.78 8.78 0 0 0 17.64 9.2z" fill="#4285F4" />
-                  <path d="M9 18a8.6 8.6 0 0 0 5.96-2.18l-2.92-2.26a5.43 5.43 0 0 1-8.07-2.85H.96v2.33A9 9 0 0 0 9 18z" fill="#34A853" />
-                  <path d="M3.97 10.71A5.41 5.41 0 0 1 3.69 9c0-.59.1-1.17.28-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.04l3.01-2.33z" fill="#FBBC05" />
-                  <path d="M9 3.58a4.86 4.86 0 0 1 3.44 1.35l2.58-2.58A8.64 8.64 0 0 0 9 0 9 9 0 0 0 .96 4.96l3.01 2.33A5.36 5.36 0 0 1 9 3.58z" fill="#EA4335" />
-                </svg>
-                Continuar com Google
-              </button>
+              {isInAppBrowser ? (
+                <div style={{
+                  width: "100%", borderRadius: 12, marginBottom: 16, padding: "14px 16px",
+                  background: "rgba(255,200,50,0.08)", border: "1px solid rgba(255,200,50,0.22)",
+                  display: "flex", flexDirection: "column", gap: 10
+                }}>
+                  <p style={{ fontSize: 13, color: "rgba(255,220,80,0.9)", fontWeight: 600, lineHeight: 1.4 }}>
+                    O Google bloqueia o login neste navegador. Abra o Salvô! no Safari ou Chrome para entrar com Google.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = window.location.href;
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(url).then(() => alert("Link copiado! Cole no Safari ou Chrome."));
+                      } else {
+                        alert(`Copie esse link e abra no Safari ou Chrome:\n\n${url}`);
+                      }
+                    }}
+                    style={{
+                      alignSelf: "flex-start", fontSize: 12, fontWeight: 700,
+                      padding: "6px 12px", borderRadius: 8,
+                      background: "rgba(255,200,50,0.14)", border: "1px solid rgba(255,200,50,0.3)",
+                      color: "rgba(255,220,80,0.95)", cursor: "pointer"
+                    }}
+                  >
+                    Copiar link
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={handleGoogle}
+                  style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", color: "#111", fontSize: 14, fontWeight: 700, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 16, transition: "opacity .2s,transform .15s", letterSpacing: "-0.01em" }}
+                  onMouseEnter={(event) => { event.currentTarget.style.opacity = ".91"; event.currentTarget.style.transform = "scale(1.01)"; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.opacity = "1"; event.currentTarget.style.transform = "scale(1)"; }}
+                >
+                  <svg width={17} height={17} viewBox="0 0 18 18">
+                    <path d="M17.64 9.2a10.34 10.34 0 0 0-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92A8.78 8.78 0 0 0 17.64 9.2z" fill="#4285F4" />
+                    <path d="M9 18a8.6 8.6 0 0 0 5.96-2.18l-2.92-2.26a5.43 5.43 0 0 1-8.07-2.85H.96v2.33A9 9 0 0 0 9 18z" fill="#34A853" />
+                    <path d="M3.97 10.71A5.41 5.41 0 0 1 3.69 9c0-.59.1-1.17.28-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.04l3.01-2.33z" fill="#FBBC05" />
+                    <path d="M9 3.58a4.86 4.86 0 0 1 3.44 1.35l2.58-2.58A8.64 8.64 0 0 0 9 0 9 9 0 0 0 .96 4.96l3.01 2.33A5.36 5.36 0 0 1 9 3.58z" fill="#EA4335" />
+                  </svg>
+                  Continuar com Google
+                </button>
+              )}
 
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <div style={{ flex: 1, height: "0.5px", background: "rgba(255,255,255,0.08)" }} />
