@@ -17,6 +17,16 @@ import type { Goal, GoalType } from "@/lib/types";
 
 const G = "#b8f55a";
 
+function maskBRL(v: string): string {
+  const digits = v.replace(/\D/g, "");
+  if (!digits) return "";
+  return Number(digits).toLocaleString("pt-BR");
+}
+
+function parseBRL(v: string): number {
+  return Number(v.replace(/\./g, "").replace(",", ".")) || 0;
+}
+
 const GOAL_META: Record<GoalType, { label: string; icon: React.ReactNode; color: string }> = {
   reserva:     { label: "Reserva de emergência", icon: <Shield size={16} />,     color: "#60a5fa" },
   viagem:      { label: "Viagem",                icon: <Plane size={16} />,       color: "#f472b6" },
@@ -381,9 +391,9 @@ function AddGoalModal({
 }) {
   const [title, setTitle] = useState(initialTitle ?? "");
   const [type, setType]   = useState<GoalType>(initialType ?? "reserva");
-  const [target, setTarget]       = useState(initialTarget ?? "");
+  const [target, setTarget]       = useState(initialTarget ? maskBRL(initialTarget) : "");
   const [current, setCurrent]     = useState("");
-  const [monthly, setMonthly]     = useState(initialMonthly ?? "");
+  const [monthly, setMonthly]     = useState(initialMonthly ? maskBRL(initialMonthly) : "");
   const [deadline, setDeadline]   = useState(initialPrazoMeses ? prazoToDeadline(initialPrazoMeses) : "");
   const [saving, setSaving]       = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -392,16 +402,16 @@ function AddGoalModal({
     user.displayName || user.email?.split("@")[0] || "Usuário";
 
   const handleSave = async () => {
-    if (!title.trim() || !target || Number(target) <= 0) return;
+    if (!title.trim() || !target || parseBRL(target) <= 0) return;
     setSaving(true);
     setSaveError("");
     try {
       await addDoc(collection(db, "workspaces", workspaceId, "goals"), {
         title: title.trim(),
         type,
-        targetAmount: Number(target),
-        currentAmount: Number(current) || 0,
-        monthlyContribution: Number(monthly) || 0,
+        targetAmount: parseBRL(target),
+        currentAmount: parseBRL(current),
+        monthlyContribution: parseBRL(monthly),
         deadline: deadline || null,
         status: "active",
         createdBy: user.uid,
@@ -485,21 +495,21 @@ function AddGoalModal({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
               <label style={LABEL}>Valor da meta (R$)</label>
-              <input type="number" min="0" step="100" style={INPUT} value={target}
-                onChange={(e) => setTarget(e.target.value)} placeholder="50.000" />
+              <input type="text" inputMode="numeric" style={INPUT} value={target}
+                onChange={(e) => setTarget(maskBRL(e.target.value))} placeholder="50.000" />
             </div>
             <div>
               <label style={LABEL}>Já tenho (R$)</label>
-              <input type="number" min="0" step="100" style={INPUT} value={current}
-                onChange={(e) => setCurrent(e.target.value)} placeholder="0" />
+              <input type="text" inputMode="numeric" style={INPUT} value={current}
+                onChange={(e) => setCurrent(maskBRL(e.target.value))} placeholder="0" />
             </div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
               <label style={LABEL}>Poupo por mês (R$)</label>
-              <input type="number" min="0" step="50" style={INPUT} value={monthly}
-                onChange={(e) => setMonthly(e.target.value)} placeholder="1.000" />
+              <input type="text" inputMode="numeric" style={INPUT} value={monthly}
+                onChange={(e) => setMonthly(maskBRL(e.target.value))} placeholder="1.000" />
             </div>
             <div>
               <label style={LABEL}>Prazo (opcional)</label>
@@ -515,12 +525,12 @@ function AddGoalModal({
           )}
           <button
             onClick={handleSave}
-            disabled={saving || !title.trim() || !target || Number(target) <= 0}
+            disabled={saving || !title.trim() || !target || parseBRL(target) <= 0}
             style={{
               marginTop: 4, background: G, color: "#000", border: "none",
               borderRadius: 9, padding: "11px", fontSize: 14, fontWeight: 800,
               cursor: saving ? "wait" : "pointer",
-              opacity: !title.trim() || !target || Number(target) <= 0 ? 0.4 : 1
+              opacity: !title.trim() || !target || parseBRL(target) <= 0 ? 0.4 : 1
             }}
           >
             {saving ? "Salvando..." : "Criar meta"}
@@ -547,7 +557,7 @@ function DepositModal({
   const meta = GOAL_META[goal.type];
 
   const handleDeposit = async () => {
-    const v = Number(amount);
+    const v = parseBRL(amount);
     if (!v || v <= 0) return;
     setSaving(true);
     try {
@@ -565,7 +575,7 @@ function DepositModal({
   };
 
   const remaining = Math.max(0, goal.targetAmount - goal.currentAmount);
-  const afterDeposit = Number(amount) > 0 ? goal.currentAmount + Number(amount) : null;
+  const afterDeposit = parseBRL(amount) > 0 ? goal.currentAmount + parseBRL(amount) : null;
   const pctAfter = afterDeposit !== null
     ? Math.min(100, Math.round((afterDeposit / goal.targetAmount) * 100))
     : null;
@@ -603,8 +613,8 @@ function DepositModal({
             Quanto você depositou? (R$)
           </label>
           <input
-            type="number" min="0" step="50" autoFocus
-            value={amount} onChange={(e) => setAmount(e.target.value)}
+            type="text" inputMode="numeric" autoFocus
+            value={amount} onChange={(e) => setAmount(maskBRL(e.target.value))}
             onKeyDown={(e) => e.key === "Enter" && handleDeposit()}
             placeholder={formatCurrency(remaining).replace("R$ ", "").replace(".", "").replace(",", ".")}
             style={{
