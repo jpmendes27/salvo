@@ -1692,19 +1692,9 @@ function WorkspaceApp({
           <p style={{ fontSize: 38, fontWeight: 900, letterSpacing: "-0.04em", color: summary.balance >= 0 ? G : "#ff8080", lineHeight: 1, marginBottom: 4 }}>
             {formatCurrency(summary.balance)}
           </p>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.32)", marginBottom: summary.accountExpense > 0 || summary.cardExpense > 0 ? 6 : 16 }}>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.32)", marginBottom: 16 }}>
             {monthLabel(showDemo ? "2026-04" : monthKey)}
           </p>
-          {(summary.accountExpense > 0 || summary.cardExpense > 0) && (
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-              {summary.accountExpense > 0 && (
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>🏦 {formatCurrency(summary.accountExpense)} em conta</span>
-              )}
-              {summary.cardExpense > 0 && (
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>💳 {formatCurrency(summary.cardExpense)} no cartão</span>
-              )}
-            </div>
-          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {(() => {
               const prevMonthShort = (() => { const [y, m] = prevMonthKey.split("-").map(Number); return `${["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][m-1]}/${String(y).slice(2)}`; })();
@@ -1726,7 +1716,10 @@ function WorkspaceApp({
                     arrowColor: mobExpenseChange <= 0 ? G : "#ff8080",
                     pct: `${Math.abs(mobExpenseChange).toFixed(1)}%`,
                     ctx: `vs ${formatCurrency(mobPrevExpense)} ${prevMonthShort}`
-                  } : null
+                  } : null,
+                  plain: summary.accountExpense > 0 && summary.cardExpense > 0
+                    ? `🏦 ${formatCurrency(summary.accountExpense)} · 💳 ${formatCurrency(summary.cardExpense)}`
+                    : undefined
                 },
                 {
                   label: "Economia", value: summary.savingsRate !== null ? `${summary.savingsRate.toFixed(0)}%` : "—", color: G,
@@ -2645,6 +2638,11 @@ function BalanceHeader({
               -{formatCurrency(summary.expense)}
             </p>
             <MoMBadge current={summary.expense} prev={prevExpense} prevMonthKey={prevMonthKey} positiveWhenUp={false} hasData={prevExpense > 0} />
+            {summary.accountExpense > 0 && summary.cardExpense > 0 && (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginTop: 4 }}>
+                🏦 {formatCurrency(summary.accountExpense)} · 💳 {formatCurrency(summary.cardExpense)}
+              </p>
+            )}
           </div>
           {summary.savingsRate !== null && summary.savingsRate > 0 && (
             <div>
@@ -2657,16 +2655,6 @@ function BalanceHeader({
           )}
         </div>
       </div>
-      {(summary.accountExpense > 0 || summary.cardExpense > 0) && (
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 14 }}>
-          {summary.accountExpense > 0 && (
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>🏦 {formatCurrency(summary.accountExpense)} em conta</span>
-          )}
-          {summary.cardExpense > 0 && (
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>💳 {formatCurrency(summary.cardExpense)} no cartão</span>
-          )}
-        </div>
-      )}
     </div>
   );
 }
