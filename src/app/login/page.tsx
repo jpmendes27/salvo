@@ -202,6 +202,11 @@ function AuthScreen() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  // Fire sign_up_started when user enters signup mode (not on initial signin mount)
+  useEffect(() => {
+    if (mode === "signup") track("sign_up_started");
+  }, [mode]);
   // Hide Google Sign-In in any PWA standalone mode (iOS or Android) —
   // OAuth redirect/popup is broken in standalone due to storage isolation.
   const [isPWA] = useState(() =>
@@ -336,7 +341,7 @@ function AuthScreen() {
       const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
       track(isNew ? "sign_up" : "login", { method: "google" });
     } catch (err: unknown) {
-      const code = (err as { code?: string })?.code ?? "";
+      const code = (err as { code?: string })?.code ?? "unknown";
       // If Firebase itself signals popup/storage failure on mobile, try redirecting to
       // the system browser as a last resort (same redirect the page-load IAB check uses).
       if (isMobile && (code === "auth/popup-blocked" || code === "auth/web-storage-unsupported")) {
@@ -348,6 +353,7 @@ function AuthScreen() {
         }
         return;
       }
+      track("login_error", { method: "google", error_code: code });
       setError(errorMessage(err));
     } finally {
       setBusy(false);
@@ -377,6 +383,8 @@ function AuthScreen() {
         track("sign_up", { method: "email" });
         window.location.replace(`${BASE}/verify`);
       } catch (err) {
+        const code = (err as { code?: string })?.code ?? "unknown";
+        track("sign_up_error", { method: "email", error_code: code });
         setError(errorMessage(err));
         setBusy(false);
       }
@@ -389,6 +397,8 @@ function AuthScreen() {
       await signInWithEmailAndPassword(auth, email, password);
       track("login", { method: "email" });
     } catch (err) {
+      const code = (err as { code?: string })?.code ?? "unknown";
+      track("login_error", { method: "email", error_code: code });
       setError(errorMessage(err));
       setBusy(false);
     }

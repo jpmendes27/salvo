@@ -98,6 +98,10 @@ function OnboardingFlow({ user }: { user: User }) {
   const invitePhoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    track("onboarding_started");
+  }, []);
+
+  useEffect(() => {
     if (step === 0) nameRef.current?.focus();
     if (step === 1) cpfRef.current?.focus();
     if (step === 2) incomeRef.current?.focus();

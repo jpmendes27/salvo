@@ -742,7 +742,7 @@ function WorkspaceApp({
   async function handleFiles(files: File[]) {
     setImportState({ phase: "parsing" });
     const ext = files[0]?.name.split(".").pop()?.toLowerCase() ?? "unknown";
-    track("file_import", { file_type: ext, file_count: files.length });
+    track("extrato_import_started", { file_type: ext, file_count: files.length });
     const rows: ParsedWithMeta[] = [];
 
     for (const file of files) {
@@ -908,6 +908,7 @@ function WorkspaceApp({
           });
         }
       } catch (err) {
+        track("extrato_import_error", { stage: "parse", file_type: ext });
         setImportState({
           phase: "preview",
           rows,
@@ -954,6 +955,7 @@ function WorkspaceApp({
         });
       }
       await markReal();
+      track("extrato_import_success", { tx_count: selected.length });
       setImportState(null);
 
     // Reconciliação: detecta faturas de cartão e propõe adicionar ao Plano do mês
@@ -972,6 +974,7 @@ function WorkspaceApp({
       setReconcilePrompt(suggestions.map((s) => ({ ...s, include: true })));
     }
     } catch (err) {
+      track("extrato_import_error", { stage: "save" });
       setImportState({ phase: "preview", rows });
       setError(err instanceof Error ? err.message : "Erro ao salvar transações. Tente de novo.");
     }
