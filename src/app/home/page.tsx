@@ -70,6 +70,7 @@ import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { extractPDFText } from "@/lib/pdf-extract";
 import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
+import { getUserFacingError } from "@/lib/errors";
 import { buildDiagFingerprint, readDiagCache, writeDiagCache, type DiagPayload, type DiagResult } from "@/lib/claude-cache";
 
 type Profile = {
@@ -234,7 +235,7 @@ function AuthenticatedApp({ user }: { user: User }) {
       setLoading(false);
     }
     loadProfile().catch((err) => {
-      setError(errorMessage(err));
+      setError(getUserFacingError(err, "data"));
       setLoading(false);
     });
   }, [user.uid]);
@@ -274,7 +275,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               if (isPermissionDenied(err)) {
                 setWorkspaceInaccessible(true);
               } else {
-                setError(`Nao foi possivel abrir o workspace: ${errorMessage(err)}`);
+                setError(getUserFacingError(err, "data"));
               }
             });
         },
@@ -282,7 +283,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           if (isPermissionDenied(err)) {
             setWorkspaceInaccessible(true);
           } else {
-            setError(`Nao foi possivel validar seu acesso ao workspace: [${(err as {code?:string}).code}] ${errorMessage(err)}`);
+            setError(getUserFacingError(err, "data"));
           }
         }
       )
@@ -350,7 +351,7 @@ function AuthenticatedApp({ user }: { user: User }) {
       await ensureDefaultWorkspace(user, displayName);
       window.location.reload();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(getUserFacingError(err, "data"));
     }
   }
 
@@ -460,16 +461,6 @@ const PARSE_FUNCTION_URL =
   process.env.NEXT_PUBLIC_FUNCTIONS_URL ||
   "https://parsebankstatement-ihalwtxjpq-uc.a.run.app";
 
-// Never expose raw API/internal error text to users.
-// Maps known Cloud Function error shapes to a friendly Portuguese message.
-function friendlyImportError(errJson: Record<string, unknown>, filename: string): string {
-  const raw = typeof errJson.error === "string" ? errJson.error : JSON.stringify(errJson.error ?? "");
-  if (/credit balance|billing|upgrade|Anthropic API|invalid_request_error/i.test(raw)) {
-    return "Não foi possível processar o arquivo agora. Tente novamente em alguns minutos.";
-  }
-  if (typeof errJson.error === "string" && errJson.error.length < 120) return errJson.error;
-  return `Não conseguimos ler o arquivo "${filename}". Verifique se é um extrato válido e tente de novo.`;
-}
 
 const SEND_EMAIL_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_EMAIL_URL ||
@@ -633,7 +624,7 @@ function WorkspaceApp({
             setTimeout(() => { if (!cancelled) subscribe(); }, 300 * attempt);
             return;
           }
-          if (code !== "permission-denied") setError(errorMessage(err));
+          if (code !== "permission-denied") setError(getUserFacingError(err, "data"));
           setTxLoading(false);
         }
       );
@@ -671,7 +662,7 @@ function WorkspaceApp({
           .sort((a, b) => a.dueDay - b.dueDay || a.title.localeCompare(b.title));
         setPlannedItems(items);
       },
-      (err) => { if ((err as { code?: string }).code !== "permission-denied") setError(errorMessage(err)); }
+      (err) => { if ((err as { code?: string }).code !== "permission-denied") setError(getUserFacingError(err, "data")); }
     );
   }, [monthKey, showDemo, workspace.id]);
 
@@ -688,7 +679,7 @@ function WorkspaceApp({
     return onSnapshot(
       q,
       (snap) => setRecurringItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RecurringItem)),
-      (err) => { if ((err as { code?: string }).code !== "permission-denied") setError(errorMessage(err)); }
+      (err) => { if ((err as { code?: string }).code !== "permission-denied") setError(getUserFacingError(err, "data")); }
     );
   }, [showDemo, workspace.id]);
 
@@ -773,8 +764,7 @@ function WorkspaceApp({
               body: JSON.stringify({ textData: text, mimeType: "text/csv", filename: file.name })
             });
             if (!resp.ok) {
-              const errJson = await resp.json().catch(() => ({}));
-              throw new Error(friendlyImportError(errJson, file.name));
+              throw new Error(await resp.text().catch(() => resp.statusText));
             }
             const data = await resp.json();
             const csvLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
@@ -834,8 +824,7 @@ function WorkspaceApp({
                 })
               });
               if (!resp.ok) {
-                const errJson = await resp.json().catch(() => ({}));
-                throw new Error(friendlyImportError(errJson, file.name));
+                throw new Error(await resp.text().catch(() => resp.statusText));
               }
               const data = await resp.json();
               const claudeLabel: string = data.sourceLabel ? normalizeSourceLabel(data.sourceLabel) : bankLabel;
@@ -868,8 +857,7 @@ function WorkspaceApp({
               })
             });
             if (!resp.ok) {
-              const errJson = await resp.json().catch(() => ({}));
-              throw new Error(friendlyImportError(errJson, file.name));
+              throw new Error(await resp.text().catch(() => resp.statusText));
             }
             const data = await resp.json();
             const claudeLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
@@ -897,8 +885,7 @@ function WorkspaceApp({
             body: JSON.stringify({ fileData: base64, mimeType: mime })
           });
           if (!resp.ok) {
-            const errJson = await resp.json().catch(() => ({}));
-            throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+            throw new Error(await resp.text().catch(() => resp.statusText));
           }
           const data = await resp.json();
           const imageLabel: string = normalizeSourceLabel(data.sourceLabel || "Comprovante");
@@ -923,7 +910,7 @@ function WorkspaceApp({
         setImportState({
           phase: "preview",
           rows,
-          error: `Erro em ${file.name}: ${errorMessage(err)}`
+          error: getUserFacingError(err, "import")
         });
         return;
       }
@@ -987,7 +974,7 @@ function WorkspaceApp({
     } catch (err) {
       track("extrato_import_error", { stage: "save" });
       setImportState({ phase: "preview", rows });
-      setError(err instanceof Error ? err.message : "Erro ao salvar transações. Tente de novo.");
+      setError(getUserFacingError(err, "import"));
     }
   }
 
@@ -1026,7 +1013,7 @@ function WorkspaceApp({
       const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
       setInviteLink(`${window.location.origin}${basePath}/convite?token=${token}`);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(getUserFacingError(err, "data"));
     }
   }
 
@@ -1103,6 +1090,7 @@ function WorkspaceApp({
   // Diagnosis state — shared between mobile view and InsightsView (desktop)
   const [sharedAiDiag, setSharedAiDiag] = useState<DiagResult | null>(null);
   const [sharedDiagLoading, setSharedDiagLoading] = useState(false);
+  const [sharedDiagError, setSharedDiagError] = useState(false);
   const mobScoreColor = mobScore === null ? G : mobScore >= 8 ? G : mobScore >= 6 ? "#facc15" : "#ff8080";
   const mobScoreRgb = mobScoreColor === G ? "184,245,90" : mobScoreColor === "#facc15" ? "250,204,21" : "255,128,128";
   const mobScoreLabel = mobScore === null ? "—" : mobScore >= 8 ? "Arrasando 💪" : mobScore >= 6 ? "Dá pra melhorar" : "Tá pesado.";
@@ -1153,19 +1141,27 @@ function WorkspaceApp({
     let cancelled = false;
     setSharedDiagLoading(true);
     setSharedAiDiag(null);
+    setSharedDiagError(false);
     fetch(GENERATE_DIAGNOSIS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...payload, monthLabel: monthLabel(effectiveMonthKey) })
     })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
+      .then(async (r) => {
+        if (!r.ok) { const t = await r.text().catch(() => r.statusText); throw new Error(t); }
+        return r.json();
+      })
       .then((data: DiagResult) => {
         if (!cancelled) {
           setSharedAiDiag(data);
           writeDiagCache(workspace.id, effectiveMonthKey, fp, data);
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        // Graceful degradation: log technical error, show soft state in UI — home stays usable
+        getUserFacingError(err, "diagnosis"); // triggers console.error + admin alert if operational
+        if (!cancelled) setSharedDiagError(true);
+      })
       .finally(() => { if (!cancelled) setSharedDiagLoading(false); });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1560,6 +1556,7 @@ function WorkspaceApp({
                   onRendaChange={handleRendaChange}
                   aiDiag={sharedAiDiag}
                   diagLoading={sharedDiagLoading}
+                  diagError={sharedDiagError}
                 />
               )}
             </WsCard>
@@ -2100,7 +2097,7 @@ function WorkspaceApp({
               }
               setReconcilePrompt([]);
             } catch (err) {
-              setError(err instanceof Error ? err.message : "Erro ao salvar. Tente de novo.");
+              setError(getUserFacingError(err, "data"));
             }
           }}
         />
@@ -2821,6 +2818,7 @@ function InsightsView({
   onRendaChange,
   aiDiag,
   diagLoading,
+  diagError = false,
 }: {
   transactions: Transaction[];
   prevTransactions: Transaction[];
@@ -2830,6 +2828,7 @@ function InsightsView({
   onRendaChange: (v: number) => void;
   aiDiag: DiagResult | null;
   diagLoading: boolean;
+  diagError?: boolean;
 }) {
   const router = useRouter();
   const [editingRenda, setEditingRenda] = useState(false);
@@ -2945,6 +2944,7 @@ function InsightsView({
             <p style={{ fontSize: 10.5, color: `rgba(${scoreRgb},0.65)`, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
               Diagnóstico do mês
               {diagLoading && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: `rgba(${scoreRgb},0.5)`, animation: "pulse 1.2s ease-in-out infinite" }} />}
+              {diagError && !diagLoading && !aiDiag && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>não carregou agora</span>}
             </p>
             <p style={{ fontSize: 28, fontWeight: 900, color: scoreColor, letterSpacing: "-0.03em", marginBottom: 10, lineHeight: 1.1 }}>
               {aiDiag?.scoreLabel ?? scoreLabel}
@@ -4906,7 +4906,7 @@ function InviteContactModal({
         if (!resp.ok || data.error) throw new Error(data.error || "Falha ao enviar.");
         setSent(true);
       } catch (e) {
-        setErr(e instanceof Error ? e.message : "Erro ao enviar mensagem.");
+        setErr(getUserFacingError(e, "data"));
       } finally {
         setSending(false);
       }
@@ -4927,7 +4927,7 @@ function InviteContactModal({
         if (!resp.ok || data.error) throw new Error(data.error || "Falha ao enviar.");
         setSent(true);
       } catch (e) {
-        setErr(e instanceof Error ? e.message : "Erro ao enviar email.");
+        setErr(getUserFacingError(e, "data"));
       } finally {
         setSending(false);
       }
@@ -5094,10 +5094,7 @@ async function ensureDefaultWorkspace(user: User, displayName: string): Promise<
   return workspaceRef.id;
 }
 
-function errorMessage(err: unknown) {
-  if (err instanceof Error) return err.message;
-  return "Algo saiu do eixo. Tente de novo.";
-}
+// Removed local errorMessage — all error mapping goes through getUserFacingError in src/lib/errors.ts
 
 function isPermissionDenied(err: unknown): boolean {
   const e = err as { code?: string; message?: string };

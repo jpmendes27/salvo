@@ -6,6 +6,7 @@ import { ArrowRight, Mail, MessageCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { auth, db } from "@/lib/firebase";
 import { track } from "@/lib/analytics";
+import { getUserFacingError } from "@/lib/errors";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const G = "#b8f55a";
@@ -92,7 +93,7 @@ function VerifyFlow({ user, phone }: { user: User; phone: string }) {
       setCountdown(60);
       track("email_confirmation_sent", { channel: ch });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao enviar código");
+      setError(getUserFacingError(err, "verify"));
       setChannel(null);
     } finally {
       setBusy(false);
@@ -116,7 +117,7 @@ function VerifyFlow({ user, phone }: { user: User; phone: string }) {
       track("email_confirmation_completed");
       window.location.replace(`${BASE}/onboarding`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Código inválido");
+      setError(getUserFacingError(err, "verify"));
       setBusy(false);
     }
   }

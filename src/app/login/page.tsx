@@ -33,6 +33,7 @@ function maskPhone(value: string): string {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 }
 import { track } from "@/lib/analytics";
+import { getUserFacingError } from "@/lib/errors";
 
 const G = "#b8f55a";
 const G_10 = "rgba(184,245,90,0.10)";
@@ -354,7 +355,7 @@ function AuthScreen() {
         return;
       }
       track("login_error", { method: "google", error_code: code });
-      setError(errorMessage(err));
+      setError(getUserFacingError(err, "login"));
     } finally {
       setBusy(false);
     }
@@ -385,7 +386,7 @@ function AuthScreen() {
       } catch (err) {
         const code = (err as { code?: string })?.code ?? "unknown";
         track("sign_up_error", { method: "email", error_code: code });
-        setError(errorMessage(err));
+        setError(getUserFacingError(err, "signup"));
         setBusy(false);
       }
       return;
@@ -399,14 +400,14 @@ function AuthScreen() {
     } catch (err) {
       const code = (err as { code?: string })?.code ?? "unknown";
       track("login_error", { method: "email", error_code: code });
-      setError(errorMessage(err));
+      setError(getUserFacingError(err, "login"));
       setBusy(false);
     }
   }
 
   async function handleReset() {
     if (!email) {
-      setError("Digite seu e-mail para receber a recuperacao de senha.");
+      setError("Digita o teu e-mail pra a gente mandar o link de recuperação.");
       return;
     }
     setError("");
@@ -414,9 +415,9 @@ function AuthScreen() {
     setBusy(true);
     try {
       await sendPasswordResetEmail(auth, email);
-      setMessage("Enviamos o link de recuperacao para seu e-mail.");
+      setMessage("Pronto! Mandamos o link pro teu e-mail.");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(getUserFacingError(err, "login"));
     } finally {
       setBusy(false);
     }
@@ -692,29 +693,7 @@ function FincheckLoader() {
   );
 }
 
-function errorMessage(err: unknown) {
-  const code = (err as { code?: string })?.code ?? "";
-  switch (code) {
-    case "auth/invalid-credential":
-    case "auth/wrong-password":
-    case "auth/user-not-found":
-    case "auth/invalid-login-credentials":
-      return "E-mail ou senha incorretos.";
-    case "auth/email-already-in-use":
-      return "Não foi possível criar conta com este e-mail.";
-    case "auth/weak-password":
-      return "Senha fraca. Use pelo menos 8 dígitos numéricos.";
-    case "auth/invalid-email":
-      return "E-mail inválido.";
-    case "auth/too-many-requests":
-      return "Muitas tentativas. Aguarde alguns minutos e tente de novo.";
-    case "auth/popup-closed-by-user":
-    case "auth/cancelled-popup-request":
-      return "";
-    default:
-      return "Algo saiu do eixo. Tente de novo.";
-  }
-}
+// Removed local errorMessage — all error mapping goes through getUserFacingError in src/lib/errors.ts
 
 export default function LoginPage() {
   // mounted guard: server renders nothing; initial client render also nothing.

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "./auth-provider";
 import { AnalyticsTracker } from "@/components/analytics-tracker";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -58,7 +59,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         )}
       </head>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <ErrorBoundary>
+          <AuthProvider>{children}</AuthProvider>
+        </ErrorBoundary>
         <AnalyticsTracker />
       </body>
     </html>

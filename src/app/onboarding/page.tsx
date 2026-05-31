@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { auth, db } from "@/lib/firebase";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { track } from "@/lib/analytics";
+import { getUserFacingError } from "@/lib/errors";
 import { maskBRL, parseBRL } from "@/lib/money";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -199,7 +200,7 @@ function OnboardingFlow({ user }: { user: User }) {
       await createWorkspace();
       setStep(3);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");
+      setError(getUserFacingError(err, "onboarding"));
     } finally {
       setBusy(false);
     }
@@ -212,7 +213,7 @@ function OnboardingFlow({ user }: { user: User }) {
       const wsId = await createWorkspace();
       await goHome(wsId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");
+      setError(getUserFacingError(err, "onboarding"));
       setBusy(false);
     }
   }
@@ -250,7 +251,7 @@ function OnboardingFlow({ user }: { user: User }) {
       }
       await goHome(wsId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Algo deu errado. Tente de novo.");
+      setError(getUserFacingError(err, "onboarding"));
       setBusy(false);
     }
   }
