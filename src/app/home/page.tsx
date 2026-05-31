@@ -460,6 +460,17 @@ const PARSE_FUNCTION_URL =
   process.env.NEXT_PUBLIC_FUNCTIONS_URL ||
   "https://parsebankstatement-ihalwtxjpq-uc.a.run.app";
 
+// Never expose raw API/internal error text to users.
+// Maps known Cloud Function error shapes to a friendly Portuguese message.
+function friendlyImportError(errJson: Record<string, unknown>, filename: string): string {
+  const raw = typeof errJson.error === "string" ? errJson.error : JSON.stringify(errJson.error ?? "");
+  if (/credit balance|billing|upgrade|Anthropic API|invalid_request_error/i.test(raw)) {
+    return "Não foi possível processar o arquivo agora. Tente novamente em alguns minutos.";
+  }
+  if (typeof errJson.error === "string" && errJson.error.length < 120) return errJson.error;
+  return `Não conseguimos ler o arquivo "${filename}". Verifique se é um extrato válido e tente de novo.`;
+}
+
 const SEND_EMAIL_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_EMAIL_URL ||
   "https://sendinviteemail-ihalwtxjpq-uc.a.run.app";
@@ -763,7 +774,7 @@ function WorkspaceApp({
             });
             if (!resp.ok) {
               const errJson = await resp.json().catch(() => ({}));
-              throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+              throw new Error(friendlyImportError(errJson, file.name));
             }
             const data = await resp.json();
             const csvLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
@@ -824,7 +835,7 @@ function WorkspaceApp({
               });
               if (!resp.ok) {
                 const errJson = await resp.json().catch(() => ({}));
-                throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+                throw new Error(friendlyImportError(errJson, file.name));
               }
               const data = await resp.json();
               const claudeLabel: string = data.sourceLabel ? normalizeSourceLabel(data.sourceLabel) : bankLabel;
@@ -858,7 +869,7 @@ function WorkspaceApp({
             });
             if (!resp.ok) {
               const errJson = await resp.json().catch(() => ({}));
-              throw new Error(errJson.error || `Erro ao processar ${file.name}`);
+              throw new Error(friendlyImportError(errJson, file.name));
             }
             const data = await resp.json();
             const claudeLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
