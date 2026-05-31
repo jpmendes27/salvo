@@ -301,12 +301,48 @@ function AuthScreen() {
 
   async function handleGoogle() {
     setError("");
+
+    // Chrome Custom Tabs (LinkedIn/Twitter/etc. Android) and SFSafariViewController (iOS)
+    // look identical to Chrome/Safari in the UA string, so our page-load IAB check misses them.
+    // Test popups synchronously from this user gesture: CCT/SVC usually block or mis-route
+    // window.open calls, which would make Firebase's signInWithPopup fall back to a broken
+    // redirect flow (the firebaseapp.com handler loses sessionStorage across tab contexts).
+    // If the probe fails → redirect to the real browser now, before touching Firebase at all.
+    const ua = navigator.userAgent;
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+    if (isMobile) {
+      const probe = window.open("about:blank", "_blank", "popup,width=1,height=1,top=0,left=0");
+      const blocked = !probe || probe.closed;
+      if (probe && !probe.closed) probe.close();
+      if (blocked) {
+        const url = window.location.href;
+        if (/Android/i.test(ua)) {
+          window.location.href = `intent://${window.location.host}${window.location.pathname}${window.location.search}#Intent;scheme=https;package=com.android.chrome;end`;
+        } else {
+          window.location.href = url.replace(/^https/, "googlechrome");
+        }
+        return;
+      }
+    }
+
     setBusy(true);
     try {
       const result = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
       const isNew = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
       track(isNew ? "sign_up" : "login", { method: "google" });
-    } catch (err) {
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code ?? "";
+      // If Firebase itself signals popup/storage failure on mobile, try redirecting to
+      // the system browser as a last resort (same redirect the page-load IAB check uses).
+      if (isMobile && (code === "auth/popup-blocked" || code === "auth/web-storage-unsupported")) {
+        const url = window.location.href;
+        if (/Android/i.test(ua)) {
+          window.location.href = `intent://${window.location.host}${window.location.pathname}${window.location.search}#Intent;scheme=https;package=com.android.chrome;end`;
+        } else {
+          window.location.href = url.replace(/^https/, "googlechrome");
+        }
+        return;
+      }
       setError(errorMessage(err));
     } finally {
       setBusy(false);
