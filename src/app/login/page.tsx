@@ -40,6 +40,11 @@ const G_20 = "rgba(184,245,90,0.18)";
 const G_30 = "rgba(184,245,90,0.28)";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
+// TEMPORARY: Google auth disabled — auth/missing-initial-state on iOS (WebKit/CCT storage
+// partitioning breaks the firebaseapp.com OAuth handler). Re-enable once fixed.
+// Implementation lives in: handleGoogle(), isInAppBrowser detection, and the JSX block below.
+const GOOGLE_AUTH_ENABLED = false;
+
 function GlassCard({
   children,
   style = {},
@@ -487,7 +492,7 @@ function AuthScreen() {
             Comece em menos de 1 minuto
           </p>
 
-          {!isPWA && (
+          {GOOGLE_AUTH_ENABLED && !isPWA && (
             <>
               {isInAppBrowser ? (
                 <div style={{
