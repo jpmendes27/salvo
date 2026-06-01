@@ -41,10 +41,12 @@ function isOperational(raw: string): boolean {
   return OPERATIONAL.test(raw);
 }
 
-// ─── Admin alert via Resend ───────────────────────────────────────────────────
-// Requires NEXT_PUBLIC_RESEND_KEY and NEXT_PUBLIC_RESEND_FROM in .env.local.
+// ─── Admin alert via Cloud Function ──────────────────────────────────────────
+// Calls the sendAdminAlert Cloud Function, which uses the RESEND_API_KEY
+// already configured in Firebase Secret Manager — chave nunca fica no browser.
 // Throttled to 1 alert per 15 min per context (localStorage).
 
+const ALERT_URL = process.env.NEXT_PUBLIC_ADMIN_ALERT_URL;
 const ALERT_TTL = 15 * 60 * 1000;
 
 function shouldAlert(context: ErrorContext): boolean {
@@ -58,32 +60,13 @@ function shouldAlert(context: ErrorContext): boolean {
 }
 
 async function adminAlert(raw: string, context: ErrorContext): Promise<void> {
-  const apiKey = process.env.NEXT_PUBLIC_RESEND_KEY;
-  const from   = process.env.NEXT_PUBLIC_RESEND_FROM;
-  if (!apiKey || !from) return; // not configured → skip silently
-  if (!shouldAlert(context)) return;
-
-  const requestId = raw.match(/"request_id":"([^"]+)"/)?.[1] ?? "—";
-
+  if (!ALERT_URL || !shouldAlert(context)) return;
+  const requestId = raw.match(/"request_id":"([^"]+)"/)?.[1];
   try {
-    await fetch("https://api.resend.com/emails", {
+    await fetch(ALERT_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        from,
-        to: "salvo@jpmendes.com",
-        subject: `[Salvô! 🚨] Erro operacional — ${context}`,
-        html: [
-          `<p><b>Contexto:</b> ${context}</p>`,
-          `<p><b>Erro (truncado):</b> ${raw.slice(0, 500)}</p>`,
-          `<p><b>Request ID:</b> ${requestId}</p>`,
-          `<p><b>Timestamp:</b> ${new Date().toISOString()}</p>`,
-          `<p style="color:#888;font-size:12px">Nenhum dado pessoal ou financeiro incluído.</p>`,
-        ].join(""),
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ errorType: "operational", raw: raw.slice(0, 600), context, requestId }),
     });
   } catch { /* alert must never crash the app */ }
 }

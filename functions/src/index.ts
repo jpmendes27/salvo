@@ -950,3 +950,73 @@ export const requestAccountDeletion = onRequest(
     }
   }
 );
+
+export const sendAdminAlert = onRequest(
+  {
+    cors: true,
+    secrets: ["RESEND_API_KEY"],
+    maxInstances: 5,
+    timeoutSeconds: 15,
+    memory: "128MiB",
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
+
+    const { errorType, raw, context, requestId } = req.body as {
+      errorType?: string;
+      raw?: string;
+      context?: string;
+      requestId?: string;
+    };
+
+    if (!errorType || !raw || !context) {
+      res.status(400).json({ error: "Missing required fields" });
+      return;
+    }
+
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) { res.status(500).json({ error: "RESEND_API_KEY not configured" }); return; }
+
+    const resend = new Resend(apiKey);
+    const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
+    try {
+      await resend.emails.send({
+        from: "Salvô! <salvo@jpmendes.com>",
+        to: ["salvo@jpmendes.com"],
+        subject: `[Salvô! 🚨] Erro operacional — ${context}`,
+        html: `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"></head>
+<body style="font-family:monospace;background:#09090b;color:#e0e0e0;padding:32px;max-width:560px;margin:0 auto">
+  <p style="font-size:13px;color:#ff5c5c;font-weight:700;margin:0 0 20px">[SALVÔ!] ERRO OPERACIONAL</p>
+  <hr style="border:none;border-top:1px solid #333;margin:20px 0"/>
+  <table style="font-size:13px;line-height:2;border-collapse:collapse">
+    <tr><td style="color:#999;padding-right:16px">Tipo:</td><td>${errorType}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Contexto:</td><td>${context}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Request ID:</td><td>${requestId || "—"}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Data:</td><td>${now}</td></tr>
+  </table>
+  <hr style="border:none;border-top:1px solid #333;margin:20px 0"/>
+  <p style="font-size:12px;color:#999;margin:0 0 8px">Erro (truncado):</p>
+  <pre style="font-size:11px;color:#ccc;background:#111;padding:12px;border-radius:6px;overflow:auto;white-space:pre-wrap">${raw.slice(0, 600)}</pre>
+  <p style="font-size:11px;color:#555;margin:20px 0 0">Nenhum dado pessoal ou financeiro incluído neste alerta.</p>
+</body>
+</html>`,
+      });
+      res.json({ success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("sendAdminAlert error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  }
+);
