@@ -1,5 +1,7 @@
 import type { ParsedTransaction } from "./parsers";
 import { categorizeTransaction, detectCardSuffix, sourceLabelFromFilename } from "./parsers";
+import { isMercadoPago } from "./import/adapters/mercado-pago";
+import { runPipeline, pipelineResultToTransactions } from "./import/pipeline";
 
 // ─── Date / value utilities ────────────────────────────────────────────────────
 
@@ -335,6 +337,32 @@ export function parseBankText(
   opts: ParseBankTextOptions = {}
 ): ParseBankTextResult {
   const { filename = "" } = opts;
+
+  // ── Route Mercado Pago through the new pipeline ───────────────────────────
+  // MP has a specific column layout (Data|Descrição|ID|Valor|Saldo) that the
+  // generic parsers get wrong: they pick the Saldo as the amount instead of
+  // the Valor. The pipeline adapter handles sign, ID extraction, and
+  // reconciliation correctly.
+  if (isMercadoPago(text, filename)) {
+    const refYear = opts.refYear ?? detectDocumentYear(text);
+    const result = runPipeline(text, filename, refYear);
+    if (result.warnings.length > 0) {
+      console.warn("[salvo:import:mp]", result.warnings.join(" | "));
+    }
+    const transactions = pipelineResultToTransactions(result);
+    // Deduplicate
+    const seen = new Set<string>();
+    return {
+      transactions: transactions.filter((r) => {
+        if (seen.has(r.dedupKey)) return false;
+        seen.add(r.dedupKey);
+        return true;
+      }),
+      sourceLabel: result.sourceLabel,
+    };
+  }
+
+  // ── Existing parsers for all other banks ─────────────────────────────────
   const refYear = opts.refYear ?? detectDocumentYear(text);
   const bank = detectBank(text, filename);
   const lines = text.split(/\n/);
