@@ -107,7 +107,7 @@ export default function HomePage() {
     }
   }, [authLoading, user]);
 
-  if (authLoading || !user) return <FincheckLoader />;
+  if (authLoading || !user) return <SalvoLoader />;
   return <AuthenticatedApp user={user} />;
 }
 
@@ -372,7 +372,7 @@ function AuthenticatedApp({ user }: { user: User }) {
 
   if (!profile?.acceptedTermsVersion) {
     window.location.replace(`${BASE}/onboarding`);
-    return <FincheckLoader />;
+    return <SalvoLoader />;
   }
 
   if (!workspaces.length) {
@@ -5022,10 +5022,10 @@ function InviteContactModal({
 }
 
 function CenteredStatus({ text: _ }: { text: string }) {
-  return <FincheckLoader />;
+  return <SalvoLoader />;
 }
 
-function FincheckLoader() {
+function SalvoLoader() {
   const RINGS = [160, 118, 82, 48] as const;
   return (
     <div style={{ minHeight: "100vh", background: "#050505", display: "flex", alignItems: "center", justifyContent: "center" }}>

@@ -658,7 +658,7 @@ function AuthScreen() {
 }
 
 
-function FincheckLoader() {
+function SalvoLoader() {
   const RINGS = [160, 118, 82, 48] as const;
   return (
     <div style={{ minHeight: "100vh", background: "#050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -776,6 +776,6 @@ export default function LoginPage() {
   }, []);
 
   if (!mounted) return null;
-  if (!ready) return <FincheckLoader />;
+  if (!ready) return <SalvoLoader />;
   return <AuthScreen />;
 }
