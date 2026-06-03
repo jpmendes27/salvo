@@ -35,7 +35,7 @@ function extractRaw(err: unknown): string {
 }
 
 // Patterns that indicate the error is our problem (infra/billing), not the user's
-const OPERATIONAL = /credit.?balance|billing|upgrade.*credits|invalid.?api.?key|authentication_error|invalid_request_error|overloaded|rate.?limit|anthropic/i;
+const OPERATIONAL = /credit.?balance|billing|upgrade.*credits|invalid.?api.?key|authentication_error|invalid_request_error|overloaded|rate.?limit|anthropic|timeout|504|abort|oom|out.?of.?memory/i;
 
 function isOperational(raw: string): boolean {
   return OPERATIONAL.test(raw);

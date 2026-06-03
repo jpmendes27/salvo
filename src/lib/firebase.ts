@@ -1,4 +1,5 @@
 import { initializeApp, getApps } from "firebase/app";
+import { getStorage } from "firebase/storage";
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
@@ -38,6 +39,7 @@ export const auth: Auth = typeof window !== "undefined"
 
 export { app };
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });

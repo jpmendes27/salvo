@@ -1,4 +1,5 @@
 import { onCall, onRequest } from "firebase-functions/v2/https";
+import { onObjectFinalized } from "firebase-functions/v2/storage";
 import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
 import crypto from "crypto";
@@ -38,47 +39,91 @@ Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras 
 
 {
   "sourceLabel": "string",
+  "initialBalance": number | null,
+  "finalBalance": number | null,
   "transactions": [
     {
       "date": "YYYY-MM-DD",
       "description": "string",
       "amount": number,
-      "type": "income" | "expense"
+      "type": "income" | "expense",
+      "category": "string",
+      "classification": "ENTRADA" | "SAIDA" | "IGNORAR",
+      "balance": number | null
     }
   ]
 }
 
-Regras para sourceLabel — CRÍTICO seguir exatamente:
+=== REGRAS PARA sourceLabel ===
 - Fatura de cartão de crédito COM últimos 4 dígitos visíveis: "Cartão [Banco] [4 dígitos]"
-  Exemplos: "Cartão Nubank 1234", "Cartão Itaú 5678", "Cartão Bradesco 9012"
+  Exemplos: "Cartão Nubank 1234", "Cartão Itaú 5678"
 - Fatura de cartão SEM dígitos visíveis: "Cartão [Banco]"
-  Exemplos: "Cartão Santander", "Cartão Caixa"
 - Extrato / conta corrente / conta digital / poupança: apenas o nome do banco
-  Exemplos: "Nubank", "Inter", "Bradesco", "Caixa"
+  Exemplos: "Nubank", "Inter", "Mercado Pago"
 - Carteira digital: nome da carteira — "PicPay", "Mercado Pago"
-- NUNCA inclua datas, períodos, números de agência ou conta no sourceLabel
-- SEMPRE tente extrair os últimos 4 dígitos do cartão — aparecem como •••• 1234, **** 1234, "final 1234", "terminado em 1234" ou similares
-- "extrato" no documento → é conta, não cartão → label = só nome do banco
+- NUNCA inclua datas, períodos, números de agência ou conta
+- SEMPRE tente extrair os últimos 4 dígitos do cartão (aparecem como •••• 1234, **** 1234, "final 1234")
 - Se não conseguir identificar o banco: "Importação"
 
-Regras para transações:
-- Débitos, saídas, compras, tarifas, IOF = "expense"
-- Créditos, entradas, depósitos, PIX recebidos = "income"
-- NÃO inclua: pagamentos de fatura, saldo anterior, saldo restante, crédito de atraso, encerramento de dívida, totais, limites — essas são linhas contábeis, não transações reais
+=== REGRAS PARA initialBalance e finalBalance ===
+- Extraia os saldos inicial e final do cabeçalho ou resumo do documento
+- Use o valor numérico exato, sem símbolo de moeda (ex: 25.04, não "R$ 25,04")
+- Use null se não disponível
+
+=== REGRAS PARA classification ===
+- ENTRADA: dinheiro que entrou de fora (salário, PIX recebido, rendimento, reembolso de terceiro real)
+- SAIDA: dinheiro que saiu para fora (compra, pagamento, PIX enviado, transferência para outro banco)
+- IGNORAR: movimento interno que NÃO representa receita nem gasto real:
+  • "Dinheiro reservado" — reserva para pagamento futuro, não saiu de facto
+  • "Dinheiro retirado" — transferência interna entre contas do mesmo banco/carteira
+  • "Reembolso" sem contexto de terceiro — estorno interno do banco
+  • "Estorno" — cancelamento de operação anterior (compensa operação prévia)
+  • Qualquer linha com amount = 0
+
+=== REGRAS PARA balance ===
+- "balance": o saldo APÓS esta transação, conforme a coluna Saldo do documento
+- Use o valor numérico exato (ex: 25.05), sem símbolo de moeda
+- null se a coluna Saldo não estiver disponível
+
+=== REGRAS ESPECÍFICAS: MERCADO PAGO ===
+O extrato do Mercado Pago tem 5 colunas: Data | Descrição | ID da operação | Valor | Saldo
+CRÍTICO — leia com atenção:
+1. O valor da transação vem da coluna VALOR (com sinal). NUNCA use a coluna SALDO como valor.
+2. Sinal da coluna Valor determina o type: "R$ -18,75" → expense; "R$ 18,75" → income.
+   Uma "Transferência enviada IFOOD R$ 18,75" COM VALOR POSITIVO é income (estorno/reembolso).
+3. O ID da operação (sequência de 12+ dígitos isolada) NÃO entra em "description".
+4. CPF/CNPJ dentro de descrições de PIX É parte da description (ex: "João Silva 123.456.789-00").
+5. A coluna Saldo = saldo depois da transação → use em "balance".
+6. "Rendimentos" = ENTRADA (rendimento da conta), type = "income".
+
+=== REGRAS PARA category ===
+Categorias disponíveis: ${IMPORT_CATEGORIES.join(", ")}
+- income/ENTRADA → "Recebimentos" como padrão; outra se claramente identificável
+- expense/SAIDA → categoria mais específica
+- IGNORAR → "Transferencias"
+- Dúvida → "Outros"
+
+=== REGRAS PARA transações ===
+- NÃO inclua: pagamentos de fatura, saldo anterior/restante, crédito de atraso, encerramento de dívida, totais, limites
 - "amount" SEMPRE positivo (ex: 150.00, nunca -150.00)
+- "type": "expense" se a transação reduziu o saldo; "income" se aumentou
 - "date" no formato ISO YYYY-MM-DD
-- "description" deve ser o texto original da transação, sem truncar
-- NÃO inclua campo "category" — isso é processado separadamente
+- "description": texto original da transação, sem truncar
 - Retorne APENAS o JSON puro, sem markdown, sem texto adicional, sem explicação`;
 }
 
 type ParsedClaudeResponse = {
   sourceLabel?: string;
+  initialBalance?: number;
+  finalBalance?: number;
   transactions?: Array<{
     date: string;
     description: string;
-    amount: number;
+    amount: number;           // always positive
     type: "income" | "expense";
+    category?: string;
+    classification?: "ENTRADA" | "SAIDA" | "IGNORAR";
+    balance?: number;         // running balance after this tx (from Saldo column)
   }>;
 };
 
@@ -105,7 +150,7 @@ async function parseOrRepairJson(
       model: "claude-sonnet-4-6",
       max_tokens: 8192,
       system:
-        "Você corrige JSON financeiro. Retorne somente um JSON válido no formato {\"sourceLabel\":\"string\",\"transactions\":[{\"date\":\"YYYY-MM-DD\",\"description\":\"string\",\"amount\":number,\"type\":\"income\"|\"expense\"}]}. Não invente transações.",
+        "Você corrige JSON financeiro. Retorne somente um JSON válido no formato {\"sourceLabel\":\"string\",\"initialBalance\":number|null,\"finalBalance\":number|null,\"transactions\":[{\"date\":\"YYYY-MM-DD\",\"description\":\"string\",\"amount\":number,\"type\":\"income\"|\"expense\",\"category\":\"string\",\"classification\":\"ENTRADA\"|\"SAIDA\"|\"IGNORAR\",\"balance\":number|null}]}. Não invente transações.",
       messages: [
         {
           role: "user",
@@ -129,6 +174,101 @@ async function parseOrRepairJson(
     }
     return JSON.parse(repairedJson) as ParsedClaudeResponse;
   }
+}
+
+// ─── Import job helpers ──────────────────────────────────────────────────────
+
+const IMPORT_CATEGORIES = [
+  "Alimentacao", "Mercado", "Transporte", "Carro", "CartaoCredito",
+  "Assinaturas", "Saude", "Varejo", "Educacao", "Moradia", "Contas",
+  "Seguros", "Taxas", "Emprestimos", "Doacoes", "Transferencias",
+  "Hospedagem", "Viagem", "Lazer", "Recebimentos", "Outros",
+] as const;
+
+// Shared extraction helper — avoids duplicating Claude call logic between
+// parseBankStatement (sync HTTP) and processImportJob (async Storage trigger).
+async function callClaudeExtraction(
+  client: Anthropic,
+  data: string,
+  mimeType: string,
+  filename?: string
+): Promise<ParsedClaudeResponse> {
+  type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  const isImage =
+    mimeType.startsWith("image/") &&
+    ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mimeType);
+  const isPDF = mimeType === "application/pdf";
+  const isText = mimeType === "text/plain" || mimeType === "text/csv";
+
+  if (!isImage && !isPDF && !isText) {
+    throw new Error("Unsupported mimeType: " + mimeType);
+  }
+
+  let content: Anthropic.MessageParam["content"];
+
+  if (isText) {
+    content = [
+      {
+        type: "text",
+        text: `Arquivo: ${filename || "extrato.txt"}\n\nExtraia todas as transações financeiras deste extrato/fatura bancária. O conteúdo pode ser texto de PDF, CSV ou OFX — adapte a leitura ao formato encontrado:\n\n${data.slice(0, 120000)}`
+      }
+    ];
+  } else if (isImage) {
+    content = [
+      {
+        type: "image",
+        source: { type: "base64", media_type: mimeType as ImageMediaType, data }
+      },
+      { type: "text", text: "Extraia todas as transações financeiras desta imagem de extrato bancário." }
+    ];
+  } else {
+    content = [
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data }
+      },
+      { type: "text", text: "Extraia todas as transações financeiras deste extrato bancário em PDF." }
+    ];
+  }
+
+  const message = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 8192,
+    system: buildSystemPrompt(),
+    messages: [{ role: "user", content }]
+  });
+
+  const rawText =
+    message.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
+
+  return parseOrRepairJson(client, rawText);
+}
+
+async function alertJobFailure(
+  resendKey: string,
+  msg: string,
+  jobId: string,
+  workspaceId: string
+): Promise<void> {
+  try {
+    const resend = new Resend(resendKey);
+    const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    await resend.emails.send({
+      from: "Salvô! <salvo@jpmendes.com>",
+      to: ["salvo@jpmendes.com"],
+      subject: "[Salvô! 🚨] Falha no job de importação",
+      html: `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"></head>
+<body style="font-family:monospace;background:#09090b;color:#e0e0e0;padding:32px;max-width:560px;margin:0 auto">
+  <p style="color:#ff5c5c;font-weight:700;margin:0 0 20px">[SALVÔ!] FALHA NO JOB DE IMPORTAÇÃO</p>
+  <table style="font-size:13px;line-height:2;border-collapse:collapse">
+    <tr><td style="color:#999;padding-right:16px">Job ID:</td><td>${jobId}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Workspace:</td><td>${workspaceId}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Data:</td><td>${now}</td></tr>
+  </table>
+  <pre style="font-size:11px;color:#ccc;background:#111;padding:12px;border-radius:6px;margin-top:16px;white-space:pre-wrap">${msg.slice(0, 600)}</pre>
+</body></html>`,
+    });
+  } catch { /* alert must never crash the pipeline */ }
 }
 
 export const parseBankStatement = onRequest(
@@ -171,76 +311,14 @@ export const parseBankStatement = onRequest(
       return;
     }
 
-    const client = new Anthropic({ apiKey });
-
-    type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-    const isImage =
-      mimeType.startsWith("image/") &&
-      ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mimeType);
-    const isPDF = mimeType === "application/pdf";
     const isText = mimeType === "text/plain" || mimeType === "text/csv";
-
-    if (!isImage && !isPDF && !isText) {
-      res.status(400).json({ error: "Unsupported mimeType: " + mimeType });
-      return;
-    }
+    const data = isText ? (textData || "") : (fileData || "");
 
     try {
-      let content: Anthropic.MessageParam["content"];
-
-      if (isText) {
-        content = [
-          {
-            type: "text",
-            text: `Arquivo: ${filename || "extrato.txt"}\n\nExtraia todas as transações financeiras deste extrato/fatura bancária. O conteúdo pode ser texto de PDF, CSV ou OFX — adapte a leitura ao formato encontrado:\n\n${(textData || "").slice(0, 120000)}`
-          }
-        ];
-      } else if (isImage) {
-        content = [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mimeType as ImageMediaType,
-              data: fileData || ""
-            }
-          },
-          {
-            type: "text",
-            text: "Extraia todas as transações financeiras desta imagem de extrato bancário."
-          }
-        ];
-      } else {
-        content = [
-          {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: fileData || ""
-            }
-          },
-          {
-            type: "text",
-            text: "Extraia todas as transações financeiras deste extrato bancário em PDF."
-          }
-        ];
-      }
-
-      const message = await client.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8192,
-        system: buildSystemPrompt(),
-        messages: [{ role: "user", content }]
-      });
-
-      const rawText =
-        message.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
-
-      const parsed = await parseOrRepairJson(client, rawText);
+      const client = new Anthropic({ apiKey });
+      const parsed = await callClaudeExtraction(client, data, mimeType, filename);
 
       const sourceLabel = parsed.sourceLabel ?? "Extrato";
-
       const transactions = (parsed.transactions ?? []).map((t) => ({
         ...t,
         amount: Math.abs(t.amount ?? 0),
@@ -253,6 +331,7 @@ export const parseBankStatement = onRequest(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Claude API error:", msg);
+      res.set("Access-Control-Allow-Origin", "*");
       res.status(500).json({ error: msg });
     }
   }
@@ -1017,6 +1096,353 @@ export const sendAdminAlert = onRequest(
       const msg = err instanceof Error ? err.message : String(err);
       console.error("sendAdminAlert error:", msg);
       res.status(500).json({ error: msg });
+    }
+  }
+);
+
+// ─── Server-side reconciliation ──────────────────────────────────────────────
+// KEEP IN SYNC with src/lib/import/reconcile.ts:reconcileWithBalanceColumn
+// Works in integer centavos to avoid floating-point drift.
+function reconcileServer(
+  txs: Array<{ signedCents: number; balanceCents?: number }>,
+  initialBalanceCents?: number,
+  finalBalanceCents?: number,
+  toleranceCents = 2
+): { ok: boolean; suspectIndices: number[] } {
+  if (txs.length === 0) return { ok: true, suspectIndices: [] };
+
+  const hasBalance = txs.some((t) => t.balanceCents !== undefined);
+
+  if (!hasBalance) {
+    // Totals strategy: sum of all signed amounts must equal final - initial
+    if (initialBalanceCents !== undefined && finalBalanceCents !== undefined) {
+      const sumCents = txs.reduce((s, t) => s + t.signedCents, 0);
+      const expectedCents = finalBalanceCents - initialBalanceCents;
+      return { ok: Math.abs(sumCents - expectedCents) <= toleranceCents, suspectIndices: [] };
+    }
+    return { ok: true, suspectIndices: [] }; // no anchor, skip
+  }
+
+  // Balance-column strategy: balance[n] == balance[n-1] + value[n]
+  const inferredInitial =
+    txs[0].balanceCents !== undefined
+      ? txs[0].balanceCents - txs[0].signedCents
+      : undefined;
+  const initial = initialBalanceCents ?? inferredInitial;
+  if (initial === undefined) return { ok: true, suspectIndices: [] };
+
+  let running = initial;
+  let maxDiff = 0;
+  const suspectIndices: number[] = [];
+
+  for (let i = 0; i < txs.length; i++) {
+    running += txs[i].signedCents;
+    const bc = txs[i].balanceCents;
+    if (bc !== undefined) {
+      const diff = Math.abs(running - bc);
+      if (diff > toleranceCents) {
+        suspectIndices.push(i);
+        running = bc; // reset to authoritative balance to avoid cascade errors
+        if (diff > maxDiff) maxDiff = diff;
+      }
+    }
+  }
+
+  const finalOk =
+    finalBalanceCents === undefined ||
+    Math.abs(running - finalBalanceCents) <= toleranceCents;
+
+  return { ok: suspectIndices.length === 0 && finalOk, suspectIndices };
+}
+
+// ─── Server-side classification ───────────────────────────────────────────────
+// KEEP IN SYNC with src/lib/import/classify.ts
+// Applies IGNORAR overrides before the sign-based default.
+const MP_IGNORE_PATTERNS = [
+  /dinheiro\s+reservado/i,
+  /dinheiro\s+retirado/i,
+  /^reembolso\b/i,
+  /^estorno\b/i,
+];
+
+function classifyServer(
+  description: string,
+  signedCents: number,
+  bankSlug: string,
+  claudeClassification?: "ENTRADA" | "SAIDA" | "IGNORAR"
+): "ENTRADA" | "SAIDA" | "IGNORAR" {
+  if (signedCents === 0) return "IGNORAR";
+
+  const norm = description.normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+
+  // Bank-specific IGNORAR patterns take priority over Claude's output
+  if (bankSlug === "mercado-pago" && MP_IGNORE_PATTERNS.some((p) => p.test(norm))) {
+    return "IGNORAR";
+  }
+
+  // Claude's IGNORAR hint is trusted for other cases
+  if (claudeClassification === "IGNORAR") return "IGNORAR";
+
+  // Sign-based default (source of truth)
+  return signedCents > 0 ? "ENTRADA" : "SAIDA";
+}
+
+// ─── Background import job (Storage trigger) ─────────────────────────────────
+//
+// Triggered when a file lands at imports/{workspaceId}/{jobId}/{filename}.
+// The client uploads either:
+//   text.txt  — pdfjs already extracted the text client-side
+//   raw.pdf   — pdfjs failed (e.g. mobile OOM); Claude reads the PDF directly
+//
+// Single-call pipeline (no double API spend):
+//   1. Idempotency check — skip if job is already done/failed
+//   2. Download file; LGPD delete immediately after reading
+//   3. ONE Claude Sonnet call: extraction + category + classification + balance
+//   4. Server-side reconciliation (balance-column or totals strategy)
+//   5. Server-side IGNORAR override (KEEP IN SYNC with classify.ts)
+//   6. Write results; partial if reconciliation fails; failed on errors
+//   On any error: mark status=failed, send alert email, do NOT loop/retry.
+
+export const processImportJob = onObjectFinalized(
+  {
+    secrets: ["ANTHROPIC_API_KEY", "RESEND_API_KEY"],
+    timeoutSeconds: 300,
+    memory: "512MiB",
+  },
+  async (event) => {
+    const objectPath = event.data.name;
+
+    // Only process files uploaded under imports/
+    if (!objectPath.startsWith("imports/")) return;
+
+    const parts = objectPath.split("/");
+    if (parts.length < 4) return;
+
+    const workspaceId = parts[1];
+    const jobId = parts[2];
+    const filename = parts.slice(3).join("/");
+    const originalFilename =
+      (event.data.metadata as Record<string, string> | undefined)?.originalFilename ?? filename;
+
+    const db = admin.firestore();
+    const jobRef = db.doc(`workspaces/${workspaceId}/importJobs/${jobId}`);
+    const bucket = admin.storage().bucket(event.data.bucket);
+
+    // ── Idempotency: skip if already processed ────────────────────────────
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+      await bucket.file(objectPath).delete().catch(() => {});
+      return;
+    }
+    const jobData = jobSnap.data()!;
+    if (jobData.status !== "processing") {
+      await bucket.file(objectPath).delete().catch(() => {});
+      return;
+    }
+
+    // ── Download ──────────────────────────────────────────────────────────
+    let fileBuffer: Buffer;
+    try {
+      [fileBuffer] = await bucket.file(objectPath).download();
+    } catch (err) {
+      console.error("[import-job] download error:", err);
+      await jobRef.update({
+        status: "failed",
+        error: "Não consegui ler o arquivo enviado.",
+        failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch(() => {});
+      return;
+    }
+
+    // ── LGPD: delete from Storage immediately after reading ───────────────
+    await bucket.file(objectPath).delete().catch(console.error);
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      await jobRef.update({
+        status: "failed",
+        error: "Configuração interna ausente.",
+        failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch(() => {});
+      return;
+    }
+
+    const client = new Anthropic({ apiKey });
+
+    // ── Extraction ────────────────────────────────────────────────────────
+    let parsed: ParsedClaudeResponse;
+    try {
+      const isPdfFile = filename.endsWith(".pdf");
+      const mimeType = isPdfFile ? "application/pdf" : "text/plain";
+      const data = isPdfFile
+        ? fileBuffer.toString("base64")
+        : fileBuffer.toString("utf-8");
+
+      parsed = await callClaudeExtraction(client, data, mimeType, originalFilename);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[import-job] extraction error:", msg);
+      await jobRef.update({
+        status: "failed",
+        error: "Não consegui extrair as transações. Tenta de novo.",
+        failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch(() => {});
+      if (resendKey) await alertJobFailure(resendKey, msg, jobId, workspaceId);
+      return;
+    }
+
+    const allRawTxs = (parsed.transactions ?? []).filter(
+      (t) => t.amount != null && t.date && t.description
+    );
+    const sourceLabel = parsed.sourceLabel ?? "Importação";
+    const bankSlug = /mercado\s*pago/i.test(sourceLabel) ? "mercado-pago" : "generic";
+
+    if (allRawTxs.length === 0) {
+      await jobRef.update({
+        status: "partial",
+        transactions: [],
+        sourceLabel,
+        warning: "Nenhuma transação encontrada nesse arquivo.",
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch(() => {});
+      return;
+    }
+
+    // ── Reconciliation (integer centavos) ─────────────────────────────────
+    // Runs over ALL raw transactions (incl. future IGNORAR) because the
+    // balance column in the document includes internal movements.
+    const internalTxs = allRawTxs.map((t) => {
+      const signedCents = Math.round(
+        (t.type === "income" ? t.amount : -t.amount) * 100
+      );
+      const balanceCents =
+        t.balance !== undefined ? Math.round(t.balance * 100) : undefined;
+      return { ...t, signedCents, balanceCents };
+    });
+
+    const initialCents =
+      parsed.initialBalance !== undefined
+        ? Math.round(parsed.initialBalance * 100)
+        : undefined;
+    const finalCents =
+      parsed.finalBalance !== undefined
+        ? Math.round(parsed.finalBalance * 100)
+        : undefined;
+
+    const reconciliation = reconcileServer(internalTxs, initialCents, finalCents);
+
+    // ── Classification (ENTRADA / SAIDA / IGNORAR) ────────────────────────
+    const classified = internalTxs.map((t) =>
+      classifyServer(t.description, t.signedCents, bankSlug, t.classification)
+    );
+
+    // ── Build saved transactions (exclude IGNORAR) ────────────────────────
+    const VALID_CATS = new Set<string>(IMPORT_CATEGORIES);
+    const transactions = internalTxs
+      .filter((_, i) => classified[i] !== "IGNORAR")
+      .filter((t) => Math.abs(t.amount) > 0)
+      .map((t) => {
+        const amount = Math.abs(t.amount);
+        const desc = t.description.trim();
+        const cat =
+          t.category && VALID_CATS.has(t.category) ? t.category : "Outros";
+        return {
+          date: t.date,
+          description: desc,
+          amount,
+          type: t.type,
+          category: cat,
+          sourceLabel,
+          source: /cartão|fatura|card/i.test(sourceLabel) ? "card" : "account",
+          monthKey: (t.date ?? "").slice(0, 7),
+          dedupKey: `${t.date}|${desc.toLowerCase()}|${amount.toFixed(2)}`,
+        };
+      });
+
+    const ignoredCount = classified.filter((c) => c === "IGNORAR").length;
+    const baseUpdate = {
+      transactions,
+      sourceLabel,
+      ignoredCount,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (!reconciliation.ok) {
+      await jobRef.update({
+        ...baseUpdate,
+        status: "partial",
+        warning: `Reconciliação não fechou — ${reconciliation.suspectIndices.length} linha(s) suspeita(s). Revise os valores antes de confirmar.`,
+        reconciliation: {
+          ok: false,
+          suspectCount: reconciliation.suspectIndices.length,
+        },
+      });
+      return;
+    }
+
+    await jobRef.update({ ...baseUpdate, status: "done" });
+  }
+);
+
+// ─── Client-side error beacon ─────────────────────────────────────────────────
+// Receives operational errors that die on the device (Storage upload failure,
+// importJob creation failure, etc.) and forwards them as admin alerts.
+// Rate-limiting is handled client-side; this endpoint trusts the client to not spam.
+export const clientError = onRequest(
+  {
+    cors: true,
+    secrets: ["RESEND_API_KEY"],
+    maxInstances: 5,
+    timeoutSeconds: 15,
+    memory: "128MiB",
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
+
+    const { context, message, uid } = req.body as {
+      context?: string;
+      message?: string;
+      uid?: string;
+    };
+
+    if (!context || !message) {
+      res.status(400).json({ error: "Missing context or message" });
+      return;
+    }
+
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) { res.json({ ok: false }); return; }
+
+    const resend = new Resend(apiKey);
+    const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
+    try {
+      await resend.emails.send({
+        from: "Salvô! <salvo@jpmendes.com>",
+        to: ["salvo@jpmendes.com"],
+        subject: `[Salvô! 🚨] Erro cliente — ${context}`,
+        html: `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"></head>
+<body style="font-family:monospace;background:#09090b;color:#e0e0e0;padding:32px;max-width:560px;margin:0 auto">
+  <p style="color:#ff5c5c;font-weight:700;margin:0 0 20px">[SALVÔ!] ERRO CLIENTE</p>
+  <table style="font-size:13px;line-height:2;border-collapse:collapse">
+    <tr><td style="color:#999;padding-right:16px">Contexto:</td><td>${context}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">UID:</td><td>${uid || "—"}</td></tr>
+    <tr><td style="color:#999;padding-right:16px">Data:</td><td>${now}</td></tr>
+  </table>
+  <pre style="font-size:11px;color:#ccc;background:#111;padding:12px;border-radius:6px;margin-top:16px;white-space:pre-wrap">${message.slice(0, 600)}</pre>
+</body></html>`,
+      });
+      res.json({ ok: true });
+    } catch {
+      res.json({ ok: false });
     }
   }
 );

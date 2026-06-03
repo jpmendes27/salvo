@@ -162,6 +162,16 @@ service cloud.firestore {
           && resource.data.uid == request.auth.uid;
         allow delete: if isOwner(workspaceId);
       }
+
+      // Background import jobs — created by the client before uploading to Storage.
+      // Only the triggering function (Admin SDK, bypasses rules) writes status/results.
+      match /importJobs/{jobId} {
+        allow read: if isMember(workspaceId);
+        allow create: if isMember(workspaceId)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == "processing";
+        allow update, delete: if false;
+      }
     }
   }
 }

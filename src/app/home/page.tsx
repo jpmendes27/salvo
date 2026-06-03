@@ -55,7 +55,8 @@ import {
   X
 } from "lucide-react";
 import { CSSProperties, DragEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { auth, db, googleProvider } from "@/lib/firebase";
+import { auth, db, googleProvider, storage } from "@/lib/firebase";
+import { ref as storageRef, uploadBytes } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { useAuthUser } from "@/app/auth-provider";
 import { consentText, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
@@ -478,6 +479,7 @@ type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
 
 type ImportState =
   | { phase: "parsing" }
+  | { phase: "background"; jobId: string; filename: string }
   | { phase: "preview"; rows: ParsedWithMeta[]; error?: string }
   | { phase: "saving"; rows: ParsedWithMeta[] };
 
@@ -741,6 +743,106 @@ function WorkspaceApp({
     setProfile({ ...profile, hasCreatedRealMonth: true });
   }
 
+  // Uploads file to Storage, creates the importJob doc, and transitions to
+  // the background polling phase. Called when local parsers return < 3 rows
+  // or when pdfjs fails (e.g. OOM on mobile).
+  async function startBackgroundJob(
+    file: File,
+    mode: "text" | "pdf",
+    textContent: string | null
+  ) {
+    const jobId = crypto.randomUUID();
+    await setDoc(doc(db, "workspaces", workspace.id, "importJobs", jobId), {
+      status: "processing",
+      filename: file.name,
+      createdAt: serverTimestamp(),
+      uid: user.uid,
+    });
+
+    const storagePath =
+      mode === "text"
+        ? `imports/${workspace.id}/${jobId}/text.txt`
+        : `imports/${workspace.id}/${jobId}/raw.pdf`;
+
+    const uploadRef = storageRef(storage, storagePath);
+
+    if (mode === "text" && textContent !== null) {
+      await uploadBytes(uploadRef, new Blob([textContent], { type: "text/plain" }), {
+        contentType: "text/plain",
+        customMetadata: { originalFilename: file.name },
+      });
+    } else {
+      await uploadBytes(uploadRef, file, {
+        contentType: "application/pdf",
+        customMetadata: { originalFilename: file.name },
+      });
+    }
+
+    setImportState({ phase: "background", jobId, filename: file.name });
+  }
+
+  // Stable ID for the current background job — drives the polling effect below.
+  const bgJobId =
+    importState?.phase === "background" ? importState.jobId : null;
+
+  useEffect(() => {
+    if (!bgJobId) return;
+
+    const unsub = onSnapshot(
+      doc(db, "workspaces", workspace.id, "importJobs", bgJobId),
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() as {
+          status: string;
+          transactions?: ParsedTransaction[];
+          warning?: string;
+          error?: string;
+        };
+
+        if (data.status === "done" || data.status === "partial") {
+          const existingKeys = new Set(
+            transactions.map((t) => {
+              const raw = (t as Transaction & { dedupKey?: string }).dedupKey;
+              return raw ?? `${t.date}|${t.description.toLowerCase().trim()}|${t.amount.toFixed(2)}`;
+            })
+          );
+          const rows: ParsedWithMeta[] = (data.transactions ?? []).map(
+            (t: ParsedTransaction) => ({
+              ...t,
+              source: inferSource(t.sourceLabel),
+              _id: crypto.randomUUID(),
+              selected: !existingKeys.has(
+                `${t.date}|${(t.description ?? "").toLowerCase().trim()}|${Math.abs(t.amount ?? 0).toFixed(2)}`
+              ),
+            })
+          );
+          setImportState({
+            phase: "preview",
+            rows,
+            error: data.status === "partial" ? data.warning : undefined,
+          });
+          unsub();
+        } else if (data.status === "failed") {
+          setImportState({
+            phase: "preview",
+            rows: [],
+            error: data.error ?? "Erro ao processar o arquivo. Tenta de novo.",
+          });
+          unsub();
+        }
+      },
+      () => {
+        setImportState({
+          phase: "preview",
+          rows: [],
+          error: "Não consegui acompanhar o processamento. Tenta de novo.",
+        });
+      }
+    );
+
+    return () => unsub();
+  }, [bgJobId, workspace.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleFiles(files: File[]) {
     setImportState({ phase: "parsing" });
     const ext = files[0]?.name.split(".").pop()?.toLowerCase() ?? "unknown";
@@ -814,68 +916,14 @@ function WorkspaceApp({
                 rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
               );
             } else {
-              const resp = await fetch(PARSE_FUNCTION_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  textData: pdfText,
-                  mimeType: "text/plain",
-                  filename: file.name
-                })
-              });
-              if (!resp.ok) {
-                throw new Error(await resp.text().catch(() => resp.statusText));
-              }
-              const data = await resp.json();
-              const claudeLabel: string = data.sourceLabel ? normalizeSourceLabel(data.sourceLabel) : bankLabel;
-              (data.transactions ?? []).forEach((t: ParsedTransaction) => {
-                if (Math.abs(t.amount ?? 0) === 0) return;
-                if (isStopDescription(t.description ?? "")) return;
-                const type = t.type ?? (t.amount < 0 ? "expense" : "income");
-                rows.push({
-                  ...t,
-                  type,
-                  amount: Math.abs(t.amount ?? 0),
-                  category: categorizeTransaction(t.description ?? "", type),
-                  sourceLabel: claudeLabel,
-                  source: inferSource(claudeLabel),
-                  _id: crypto.randomUUID(),
-                  selected: true
-                });
-              });
+              // Parsers returned < 3 transactions — hand off to background job
+              await startBackgroundJob(file, "text", pdfText);
+              return;
             }
           } else {
-            // pdfjs failed (e.g. out-of-memory on mobile) — send raw PDF to Cloud Function
-            const base64 = await fileToBase64(file);
-            const resp = await fetch(PARSE_FUNCTION_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                fileData: base64,
-                mimeType: "application/pdf",
-                filename: file.name
-              })
-            });
-            if (!resp.ok) {
-              throw new Error(await resp.text().catch(() => resp.statusText));
-            }
-            const data = await resp.json();
-            const claudeLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
-            (data.transactions ?? []).forEach((t: ParsedTransaction) => {
-              if (Math.abs(t.amount ?? 0) === 0) return;
-              if (isStopDescription(t.description ?? "")) return;
-              const type = t.type ?? (t.amount < 0 ? "expense" : "income");
-              rows.push({
-                ...t,
-                type,
-                amount: Math.abs(t.amount ?? 0),
-                category: categorizeTransaction(t.description ?? "", type),
-                sourceLabel: claudeLabel,
-                source: inferSource(claudeLabel),
-                _id: crypto.randomUUID(),
-                selected: true
-              });
-            });
+            // pdfjs failed (e.g. OOM on mobile) — upload raw PDF to background job
+            await startBackgroundJob(file, "pdf", null);
+            return;
           }
         } else if (mime.startsWith("image/")) {
           const base64 = await fileToBase64(file);
@@ -3416,8 +3464,9 @@ function ImportModal({
   onCategoryChange: (id: string, cat: string) => void;
 }) {
   const isParsing = state.phase === "parsing";
+  const isBackground = state.phase === "background";
   const isSaving = state.phase === "saving";
-  const rows = state.phase !== "parsing" ? state.rows : [];
+  const rows = state.phase === "preview" || state.phase === "saving" ? state.rows : [];
   const selectedCount = rows.filter((r) => r.selected).length;
   const error = state.phase === "preview" ? state.error : undefined;
 
@@ -3470,11 +3519,13 @@ function ImportModal({
             <h2 style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>
               {isParsing
                 ? "Lendo arquivo..."
+                : isBackground
+                ? "Analisando extrato..."
                 : isSaving
                 ? "Salvando..."
                 : "Revisar importação"}
             </h2>
-            {!isParsing && !isSaving && (
+            {!isParsing && !isBackground && !isSaving && (
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 3 }}>
                 {selectedCount} de {rows.length} transações selecionadas
               </p>
@@ -3500,7 +3551,7 @@ function ImportModal({
 
         {/* Modal body */}
         <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
-          {isParsing || isSaving ? (
+          {isParsing || isBackground || isSaving ? (
             <div
               style={{
                 display: "flex",
@@ -3524,8 +3575,15 @@ function ImportModal({
               <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
                 {isParsing
                   ? "Extraindo transações com IA..."
+                  : isBackground
+                  ? "Processando em segundo plano..."
                   : "Salvando lançamentos..."}
               </p>
+              {isBackground && (
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: -6 }}>
+                  Pode levar até 1 minuto para extratos grandes.
+                </p>
+              )}
             </div>
           ) : (
             <>
@@ -3674,7 +3732,7 @@ function ImportModal({
         </div>
 
         {/* Modal footer */}
-        {!isParsing && !isSaving && (
+        {!isParsing && !isBackground && !isSaving && (
           <div
             style={{
               display: "flex",
