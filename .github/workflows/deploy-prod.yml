@@ -37,6 +37,7 @@ jobs:
           NEXT_PUBLIC_FUNCTIONS_URL: ${{ secrets.PROD_FUNCTIONS_URL }}
           NEXT_PUBLIC_SEND_EMAIL_URL: ${{ secrets.PROD_SEND_EMAIL_URL }}
           NEXT_PUBLIC_SUGGEST_GOAL_URL: ${{ secrets.PROD_SUGGEST_GOAL_URL }}
+          NEXT_PUBLIC_ADMIN_ALERT_URL: ${{ secrets.PROD_ADMIN_ALERT_URL }}
 
       - name: Add .nojekyll (evita que GitHub Pages ignore pastas _next)
         run: touch out/.nojekyll
