@@ -529,6 +529,8 @@ async function extractTextInChunks(client, text, filename) {
     if (!rec.ok && rec.suspectIndices.length > 0) {
         const affected = new Set();
         for (const idx of rec.suspectIndices) {
+            if (idx < 0)
+                continue; // sentinel from the totals strategy — not a tx index
             let acc = 0;
             for (let ci = 0; ci < perChunk.length; ci++) {
                 if (idx < acc + perChunk[ci].length) {
@@ -1287,45 +1289,51 @@ exports.sendAdminAlert = (0, https_1.onRequest)({
 // ─── Server-side reconciliation ──────────────────────────────────────────────
 // KEEP IN SYNC with src/lib/import/reconcile.ts:reconcileWithBalanceColumn
 // Works in integer centavos to avoid floating-point drift.
+// ─── Reconciliation gate ──────────────────────────────────────────────────────
+//
+// The ONLY thing standing between extracted data and the user. It passes ONLY
+// when it has actually VALIDATED completeness — never on a silent skip:
+//   • there are transactions, AND
+//   • the document's final balance is known (anchors the end of the chain), AND
+//   • the per-line balance chain (or the sum, when no per-line balance) closes
+//     at the final balance within tolerance.
+// Anything it cannot validate returns ok:false (blocked). A dropped transaction
+// or a Saldo-as-Valor swap breaks the chain → ok:false → never shown as importable.
 function reconcileServer(txs, initialBalanceCents, finalBalanceCents, toleranceCents = 2) {
     if (txs.length === 0)
-        return { ok: true, suspectIndices: [] };
+        return { ok: false, validated: false, suspectIndices: [], reason: "nenhuma transação extraída" };
+    // Completeness can only be guaranteed if the final balance anchors the end of
+    // the chain. No final balance → cannot prove nothing was dropped → block.
+    if (finalBalanceCents === undefined)
+        return { ok: false, validated: false, suspectIndices: [], reason: "saldo final não encontrado no documento" };
     const hasBalance = txs.some((t) => t.balanceCents !== undefined);
     if (!hasBalance) {
-        // Totals strategy: sum of all signed amounts must equal final - initial
-        if (initialBalanceCents !== undefined && finalBalanceCents !== undefined) {
-            const sumCents = txs.reduce((s, t) => s + t.signedCents, 0);
-            const expectedCents = finalBalanceCents - initialBalanceCents;
-            return { ok: Math.abs(sumCents - expectedCents) <= toleranceCents, suspectIndices: [] };
-        }
-        return { ok: true, suspectIndices: [] }; // no anchor, skip
+        // No per-line balance: validate the sum of all signed amounts against
+        // (final − initial). Requires the initial balance too.
+        if (initialBalanceCents === undefined)
+            return { ok: false, validated: false, suspectIndices: [], reason: "saldo inicial não encontrado" };
+        const sumCents = txs.reduce((s, t) => s + t.signedCents, 0);
+        const ok = Math.abs(sumCents - (finalBalanceCents - initialBalanceCents)) <= toleranceCents;
+        return { ok, validated: true, suspectIndices: ok ? [] : [-1], reason: ok ? undefined : "soma dos valores não bate com os saldos" };
     }
-    // Balance-column strategy: balance[n] == balance[n-1] + value[n]
-    const inferredInitial = txs[0].balanceCents !== undefined
-        ? txs[0].balanceCents - txs[0].signedCents
-        : undefined;
+    // Per-line balance chain anchored at the initial balance, must close at final.
+    const inferredInitial = txs[0].balanceCents !== undefined ? txs[0].balanceCents - txs[0].signedCents : undefined;
     const initial = initialBalanceCents ?? inferredInitial;
     if (initial === undefined)
-        return { ok: true, suspectIndices: [] };
+        return { ok: false, validated: false, suspectIndices: [], reason: "saldo inicial não encontrado" };
     let running = initial;
-    let maxDiff = 0;
     const suspectIndices = [];
     for (let i = 0; i < txs.length; i++) {
         running += txs[i].signedCents;
         const bc = txs[i].balanceCents;
-        if (bc !== undefined) {
-            const diff = Math.abs(running - bc);
-            if (diff > toleranceCents) {
-                suspectIndices.push(i);
-                running = bc; // reset to authoritative balance to avoid cascade errors
-                if (diff > maxDiff)
-                    maxDiff = diff;
-            }
+        if (bc !== undefined && Math.abs(running - bc) > toleranceCents) {
+            suspectIndices.push(i);
+            running = bc; // reset to authoritative balance to avoid cascade errors
         }
     }
-    const finalOk = finalBalanceCents === undefined ||
-        Math.abs(running - finalBalanceCents) <= toleranceCents;
-    return { ok: suspectIndices.length === 0 && finalOk, suspectIndices };
+    const finalOk = Math.abs(running - finalBalanceCents) <= toleranceCents;
+    const ok = suspectIndices.length === 0 && finalOk;
+    return { ok, validated: true, suspectIndices, reason: ok ? undefined : "cadeia de saldo não fecha no saldo final" };
 }
 // ─── Server-side classification ───────────────────────────────────────────────
 // KEEP IN SYNC with src/lib/import/classify.ts
@@ -1367,7 +1375,7 @@ function classifyServer(description, signedCents, bankSlug, claudeClassification
 //   On any error: mark status=failed, send alert email, do NOT loop/retry.
 exports.processImportJob = (0, storage_1.onObjectFinalized)({
     secrets: ["ANTHROPIC_API_KEY", "RESEND_API_KEY"],
-    timeoutSeconds: 300,
+    timeoutSeconds: 540,
     memory: "1GiB",
 }, async (event) => {
     const objectPath = event.data.name;
@@ -1427,57 +1435,62 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
     // extraction — scales to any size and stays well under the 300s timeout.
     // Raw PDF path (pdfjs failed, e.g. mobile OOM, rare): can't be chunked
     // (binary), so a single call with a high token budget is the safety net.
-    let parsed;
-    try {
+    // Extraction wrapped in a watchdog: if it runs too long (a stuck Claude
+    // fallback on a huge statement), fail cleanly BEFORE the platform's hard
+    // kill at 540s. A platform kill would leave the job "processing" forever;
+    // the watchdog guarantees timeout → status=failed, never a stuck/partial job.
+    const WATCHDOG_MS = 500000; // 500s, safely under the 540s function timeout
+    const doExtraction = async () => {
         const isPdfFile = filename.endsWith(".pdf");
         if (isPdfFile) {
-            // Extract text server-side with pdfjs (no device OOM), then run the
-            // chunked parallel extraction — fast (~30s) and stable, versus a single
-            // 32K-token raw-PDF call (~170s and prone to truncation/instability).
             let pdfText = "";
             try {
                 pdfText = await extractPdfTextServer(fileBuffer);
             }
             catch (pdfErr) {
                 const m = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
-                console.error("[import-job] pdf text extraction error:", m);
-                await jobRef.update({
-                    status: "failed",
-                    error: /password/i.test(m)
-                        ? "Esse PDF tá protegido por senha. Abre no computador pra importar."
-                        : "Não consegui abrir esse PDF. Tenta exportar de novo.",
-                    failedAt: admin.firestore.FieldValue.serverTimestamp(),
-                }).catch(() => { });
-                return;
+                throw new Error(/password/i.test(m) ? "PDF_PASSWORD" : "PDF_UNREADABLE");
             }
             if (pdfText.trim().length > 100) {
-                // Try the deterministic adapter first (zero API cost, ~instant). Only
-                // accept it if it reconciles — otherwise fall through to Claude. This
-                // keeps Claude as a true fallback even on mobile, so a recognized bank
-                // (Mercado Pago today) costs nothing.
+                // Deterministic adapter first (zero API cost). Accept ONLY if it passes
+                // the reconciliation gate — otherwise fall through to the Claude path.
+                // Logs are data-free: just which path ran, for production validation.
                 const deterministic = tryMercadoPagoDeterministic(pdfText);
-                if (deterministic && reconcileParsed(deterministic).ok) {
-                    parsed = deterministic;
+                if (deterministic) {
+                    const detRec = reconcileParsed(deterministic);
+                    console.log(`[import-job] deterministic adapter: ${deterministic.transactions?.length ?? 0} txs, ` +
+                        `reconcile=${detRec.ok ? "OK" : `FAIL(${detRec.reason})`}`);
+                    if (detRec.ok)
+                        return deterministic;
                 }
-                else {
-                    parsed = await extractTextInChunks(client, pdfText, originalFilename);
-                }
+                console.log("[import-job] falling back to Claude chunked extraction");
+                return extractTextInChunks(client, pdfText, originalFilename);
             }
-            else {
-                // No text layer (scanned/image-only PDF) → Claude reads the raw PDF.
-                parsed = await callClaudeExtraction(client, fileBuffer.toString("base64"), "application/pdf", originalFilename, 32000);
-            }
+            // No text layer (scanned/image-only PDF) → Claude reads the raw PDF.
+            return callClaudeExtraction(client, fileBuffer.toString("base64"), "application/pdf", originalFilename, 32000);
         }
-        else {
-            parsed = await extractTextInChunks(client, fileBuffer.toString("utf-8"), originalFilename);
-        }
+        return extractTextInChunks(client, fileBuffer.toString("utf-8"), originalFilename);
+    };
+    let parsed;
+    try {
+        parsed = await Promise.race([
+            doExtraction(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("WATCHDOG_TIMEOUT")), WATCHDOG_MS)),
+        ]);
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[import-job] extraction error:", msg);
+        let userError = "Não consegui extrair as transações. Tenta de novo.";
+        if (msg.includes("WATCHDOG_TIMEOUT"))
+            userError = "Esse extrato é grande demais e demorou pra processar. Tenta importar um período menor.";
+        else if (msg.includes("PDF_PASSWORD"))
+            userError = "Esse PDF tá protegido por senha. Tira a senha e envia de novo.";
+        else if (msg.includes("PDF_UNREADABLE"))
+            userError = "Não consegui abrir esse PDF. Tenta exportar de novo.";
         await jobRef.update({
             status: "failed",
-            error: "Não consegui extrair as transações. Tenta de novo.",
+            error: userError,
             failedAt: admin.firestore.FieldValue.serverTimestamp(),
         }).catch(() => { });
         if (resendKey)
@@ -1489,11 +1502,9 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
     const bankSlug = /mercado\s*pago/i.test(sourceLabel) ? "mercado-pago" : "generic";
     if (allRawTxs.length === 0) {
         await jobRef.update({
-            status: "partial",
-            transactions: [],
-            sourceLabel,
-            warning: "Nenhuma transação encontrada nesse arquivo.",
-            processedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: "failed",
+            error: "Não achei transações nesse arquivo. Confere se é o extrato certo e envia de novo.",
+            failedAt: admin.firestore.FieldValue.serverTimestamp(),
         }).catch(() => { });
         return;
     }
@@ -1542,16 +1553,22 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
         ignoredCount,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
+    // ── THE GATE ──────────────────────────────────────────────────────────
+    // Reconciliation is non-negotiable: extracted data is shown to the user
+    // ONLY if the balance chain validated completeness. If it didn't (dropped
+    // transaction, Saldo-as-Valor swap, missing balances, partial Claude
+    // output), the result is BLOCKED — never surfaced as "X de X / importar".
     if (!reconciliation.ok) {
+        console.error(`[import-job] BLOCKED by reconciliation: ${reconciliation.reason} ` +
+            `(${allRawTxs.length} txs, ${reconciliation.suspectIndices.length} suspect)`);
         await jobRef.update({
-            ...baseUpdate,
-            status: "partial",
-            warning: `Reconciliação não fechou — ${reconciliation.suspectIndices.length} linha(s) suspeita(s). Revise os valores antes de confirmar.`,
-            reconciliation: {
-                ok: false,
-                suspectCount: reconciliation.suspectIndices.length,
-            },
-        });
+            status: "failed",
+            error: "Não consegui validar todos os lançamentos desse extrato. Pra não importar nada errado, parei aqui — tenta de novo ou fala com a gente.",
+            failedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(() => { });
+        if (resendKey) {
+            await alertJobFailure(resendKey, `Reconciliation blocked: ${reconciliation.reason}. txs=${allRawTxs.length}, suspect=${reconciliation.suspectIndices.length}, source=${sourceLabel}`, jobId, workspaceId);
+        }
         return;
     }
     await jobRef.update({ ...baseUpdate, status: "done" });

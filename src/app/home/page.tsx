@@ -66,9 +66,8 @@ import { buildMonthlySummary } from "@/lib/summary";
 import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction, TransactionType, Workspace } from "@/lib/types";
 import { defaultCategories, demoTransactions } from "@/lib/demo";
 import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, normalizeSourceLabel, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
-import { isStopDescription, parseBankText } from "@/lib/bank-parsers";
+import { isStopDescription } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
-import { extractPDFText } from "@/lib/pdf-extract";
 import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
 import { getUserFacingError } from "@/lib/errors";
@@ -795,11 +794,14 @@ function WorkspaceApp({
         const data = snap.data() as {
           status: string;
           transactions?: ParsedTransaction[];
-          warning?: string;
           error?: string;
         };
 
-        if (data.status === "done" || data.status === "partial") {
+        // Only "done" is shown — it means the server's reconciliation gate
+        // passed (count complete + balance chain closed). "partial" no longer
+        // exists: anything that didn't fully reconcile comes back as "failed"
+        // and is blocked, never surfaced as importable.
+        if (data.status === "done") {
           const existingKeys = new Set(
             transactions.map((t) => {
               const raw = (t as Transaction & { dedupKey?: string }).dedupKey;
@@ -822,11 +824,7 @@ function WorkspaceApp({
               ),
             })
           );
-          setImportState({
-            phase: "preview",
-            rows,
-            error: data.status === "partial" ? data.warning : undefined,
-          });
+          setImportState({ phase: "preview", rows });
           unsub();
         } else if (data.status === "failed") {
           setImportState({
@@ -897,56 +895,14 @@ function WorkspaceApp({
             rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
           );
         } else if (ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf")) {
-          // On mobile, skip client-side pdfjs entirely. Extracting a multi-page
-          // PDF on the device can exhaust memory and crash the tab (the original
-          // iPhone OOM). Upload the raw PDF and let the server extract + chunk it
-          // in parallel — fast (~30s worst case) and crash-proof.
-          const ua = navigator.userAgent;
-          const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-          const isMobileDevice =
-            /Android|iPhone|iPad|iPod/i.test(ua) ||
-            (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) || // iPadOS Safari reports as Mac
-            (deviceMemory !== undefined && deviceMemory <= 4); // low-RAM devices (e.g. Galaxy A30) risk OOM in pdfjs
-          if (isMobileDevice) {
-            await startBackgroundJob(file, "pdf", null);
-            return;
-          }
-
-          // Desktop: try client-side pdfjs first — it's free and instant when the
-          // local parsers resolve the statement (e.g. the Mercado Pago adapter).
-          const pdfCandidates = profile.cpf
-            ? [
-                profile.cpf.slice(0, 3),
-                profile.cpf.slice(0, 4),
-                profile.cpf.slice(0, 6),
-                profile.cpf,
-              ]
-            : [];
-
-          let pdfText: string | null = null;
-          try {
-            pdfText = await extractPDFText(file, undefined, pdfCandidates);
-          } catch {
-            // pdfjs failed — will fall back to background job with raw PDF below
-          }
-
-          if (pdfText !== null) {
-            const { transactions: bankTxs, sourceLabel: bankLabel } = parseBankText(pdfText, { filename: file.name });
-
-            if (bankTxs.length >= 3) {
-              bankTxs.forEach((t) =>
-                rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
-              );
-            } else {
-              // Parsers returned < 3 transactions — hand off to background job
-              await startBackgroundJob(file, "text", pdfText);
-              return;
-            }
-          } else {
-            // pdfjs failed (e.g. OOM on mobile) — upload raw PDF to background job
-            await startBackgroundJob(file, "pdf", null);
-            return;
-          }
+          // SINGLE PATH for PDF: always the server. No client-side pdfjs/parsing.
+          // Desktop and mobile behave identically — the raw PDF is uploaded and
+          // the server extracts, reconciles, and gates it. This kills the old
+          // desktop path (client parser that confused Saldo with Valor and showed
+          // unvalidated data) and the two-parser KEEP-IN-SYNC drift. Every PDF now
+          // passes through the same reconciliation gate before anything is shown.
+          await startBackgroundJob(file, "pdf", null);
+          return;
         } else if (mime.startsWith("image/")) {
           const base64 = await fileToBase64(file);
           const resp = await fetch(PARSE_FUNCTION_URL, {
