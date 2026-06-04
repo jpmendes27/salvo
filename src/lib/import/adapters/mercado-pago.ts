@@ -73,150 +73,59 @@ export function extractMPHeader(text: string): BankHeader {
   };
 }
 
-// ─── Noise removal ────────────────────────────────────────────────────────────
-
-const NOISE_PATTERNS: RegExp[] = [
-  // Column headers repeated on each page
-  /^Data\s+Descri[cç][aã]o\s+ID\s+da\s+opera[cç][aã]o\s+Valor\s+Saldo\s*$/im,
-  /^Data\s+Descri[cç][aã]o.*Valor\s+Saldo\s*$/im,
-  // Page numbers "1/25", "25/25"
-  /^\d{1,3}\/\d{1,3}\s*$/m,
-  // Section headers like "Resumo", "Extrato de conta", "Movimentações"
-  /^Resumo\s*$/im,
-  /^Extrato\s+de\s+conta\s*$/im,
-  /^Movimenta[cç][oõ]es\s*$/im,
-  // Legal footer boilerplate
-  /^Mercado\s+Pago\s+Institui[cç][aã]o\s+de\s+Pagamento/im,
-  /^CNPJ[\s:]/im,
-  // Horizontal rules made of dashes/underscores
-  /^[-_]{5,}\s*$/m,
-];
-
-function cleanText(raw: string): string {
-  let t = raw;
-  for (const p of NOISE_PATTERNS) {
-    t = t.replace(new RegExp(p.source, p.flags.includes("m") ? p.flags : p.flags + "m"), "");
-  }
-  // Collapse runs of blank lines into a single blank line
-  t = t.replace(/\n{3,}/g, "\n\n");
-  return t;
-}
-
 // ─── Record parsing ───────────────────────────────────────────────────────────
+//
+// Real pdfjs output lays out each transaction as a single "anchor line":
+//   "DD-MM-YYYY [inline desc] [ID] R$ valor R$ saldo"
+// Long PIX descriptions add lines BEFORE the anchor (they don't fit inline).
+// The two trailing R$ are always [valor, saldo]; the ID is the trailing run of
+// ≥12 digits in the inline middle (CPFs in descriptions sit further left, so the
+// trailing-run anchor avoids mistaking them for the ID).
+//
+// KEEP IN SYNC with functions/src/index.ts (tryMercadoPagoDeterministic).
 
-// Matches a date at the start of a line: DD/MM/YYYY
-const DATE_RE = /^(\d{2}\/\d{2}\/\d{4})\s*$/;
-
-// Matches an R$ value line, optionally signed:
-//   "R$ 0,01"  "R$ -1.234,56"  "R$ 1.234.567,89"
-const R_LINE_RE = /^R\$\s*([-−]?[\d.]+,\d{2})\s*$/;
-
-// Matches a bare money amount without R$ prefix (fallback for some extractions)
-const AMOUNT_ONLY_RE = /^[-−]?[\d.]+,\d{2}\s*$/;
-
-// Matches an operation ID: run of ≥12 digits on its own line.
-// Must NOT be immediately followed by another all-digit line (that would be
-// a CPF/CNPJ embedded in a description, not the actual ID).
-const ID_RE = /^\d{12,}\s*$/;
-
-function isRLine(line: string): boolean {
-  return R_LINE_RE.test(line) || AMOUNT_ONLY_RE.test(line);
-}
-
-function extractRValue(line: string): string {
-  // Normalise to "R$ VALUE" so parseBRCentavos can handle it
-  const m = line.match(R_LINE_RE);
-  if (m) return `R$ ${m[1]}`;
-  return `R$ ${line.trim()}`;
-}
+const MP_ANCHOR = /^(\d{2}-\d{2}-\d{4})\s+(.*?)\s+R\$\s*([-−]?[\d.]+,\d{2})\s+R\$\s*([-−]?[\d.]+,\d{2})\s*$/;
+const MP_NOISE = /^(data\s+descri|detalhe dos|extrato de|saldo (inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj|\d+\/\d+$)/i;
+const MP_ID_TAIL = /(\d{12,})\s*$/;
 
 export function parseMPText(rawText: string): { lines: RawLine[]; header: BankHeader } {
   const header = extractMPHeader(rawText);
-  const text = cleanText(rawText);
-  const rawLines = text.split("\n").map((l) => l.trim());
+  const rawLines = rawText.split("\n").map((l) => l.trim());
 
   const records: RawLine[] = [];
-  let i = 0;
+  let descBuf: string[] = [];
 
-  while (i < rawLines.length) {
-    // Find start of next record: a line that is ONLY a DD/MM/YYYY date
-    if (!DATE_RE.test(rawLines[i])) { i++; continue; }
+  for (const line of rawLines) {
+    if (!line) continue;
 
-    const date = rawLines[i].trim();
-    i++;
-
-    // Collect content lines until we find the Valor+Saldo pair
-    const contentLines: string[] = [];
-    let id: string | undefined;
-    let valorRaw: string | undefined;
-    let saldoRaw: string | undefined;
-
-    while (i < rawLines.length) {
-      const line = rawLines[i];
-
-      // Empty line: skip but don't break (description can span blank lines
-      // within a page-break region)
-      if (!line) { i++; continue; }
-
-      // New date line = start of next record: stop collecting for this record
-      if (DATE_RE.test(line)) break;
-
-      // Check for the Valor+Saldo pair:
-      // Current line is R$ AND next non-empty line is also R$
-      if (isRLine(line)) {
-        // Peek at next non-empty line
-        let j = i + 1;
-        while (j < rawLines.length && !rawLines[j]) j++;
-
-        if (j < rawLines.length && isRLine(rawLines[j])) {
-          // Found Valor + Saldo
-          valorRaw = extractRValue(line);
-          saldoRaw = extractRValue(rawLines[j]);
-          i = j + 1;
-          break;
-        }
+    const m = line.match(MP_ANCHOR);
+    if (!m) {
+      // Non-anchor line: a candidate description line, unless it's document
+      // chrome (header, column titles, summary). Keep only the most recent few
+      // so leftover header lines never bleed into the first transaction.
+      const norm = line.normalize("NFD").replace(/[̀-ͯ]/g, "");
+      if (!MP_NOISE.test(norm)) {
+        descBuf.push(line);
+        if (descBuf.length > 4) descBuf.shift();
+      } else {
+        descBuf = [];
       }
-
-      // Check if this is the operation ID:
-      // All digits (≥12), and the NEXT non-empty line is an R$ line.
-      if (ID_RE.test(line)) {
-        let j = i + 1;
-        while (j < rawLines.length && !rawLines[j]) j++;
-        if (j < rawLines.length && isRLine(rawLines[j])) {
-          // Confirm it's an ID (not a CPF in description) by checking the
-          // line AFTER the R$ is also R$ (the Saldo line)
-          let k = j + 1;
-          while (k < rawLines.length && !rawLines[k]) k++;
-          if (k < rawLines.length && isRLine(rawLines[k])) {
-            id = line.trim();
-            i++;
-            // Consume Valor + Saldo
-            valorRaw = extractRValue(rawLines[j]);
-            saldoRaw = extractRValue(rawLines[k]);
-            i = k + 1;
-            break;
-          }
-        }
-      }
-
-      contentLines.push(line);
-      i++;
+      continue;
     }
 
-    // Only emit a record if we successfully captured both Valor and Saldo
-    if (!valorRaw || !saldoRaw) continue;
+    const [, date, middle, valor, saldo] = m;
 
-    // Description = all content lines joined, with whitespace collapsed.
-    // IDs, R$ values, and CPFs that ended up here are left in for now —
-    // the description normalizer will collapse whitespace but won't strip numbers.
-    // (CPFs are a normal part of Pix descriptions, e.g. "João Silva 123.456.789-00".)
-    const description = contentLines
-      .filter((l) => l && !R_LINE_RE.test(l) && !AMOUNT_ONLY_RE.test(l))
-      .join(" ")
-      .replace(/\s{2,}/g, " ")
-      .trim();
+    // Split the operation ID (trailing 12+ digits) from the inline description.
+    let inlineDesc = middle;
+    let id: string | undefined;
+    const idm = middle.match(MP_ID_TAIL);
+    if (idm) { id = idm[1]; inlineDesc = middle.slice(0, idm.index).trim(); }
 
-    records.push({ date, description, valorRaw, saldoRaw, id });
+    // Description = buffered lines (they precede the anchor) + inline remainder.
+    const description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
+
+    records.push({ date, description, valorRaw: `R$ ${valor}`, saldoRaw: `R$ ${saldo}`, id });
+    descBuf = [];
   }
 
   return { lines: records, header };

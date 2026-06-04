@@ -809,6 +809,12 @@ function WorkspaceApp({
           const rows: ParsedWithMeta[] = (data.transactions ?? []).map(
             (t: ParsedTransaction) => ({
               ...t,
+              // Categorize client-side: the deterministic server path doesn't
+              // categorize (avoids duplicating the keyword engine in functions);
+              // the Claude path may include a category, which we keep if valid.
+              category: (t.category && (CATEGORIES as readonly string[]).includes(t.category))
+                ? t.category
+                : categorizeTransaction(t.description ?? "", t.type),
               source: inferSource(t.sourceLabel),
               _id: crypto.randomUUID(),
               selected: !existingKeys.has(
@@ -891,6 +897,23 @@ function WorkspaceApp({
             rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
           );
         } else if (ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf")) {
+          // On mobile, skip client-side pdfjs entirely. Extracting a multi-page
+          // PDF on the device can exhaust memory and crash the tab (the original
+          // iPhone OOM). Upload the raw PDF and let the server extract + chunk it
+          // in parallel — fast (~30s worst case) and crash-proof.
+          const ua = navigator.userAgent;
+          const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+          const isMobileDevice =
+            /Android|iPhone|iPad|iPod/i.test(ua) ||
+            (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) || // iPadOS Safari reports as Mac
+            (deviceMemory !== undefined && deviceMemory <= 4); // low-RAM devices (e.g. Galaxy A30) risk OOM in pdfjs
+          if (isMobileDevice) {
+            await startBackgroundJob(file, "pdf", null);
+            return;
+          }
+
+          // Desktop: try client-side pdfjs first — it's free and instant when the
+          // local parsers resolve the statement (e.g. the Mercado Pago adapter).
           const pdfCandidates = profile.cpf
             ? [
                 profile.cpf.slice(0, 3),
@@ -900,12 +923,11 @@ function WorkspaceApp({
               ]
             : [];
 
-          // Try client-side pdfjs first; on mobile it may throw out-of-memory
           let pdfText: string | null = null;
           try {
             pdfText = await extractPDFText(file, undefined, pdfCandidates);
           } catch {
-            // pdfjs failed — will fall back to Cloud Function with raw PDF below
+            // pdfjs failed — will fall back to background job with raw PDF below
           }
 
           if (pdfText !== null) {

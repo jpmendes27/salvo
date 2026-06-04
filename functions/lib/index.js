@@ -195,6 +195,42 @@ const IMPORT_CATEGORIES = [
     "Seguros", "Taxas", "Emprestimos", "Doacoes", "Transferencias",
     "Hospedagem", "Viagem", "Lazer", "Recebimentos", "Outros",
 ];
+// ─── Output-token rate limiter (Anthropic Tier 1: 8K output tokens/min) ──────
+//
+// A sliding 60s window of real output-token usage. Before each Claude call we
+// block until the next request fits under the budget. This proactively avoids
+// 429s; any that still slip through are handled by the SDK's built-in retry
+// (maxRetries), which honours the Retry-After header. The goal is zero failures,
+// not speed — a ~2-2.5min background job for a 304-tx statement is invisible to
+// the user, a 429 is not.
+const OUTPUT_TOKENS_PER_MIN = 7500; // 8K hard limit minus safety margin
+const tokenLog = [];
+function recentOutputTokens() {
+    const cutoff = Date.now() - 60000;
+    while (tokenLog.length && tokenLog[0].t < cutoff)
+        tokenLog.shift();
+    return tokenLog.reduce((s, e) => s + e.tokens, 0);
+}
+async function throttleOutput(estimatedTokens) {
+    // Block until the trailing-60s usage plus this request fits the budget.
+    while (recentOutputTokens() + estimatedTokens > OUTPUT_TOKENS_PER_MIN && tokenLog.length) {
+        const waitMs = Math.max(1000, tokenLog[0].t + 60000 - Date.now());
+        await new Promise((r) => setTimeout(r, Math.min(waitMs, 15000)));
+    }
+}
+function recordOutputTokens(tokens) {
+    tokenLog.push({ t: Date.now(), tokens });
+}
+// Rough output-token estimate before a call (we don't know the count until the
+// response arrives; the recorded value uses the real usage). ~30 tokens per
+// "R$" occurrence (each tx line has ~2) is a safe over-estimate for text.
+function estimateOutputTokens(data, mimeType) {
+    if (mimeType === "text/plain" || mimeType === "text/csv") {
+        const rs = (data.match(/R\$/g) || []).length;
+        return Math.min(8192, Math.max(800, rs * 25));
+    }
+    return 4000; // image/PDF: conservative
+}
 // Shared extraction helper — avoids duplicating Claude call logic between
 // parseBankStatement (sync HTTP) and processImportJob (async Storage trigger).
 async function callClaudeExtraction(client, data, mimeType, filename, maxTokens = 8192) {
@@ -232,14 +268,149 @@ async function callClaudeExtraction(client, data, mimeType, filename, maxTokens 
             { type: "text", text: "Extraia todas as transações financeiras deste extrato bancário em PDF." }
         ];
     }
+    // Stay under the Tier 1 output-token/min budget before issuing the call.
+    await throttleOutput(estimateOutputTokens(data, mimeType));
     const message = await client.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: maxTokens,
         system: buildSystemPrompt(),
         messages: [{ role: "user", content }]
     });
+    // Record real usage so the sliding window reflects what was actually emitted.
+    recordOutputTokens(message.usage?.output_tokens ?? 0);
     const rawText = message.content.find((b) => b.type === "text")?.text ?? "{}";
     return parseOrRepairJson(client, rawText);
+}
+// ─── Server-side PDF text extraction (pdfjs in Node, no worker) ──────────────
+//
+// Mirrors the client's pdf-extract.ts: groups text items by rounded y-coordinate
+// to reconstruct visual rows, so the text fed to Claude matches the desktop path.
+// Running this server-side (instead of in the device) eliminates the mobile OOM
+// and feeds the fast chunked path instead of a slow single raw-PDF call.
+//
+// pdfjs-dist v5 ships ESM only. The runtime dynamic import below is wrapped in
+// new Function so TypeScript (module: commonjs) doesn't down-level it to
+// require(), which would fail on the ESM-only module.
+const importEsm = new Function("s", "return import(s)");
+async function extractPdfTextServer(buffer) {
+    const pdfjs = await importEsm("pdfjs-dist/legacy/build/pdf.mjs");
+    const doc = await pdfjs.getDocument({
+        data: new Uint8Array(buffer),
+        useSystemFonts: true,
+        isEvalSupported: false,
+    }).promise;
+    const pageTexts = [];
+    for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
+        const page = await doc.getPage(pageNum);
+        const content = await page.getTextContent();
+        const rowMap = new Map();
+        for (const item of content.items) {
+            if (!item.str || !item.str.trim() || !item.transform)
+                continue;
+            const y = Math.round(item.transform[5]);
+            const x = item.transform[4];
+            if (!rowMap.has(y))
+                rowMap.set(y, []);
+            rowMap.get(y).push({ x, text: item.str });
+        }
+        const rows = [...rowMap.entries()]
+            .sort((a, b) => b[0] - a[0])
+            .map(([, items]) => items.sort((a, b) => a.x - b.x).map((i) => i.text).join("  ").trim())
+            .filter(Boolean);
+        pageTexts.push(rows.join("\n"));
+    }
+    return pageTexts.join("\n");
+}
+// ─── Deterministic Mercado Pago adapter (zero API cost) ──────────────────────
+//
+// Operates on the real pdfjs text layout, where each transaction is a single
+// "anchor line": "DD-MM-YYYY [inline desc] [ID] R$ valor R$ saldo". Long PIX
+// descriptions add lines BEFORE the anchor. Validated against the real 304-tx
+// statement: 304/304, reconciles 25,04 → 16,81.
+//
+// KEEP IN SYNC with src/lib/import/adapters/mercado-pago.ts (anchor-line format).
+// Note: this does NOT categorize — the client categorizes on receipt (avoids
+// duplicating the keyword engine here).
+function parseBRCentavosSrv(raw) {
+    let s = raw.replace(/\s/g, "").replace(/R\$/gi, "").trim();
+    const neg = s.startsWith("-") || s.startsWith("−");
+    s = s.replace(/^[-−+]/, "").trim();
+    const br = s.match(/^([\d.]+),(\d{1,2})$/);
+    if (br) {
+        const cents = parseInt(br[1].replace(/\./g, ""), 10) * 100 + parseInt(br[2].padEnd(2, "0"), 10);
+        return neg ? -cents : cents;
+    }
+    return 0;
+}
+function parseBRDateSrv(raw) {
+    const f = raw.trim().match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
+    if (!f)
+        return null;
+    const y = f[3].length === 2 ? 2000 + parseInt(f[3], 10) : parseInt(f[3], 10);
+    return `${y}-${f[2].padStart(2, "0")}-${f[1].padStart(2, "0")}`;
+}
+const MP_DETECT = /mercado\s*pago|mp\s*conta/i;
+const MP_ANCHOR = /^(\d{2}-\d{2}-\d{4})\s+(.*?)\s+R\$\s*([-−]?[\d.]+,\d{2})\s+R\$\s*([-−]?[\d.]+,\d{2})\s*$/;
+const MP_NOISE = /^(data\s+descri|detalhe dos|extrato de|saldo (inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj|\d+\/\d+$)/i;
+const MP_ID_TAIL = /(\d{12,})\s*$/;
+function isMercadoPagoSrv(text) {
+    return MP_DETECT.test(text.slice(0, 2000).normalize("NFD").replace(/[̀-ͯ]/g, ""));
+}
+// Returns a ParsedClaudeResponse-shaped object so it plugs into the same
+// downstream pipeline (reconcile/classify/build) as the Claude path. category
+// is left undefined — the client fills it in.
+function tryMercadoPagoDeterministic(rawText) {
+    if (!isMercadoPagoSrv(rawText))
+        return null;
+    const initM = rawText.match(/saldo\s+inicial[:\s]*R?\$?\s*([\d.,]+)/i);
+    const finM = rawText.match(/saldo\s+final[:\s]*R?\$?\s*([\d.,]+)/i);
+    const initialBalance = initM ? parseBRCentavosSrv(initM[1]) / 100 : undefined;
+    const finalBalance = finM ? parseBRCentavosSrv(finM[1]) / 100 : undefined;
+    const lines = rawText.split("\n").map((l) => l.trim());
+    const transactions = [];
+    let descBuf = [];
+    for (const line of lines) {
+        if (!line)
+            continue;
+        const m = line.match(MP_ANCHOR);
+        if (!m) {
+            const norm = line.normalize("NFD").replace(/[̀-ͯ]/g, "");
+            if (!MP_NOISE.test(norm)) {
+                descBuf.push(line);
+                if (descBuf.length > 4)
+                    descBuf.shift();
+            }
+            else {
+                descBuf = [];
+            }
+            continue;
+        }
+        const [, dateRaw, middle, valorRaw, saldoRaw] = m;
+        const date = parseBRDateSrv(dateRaw);
+        if (!date) {
+            descBuf = [];
+            continue;
+        }
+        let inlineDesc = middle;
+        const idm = middle.match(MP_ID_TAIL);
+        if (idm)
+            inlineDesc = middle.slice(0, idm.index).trim();
+        const description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
+        const valueCents = parseBRCentavosSrv(valorRaw);
+        const balanceCents = parseBRCentavosSrv(saldoRaw);
+        transactions.push({
+            date,
+            description,
+            amount: Math.abs(valueCents) / 100,
+            type: valueCents >= 0 ? "income" : "expense",
+            balance: balanceCents / 100,
+        });
+        descBuf = [];
+    }
+    // Too few records → not a layout we recognize; let Claude handle it.
+    if (transactions.length < 3)
+        return null;
+    return { sourceLabel: "Mercado Pago", initialBalance, finalBalance, transactions };
 }
 // ─── Chunked text extraction (parallel batches) ───────────────────────────────
 //
@@ -269,57 +440,114 @@ function looksLikeTxStart(line) {
 // (lines after the last tx, e.g. "Saldo final") rides with the last chunk.
 function splitTextIntoChunks(text) {
     const lines = text.split("\n");
-    const startIdx = [];
+    const anchorIdx = [];
     for (let i = 0; i < lines.length; i++) {
         if (looksLikeTxStart(lines[i]))
-            startIdx.push(i);
+            anchorIdx.push(i);
     }
     // Not enough structure to chunk safely → single chunk
-    if (startIdx.length <= CHUNK_THRESHOLD)
+    if (anchorIdx.length <= CHUNK_THRESHOLD)
         return [text];
+    // Cut AFTER each anchor line, not at it. In layouts like Mercado Pago the
+    // description spans the lines BEFORE the anchor (date+id+amount+balance line),
+    // so cutting at the anchor would orphan a transaction's description in the
+    // previous chunk and its amount in the next — breaking reconciliation at every
+    // boundary. Cutting after the anchor keeps each [description + anchor] block
+    // whole. Validated on the real 304-tx statement: 0 split transactions (vs 6
+    // with the naive cut-at-anchor approach).
     const chunks = [];
-    for (let g = 0; g < startIdx.length; g += BATCH_TX_COUNT) {
-        // First group starts at line 0 to keep the document header.
-        const from = g === 0 ? 0 : startIdx[g];
-        const nextGroup = g + BATCH_TX_COUNT;
-        // Last group runs to the end of the document to keep the footer/summary.
-        const to = nextGroup < startIdx.length ? startIdx[nextGroup] : lines.length;
+    const n = anchorIdx.length;
+    for (let k = 0; k < n; k += BATCH_TX_COUNT) {
+        // Start right after the previous group's last anchor (chunk 0 keeps the
+        // document header by starting at line 0).
+        const from = k === 0 ? 0 : anchorIdx[k - 1] + 1;
+        // End right after this group's last anchor so the block stays whole; the
+        // last group runs to EOF to keep the footer (e.g. "Saldo final").
+        const lastInGroup = Math.min(k + BATCH_TX_COUNT - 1, n - 1);
+        const to = lastInGroup === n - 1 ? lines.length : anchorIdx[lastInGroup] + 1;
         chunks.push(lines.slice(from, to).join("\n"));
     }
     return chunks;
 }
+// Assemble per-chunk results into one response. Transactions are concatenated
+// in document order (no dedup: the cut-after-anchor chunking produces no overlap,
+// and reconciliation must see every raw transaction in sequence). Header fields:
+// sourceLabel/initialBalance = first non-null; finalBalance = last non-null.
+function assembleMerged(perChunk, headers) {
+    const transactions = [];
+    for (const txs of perChunk)
+        for (const t of txs)
+            transactions.push(t);
+    return {
+        sourceLabel: headers.find((r) => r.sourceLabel)?.sourceLabel,
+        initialBalance: headers.find((r) => r.initialBalance != null)?.initialBalance,
+        finalBalance: [...headers].reverse().find((r) => r.finalBalance != null)?.finalBalance,
+        transactions,
+    };
+}
+// Reconcile a parsed response (convert to signed centavos, run the balance-column
+// / totals check). KEEP IN SYNC with the conversion in processImportJob.
+function reconcileParsed(parsed) {
+    const txs = (parsed.transactions ?? []).map((t) => ({
+        signedCents: Math.round((t.type === "income" ? t.amount : -t.amount) * 100),
+        balanceCents: t.balance != null ? Math.round(t.balance * 100) : undefined,
+    }));
+    const initC = parsed.initialBalance != null ? Math.round(parsed.initialBalance * 100) : undefined;
+    const finC = parsed.finalBalance != null ? Math.round(parsed.finalBalance * 100) : undefined;
+    return reconcileServer(txs, initC, finC);
+}
 async function extractTextInChunks(client, text, filename) {
     const chunks = splitTextIntoChunks(text);
-    // Small statement → one call (default token budget is plenty).
+    // Small statement → one call. Retry once if it doesn't reconcile.
     if (chunks.length === 1) {
-        return callClaudeExtraction(client, text, "text/plain", filename);
-    }
-    const results = await Promise.all(chunks.map((chunk) => callClaudeExtraction(client, chunk, "text/plain", filename)));
-    // Merge: transactions concatenated in document order. Dedup defensively in
-    // case a boundary heuristic ever overlaps (would otherwise double-count and
-    // break reconciliation). Only dedup when a balance is present — the running
-    // balance is a monotonic total that never legitimately repeats, so a
-    // collision there is a true overlap. Without a balance, two identical rows
-    // (e.g. two equal coffees on the same day) are kept as distinct.
-    const seen = new Set();
-    const transactions = [];
-    for (const r of results) {
-        for (const t of r.transactions ?? []) {
-            if (t.balance != null) {
-                const key = `${t.date}|${(t.description ?? "").toLowerCase().trim()}|${t.amount}|${t.balance}`;
-                if (seen.has(key))
-                    continue;
-                seen.add(key);
-            }
-            transactions.push(t);
+        let parsed = await callClaudeExtraction(client, text, "text/plain", filename);
+        if (!reconcileParsed(parsed).ok) {
+            const retry = await callClaudeExtraction(client, text, "text/plain", filename);
+            if (reconcileParsed(retry).ok)
+                parsed = retry;
         }
+        return parsed;
     }
-    // sourceLabel & initialBalance: first non-null (document header is in chunk 0).
-    // finalBalance: last non-null (closest to the end of the document).
-    const sourceLabel = results.find((r) => r.sourceLabel)?.sourceLabel;
-    const initialBalance = results.find((r) => r.initialBalance != null)?.initialBalance;
-    const finalBalance = [...results].reverse().find((r) => r.finalBalance != null)?.finalBalance;
-    return { sourceLabel, initialBalance, finalBalance, transactions };
+    // Sequential extraction: the output-token throttle spaces the calls to stay
+    // under the Tier 1 budget. Parallelism wouldn't help — the per-minute rate
+    // cap is the floor, not concurrency. Optimize for never failing, not speed.
+    const perChunk = [];
+    const headers = [];
+    for (const chunk of chunks) {
+        const r = await callClaudeExtraction(client, chunk, "text/plain", filename);
+        headers.push(r);
+        perChunk.push(r.transactions ?? []);
+    }
+    let merged = assembleMerged(perChunk, headers);
+    const rec = reconcileParsed(merged);
+    // Targeted retry: a broken balance points at the region that dropped (or
+    // misread) a transaction. Map each suspect tx back to its chunk via cumulative
+    // offsets, plus the chunk immediately before it (a missing tx makes the NEXT
+    // balance look wrong, so the gap often sits at the boundary). Re-extract only
+    // those chunks — ~2.5K output each, not the whole document. "partial" only if
+    // it still doesn't reconcile after this.
+    if (!rec.ok && rec.suspectIndices.length > 0) {
+        const affected = new Set();
+        for (const idx of rec.suspectIndices) {
+            let acc = 0;
+            for (let ci = 0; ci < perChunk.length; ci++) {
+                if (idx < acc + perChunk[ci].length) {
+                    affected.add(ci);
+                    if (ci > 0)
+                        affected.add(ci - 1);
+                    break;
+                }
+                acc += perChunk[ci].length;
+            }
+        }
+        for (const ci of affected) {
+            const r = await callClaudeExtraction(client, chunks[ci], "text/plain", filename);
+            headers[ci] = r;
+            perChunk[ci] = r.transactions ?? [];
+        }
+        merged = assembleMerged(perChunk, headers);
+    }
+    return merged;
 }
 async function alertJobFailure(resendKey, msg, jobId, workspaceId) {
     try {
@@ -374,7 +602,7 @@ exports.parseBankStatement = (0, https_1.onRequest)({
     const isText = mimeType === "text/plain" || mimeType === "text/csv";
     const data = isText ? (textData || "") : (fileData || "");
     try {
-        const client = new sdk_1.default({ apiKey });
+        const client = new sdk_1.default({ apiKey, maxRetries: 6 });
         const parsed = await callClaudeExtraction(client, data, mimeType, filename);
         const sourceLabel = parsed.sourceLabel ?? "Extrato";
         const transactions = (parsed.transactions ?? []).map((t) => ({
@@ -809,7 +1037,7 @@ Exemplos de tom:
 - "Carro engoliu R$3.527 — 27% de tudo que saiu. São 2,3 salários mínimos só de ferro."
   (esse exemplo só vale se salário mínimo foi fornecido)
 - "Gastos explodiram 2333% vs mês passado. O que mudou?"`;
-    const client = new sdk_1.default({ apiKey });
+    const client = new sdk_1.default({ apiKey, maxRetries: 6 });
     try {
         const message = await client.messages.create({
             model: "claude-haiku-4-5-20251001",
@@ -894,7 +1122,7 @@ Retorna APENAS JSON válido:
   "valorMensal": 200,
   "mensagem": "Frase de impacto do Salvô! sobre essa meta (ex: 'Com R$200 por mês, em 5 meses você tem um colchão real. Ninguém te tira do sério.')"
 }`;
-    const client = new sdk_1.default({ apiKey });
+    const client = new sdk_1.default({ apiKey, maxRetries: 6 });
     try {
         const message = await client.messages.create({
             model: "claude-haiku-4-5-20251001",
@@ -1140,7 +1368,7 @@ function classifyServer(description, signedCents, bankSlug, claudeClassification
 exports.processImportJob = (0, storage_1.onObjectFinalized)({
     secrets: ["ANTHROPIC_API_KEY", "RESEND_API_KEY"],
     timeoutSeconds: 300,
-    memory: "512MiB",
+    memory: "1GiB",
 }, async (event) => {
     const objectPath = event.data.name;
     // Only process files uploaded under imports/
@@ -1193,7 +1421,7 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
         }).catch(() => { });
         return;
     }
-    const client = new sdk_1.default({ apiKey });
+    const client = new sdk_1.default({ apiKey, maxRetries: 6 });
     // ── Extraction ────────────────────────────────────────────────────────
     // Text path (pdfjs extracted client-side, common case): chunked parallel
     // extraction — scales to any size and stays well under the 300s timeout.
@@ -1203,7 +1431,42 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
     try {
         const isPdfFile = filename.endsWith(".pdf");
         if (isPdfFile) {
-            parsed = await callClaudeExtraction(client, fileBuffer.toString("base64"), "application/pdf", originalFilename, 32000);
+            // Extract text server-side with pdfjs (no device OOM), then run the
+            // chunked parallel extraction — fast (~30s) and stable, versus a single
+            // 32K-token raw-PDF call (~170s and prone to truncation/instability).
+            let pdfText = "";
+            try {
+                pdfText = await extractPdfTextServer(fileBuffer);
+            }
+            catch (pdfErr) {
+                const m = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
+                console.error("[import-job] pdf text extraction error:", m);
+                await jobRef.update({
+                    status: "failed",
+                    error: /password/i.test(m)
+                        ? "Esse PDF tá protegido por senha. Abre no computador pra importar."
+                        : "Não consegui abrir esse PDF. Tenta exportar de novo.",
+                    failedAt: admin.firestore.FieldValue.serverTimestamp(),
+                }).catch(() => { });
+                return;
+            }
+            if (pdfText.trim().length > 100) {
+                // Try the deterministic adapter first (zero API cost, ~instant). Only
+                // accept it if it reconciles — otherwise fall through to Claude. This
+                // keeps Claude as a true fallback even on mobile, so a recognized bank
+                // (Mercado Pago today) costs nothing.
+                const deterministic = tryMercadoPagoDeterministic(pdfText);
+                if (deterministic && reconcileParsed(deterministic).ok) {
+                    parsed = deterministic;
+                }
+                else {
+                    parsed = await extractTextInChunks(client, pdfText, originalFilename);
+                }
+            }
+            else {
+                // No text layer (scanned/image-only PDF) → Claude reads the raw PDF.
+                parsed = await callClaudeExtraction(client, fileBuffer.toString("base64"), "application/pdf", originalFilename, 32000);
+            }
         }
         else {
             parsed = await extractTextInChunks(client, fileBuffer.toString("utf-8"), originalFilename);

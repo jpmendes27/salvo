@@ -11,6 +11,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "firebase-admin": "^13.0.0",
     "firebase-functions": "^6.0.0",
+    "pdfjs-dist": "^5.7.284",
     "resend": "^6.12.3"
   },
   "devDependencies": {
