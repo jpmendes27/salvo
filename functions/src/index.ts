@@ -191,7 +191,8 @@ async function callClaudeExtraction(
   client: Anthropic,
   data: string,
   mimeType: string,
-  filename?: string
+  filename?: string,
+  maxTokens = 8192
 ): Promise<ParsedClaudeResponse> {
   type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
   const isImage =
@@ -233,7 +234,7 @@ async function callClaudeExtraction(
 
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 8192,
+    max_tokens: maxTokens,
     system: buildSystemPrompt(),
     messages: [{ role: "user", content }]
   });
@@ -242,6 +243,105 @@ async function callClaudeExtraction(
     message.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
 
   return parseOrRepairJson(client, rawText);
+}
+
+// ─── Chunked text extraction (parallel batches) ───────────────────────────────
+//
+// A single Claude call truncates at max_tokens AND approaches the 300s timeout
+// for large statements (304+ transactions ≈ 17K output tokens ≈ 240s).
+// Splitting the text into batches of ~50 transactions and extracting them in
+// parallel keeps each call small (~2.8K tokens, ~40s) and the total fast,
+// regardless of statement size.
+//
+// Chunk boundaries are aligned to transaction-start lines (date-anchored) so a
+// transaction is never split across two chunks — this keeps reconciliation
+// (which needs the full ordered balance sequence) intact.
+
+const BATCH_TX_COUNT = 50;
+// Below this many transactions a single call is cheaper than the chunk overhead.
+const CHUNK_THRESHOLD = 60;
+
+// A line that starts a new transaction block. Covers the common BR layouts:
+//   "06/05/2024"            (Mercado Pago: date on its own line)
+//   "06/05/2024 ... 18,75"  (generic inline: date description amount)
+//   "06 MAI ..."            (Nubank fatura/extrato)
+function looksLikeTxStart(line: string): boolean {
+  const l = line.trim();
+  return (
+    /^\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?(\s|$)/.test(l) ||
+    /^\d{1,2}\s+[A-Za-zÀ-ÿ]{3,4}\b/.test(l)
+  );
+}
+
+// Partition text lines into chunks of ~BATCH_TX_COUNT transactions each.
+// The header prefix (lines before the first tx) rides with chunk 0; the footer
+// (lines after the last tx, e.g. "Saldo final") rides with the last chunk.
+function splitTextIntoChunks(text: string): string[] {
+  const lines = text.split("\n");
+  const startIdx: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (looksLikeTxStart(lines[i])) startIdx.push(i);
+  }
+
+  // Not enough structure to chunk safely → single chunk
+  if (startIdx.length <= CHUNK_THRESHOLD) return [text];
+
+  const chunks: string[] = [];
+  for (let g = 0; g < startIdx.length; g += BATCH_TX_COUNT) {
+    // First group starts at line 0 to keep the document header.
+    const from = g === 0 ? 0 : startIdx[g];
+    const nextGroup = g + BATCH_TX_COUNT;
+    // Last group runs to the end of the document to keep the footer/summary.
+    const to = nextGroup < startIdx.length ? startIdx[nextGroup] : lines.length;
+    chunks.push(lines.slice(from, to).join("\n"));
+  }
+  return chunks;
+}
+
+async function extractTextInChunks(
+  client: Anthropic,
+  text: string,
+  filename?: string
+): Promise<ParsedClaudeResponse> {
+  const chunks = splitTextIntoChunks(text);
+
+  // Small statement → one call (default token budget is plenty).
+  if (chunks.length === 1) {
+    return callClaudeExtraction(client, text, "text/plain", filename);
+  }
+
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      callClaudeExtraction(client, chunk, "text/plain", filename)
+    )
+  );
+
+  // Merge: transactions concatenated in document order. Dedup defensively in
+  // case a boundary heuristic ever overlaps (would otherwise double-count and
+  // break reconciliation). Only dedup when a balance is present — the running
+  // balance is a monotonic total that never legitimately repeats, so a
+  // collision there is a true overlap. Without a balance, two identical rows
+  // (e.g. two equal coffees on the same day) are kept as distinct.
+  const seen = new Set<string>();
+  const transactions: NonNullable<ParsedClaudeResponse["transactions"]> = [];
+  for (const r of results) {
+    for (const t of r.transactions ?? []) {
+      if (t.balance != null) {
+        const key = `${t.date}|${(t.description ?? "").toLowerCase().trim()}|${t.amount}|${t.balance}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      transactions.push(t);
+    }
+  }
+
+  // sourceLabel & initialBalance: first non-null (document header is in chunk 0).
+  // finalBalance: last non-null (closest to the end of the document).
+  const sourceLabel = results.find((r) => r.sourceLabel)?.sourceLabel;
+  const initialBalance = results.find((r) => r.initialBalance != null)?.initialBalance;
+  const finalBalance = [...results].reverse().find((r) => r.finalBalance != null)?.finalBalance;
+
+  return { sourceLabel, initialBalance, finalBalance, transactions };
 }
 
 async function alertJobFailure(
@@ -1271,15 +1371,28 @@ export const processImportJob = onObjectFinalized(
     const client = new Anthropic({ apiKey });
 
     // ── Extraction ────────────────────────────────────────────────────────
+    // Text path (pdfjs extracted client-side, common case): chunked parallel
+    // extraction — scales to any size and stays well under the 300s timeout.
+    // Raw PDF path (pdfjs failed, e.g. mobile OOM, rare): can't be chunked
+    // (binary), so a single call with a high token budget is the safety net.
     let parsed: ParsedClaudeResponse;
     try {
       const isPdfFile = filename.endsWith(".pdf");
-      const mimeType = isPdfFile ? "application/pdf" : "text/plain";
-      const data = isPdfFile
-        ? fileBuffer.toString("base64")
-        : fileBuffer.toString("utf-8");
-
-      parsed = await callClaudeExtraction(client, data, mimeType, originalFilename);
+      if (isPdfFile) {
+        parsed = await callClaudeExtraction(
+          client,
+          fileBuffer.toString("base64"),
+          "application/pdf",
+          originalFilename,
+          32000
+        );
+      } else {
+        parsed = await extractTextInChunks(
+          client,
+          fileBuffer.toString("utf-8"),
+          originalFilename
+        );
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[import-job] extraction error:", msg);
