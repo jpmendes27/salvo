@@ -82,6 +82,7 @@ echo "Creating alert: 5xx errors on processImportJob..."
 cat > /tmp/salvo-alert-5xx.json << EOF
 {
   "displayName": "Salvô processImportJob — 5xx errors",
+  "combiner": "OR",
   "conditions": [
     {
       "displayName": "5xx response rate > 0",
@@ -121,6 +122,7 @@ echo "Creating alert: high latency on processImportJob..."
 cat > /tmp/salvo-alert-latency.json << EOF
 {
   "displayName": "Salvô processImportJob — latency > 240s",
+  "combiner": "OR",
   "conditions": [
     {
       "displayName": "p99 latency > 240s",
