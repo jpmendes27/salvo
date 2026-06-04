@@ -10,8 +10,8 @@
 #   - Project set (gcloud config set project YOUR_PROJECT_ID)
 #   - Cloud Monitoring API enabled
 #
-# Run once after deploying processImportJob for the first time.
-# Subsequent deploys do NOT re-run this script.
+# Idempotent: safe to re-run. Reuses an existing notification channel and
+# skips alert policies that already exist (matched by display name).
 #
 # Usage:
 #   chmod +x scripts/setup-alerting.sh
@@ -22,6 +22,7 @@ set -euo pipefail
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 ALERT_EMAIL="salvo@jpmendes.com"
 FUNCTION_NAME="processImportJob"
+CHANNEL_DISPLAY="Salvô Admin Alert"
 
 if [[ -z "$PROJECT_ID" ]]; then
   echo "ERROR: No GCP project set. Run: gcloud config set project YOUR_PROJECT_ID"
@@ -33,21 +34,50 @@ echo "Alert email: $ALERT_EMAIL"
 echo "Function: $FUNCTION_NAME"
 echo ""
 
-# ── 1. Create email notification channel ─────────────────────────────────────
-echo "Creating email notification channel..."
-CHANNEL_JSON=$(gcloud alpha monitoring channels create \
-  --display-name="Salvô Admin Alert" \
-  --type=email \
-  --channel-labels="email_address=${ALERT_EMAIL}" \
-  --format=json \
-  --project="$PROJECT_ID")
+# ── 1. Email notification channel (idempotent: reuse if it exists) ───────────
+echo "Looking for existing email notification channel..."
+CHANNEL_NAME=$(gcloud alpha monitoring channels list \
+  --filter="displayName=\"${CHANNEL_DISPLAY}\" AND type=\"email\"" \
+  --format="value(name)" \
+  --project="$PROJECT_ID" 2>/dev/null | head -n1)
 
-CHANNEL_NAME=$(echo "$CHANNEL_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])")
-echo "  Channel created: $CHANNEL_NAME"
+if [[ -z "$CHANNEL_NAME" ]]; then
+  echo "  None found — creating..."
+  CHANNEL_JSON=$(gcloud alpha monitoring channels create \
+    --display-name="$CHANNEL_DISPLAY" \
+    --type=email \
+    --channel-labels="email_address=${ALERT_EMAIL}" \
+    --format=json \
+    --project="$PROJECT_ID")
+  CHANNEL_NAME=$(echo "$CHANNEL_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])")
+  echo "  Channel created: $CHANNEL_NAME"
+else
+  echo "  Reusing existing channel: $CHANNEL_NAME"
+fi
 echo ""
+
+# Helper: create a policy only if one with the same displayName doesn't exist.
+create_policy_if_absent() {
+  local display="$1"
+  local file="$2"
+  local existing
+  existing=$(gcloud alpha monitoring policies list \
+    --filter="displayName=\"${display}\"" \
+    --format="value(name)" \
+    --project="$PROJECT_ID" 2>/dev/null | head -n1)
+  if [[ -n "$existing" ]]; then
+    echo "  Already exists, skipping: $existing"
+  else
+    gcloud alpha monitoring policies create \
+      --policy-from-file="$file" \
+      --project="$PROJECT_ID"
+  fi
+}
 
 # ── 2. Alert policy: 5xx errors ───────────────────────────────────────────────
 # Gen2 Cloud Functions run on Cloud Run; use run.googleapis.com metrics.
+# NOTE: notificationRateLimit is only valid on log-based policies, so it is
+# intentionally omitted here — metric alerts group by incident by default.
 echo "Creating alert: 5xx errors on processImportJob..."
 cat > /tmp/salvo-alert-5xx.json << EOF
 {
@@ -73,7 +103,7 @@ cat > /tmp/salvo-alert-5xx.json << EOF
   ],
   "notificationChannels": ["${CHANNEL_NAME}"],
   "alertStrategy": {
-    "notificationRateLimit": { "period": "900s" }
+    "autoClose": "1800s"
   },
   "documentation": {
     "content": "processImportJob returned a 5xx response. Check Cloud Logging for details: https://console.cloud.google.com/logs/query?project=${PROJECT_ID}",
@@ -82,10 +112,8 @@ cat > /tmp/salvo-alert-5xx.json << EOF
 }
 EOF
 
-gcloud alpha monitoring policies create \
-  --policy-from-file=/tmp/salvo-alert-5xx.json \
-  --project="$PROJECT_ID"
-echo "  5xx alert created."
+create_policy_if_absent "Salvô processImportJob — 5xx errors" /tmp/salvo-alert-5xx.json
+echo "  5xx alert done."
 echo ""
 
 # ── 3. Alert policy: high latency (> 240s = 80% of 300s timeout) ─────────────
@@ -114,7 +142,7 @@ cat > /tmp/salvo-alert-latency.json << EOF
   ],
   "notificationChannels": ["${CHANNEL_NAME}"],
   "alertStrategy": {
-    "notificationRateLimit": { "period": "1800s" }
+    "autoClose": "1800s"
   },
   "documentation": {
     "content": "processImportJob p99 latency exceeded 240s (80% of 300s timeout). Risk of 504. Check Cloud Logging.",
@@ -123,10 +151,8 @@ cat > /tmp/salvo-alert-latency.json << EOF
 }
 EOF
 
-gcloud alpha monitoring policies create \
-  --policy-from-file=/tmp/salvo-alert-latency.json \
-  --project="$PROJECT_ID"
-echo "  Latency alert created."
+create_policy_if_absent "Salvô processImportJob — latency > 240s" /tmp/salvo-alert-latency.json
+echo "  Latency alert done."
 echo ""
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
@@ -135,4 +161,4 @@ rm -f /tmp/salvo-alert-5xx.json /tmp/salvo-alert-latency.json
 echo "✓ Done. Alerts active for project: $PROJECT_ID"
 echo "  View alerts: https://console.cloud.google.com/monitoring/alerting?project=${PROJECT_ID}"
 echo ""
-echo "NOTE: Run this script ONCE after the first deploy. Do not re-run."
+echo "NOTE: Safe to re-run — reuses the channel and skips existing policies."
