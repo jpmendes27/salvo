@@ -85,7 +85,12 @@ export function extractMPHeader(text: string): BankHeader {
 // KEEP IN SYNC with functions/src/index.ts (tryMercadoPagoDeterministic).
 
 const MP_ANCHOR = /^(\d{2}-\d{2}-\d{4})\s+(.*?)\s+R\$\s*([-−]?[\d.]+,\d{2})\s+R\$\s*([-−]?[\d.]+,\d{2})\s*$/;
-const MP_NOISE = /^(data\s+descri|detalhe dos|extrato de|saldo (inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj|\d+\/\d+$)/i;
+// Page-break chrome (column header repeated atop each page, page numbers): SKIP
+// without resetting — a description can straddle a page break, its anchor landing
+// on the next page after this chrome. Document-header chrome: RESET so the holder
+// name / CPF / totals never bleed into the first transaction.
+const MP_NOISE_SKIP = /^(data\s+descri|\d+\/\d+\s*$)/i;
+const MP_NOISE_RESET = /^(detalhe dos|extrato de|saldo\s+(inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj)/i;
 const MP_ID_TAIL = /(\d{12,})\s*$/;
 
 export function parseMPText(rawText: string): { lines: RawLine[]; header: BankHeader } {
@@ -100,15 +105,14 @@ export function parseMPText(rawText: string): { lines: RawLine[]; header: BankHe
 
     const m = line.match(MP_ANCHOR);
     if (!m) {
-      // Non-anchor line: a candidate description line, unless it's document
-      // chrome (header, column titles, summary). Keep only the most recent few
-      // so leftover header lines never bleed into the first transaction.
       const norm = line.normalize("NFD").replace(/[̀-ͯ]/g, "");
-      if (!MP_NOISE.test(norm)) {
+      if (MP_NOISE_SKIP.test(norm)) {
+        // page-break chrome — ignore but keep the buffered description
+      } else if (MP_NOISE_RESET.test(norm)) {
+        descBuf = [];
+      } else {
         descBuf.push(line);
         if (descBuf.length > 4) descBuf.shift();
-      } else {
-        descBuf = [];
       }
       continue;
     }
@@ -122,7 +126,9 @@ export function parseMPText(rawText: string): { lines: RawLine[]; header: BankHe
     if (idm) { id = idm[1]; inlineDesc = middle.slice(0, idm.index).trim(); }
 
     // Description = buffered lines (they precede the anchor) + inline remainder.
-    const description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
+    // Never empty: fall back to the ID so the row survives the downstream filter.
+    let description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
+    if (!description) description = id ? `Mercado Pago ${id}` : "Mercado Pago";
 
     records.push({ date, description, valorRaw: `R$ ${valor}`, saldoRaw: `R$ ${saldo}`, id });
     descBuf = [];

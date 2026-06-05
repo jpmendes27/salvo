@@ -71,7 +71,14 @@ function parseBRDateSrv(raw) {
 }
 const MP_DETECT = /mercado\s*pago|mp\s*conta/i;
 const MP_ANCHOR = /^(\d{2}-\d{2}-\d{4})\s+(.*?)\s+R\$\s*([-−]?[\d.]+,\d{2})\s+R\$\s*([-−]?[\d.]+,\d{2})\s*$/;
-const MP_NOISE = /^(data\s+descri|detalhe dos|extrato de|saldo (inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj|\d+\/\d+$)/i;
+// Page-break chrome (column header repeated atop each page, page numbers like
+// "12/25"): SKIP without resetting the description buffer — a transaction's
+// description can straddle a page break, with its anchor line landing on the
+// next page after this chrome. Resetting here was dropping those descriptions.
+const MP_NOISE_SKIP = /^(data\s+descri|\d+\/\d+\s*$)/i;
+// Document-header chrome (holder name area, CPF, period, totals, section title):
+// RESET the buffer so none of it bleeds into the first transaction's description.
+const MP_NOISE_RESET = /^(detalhe dos|extrato de|saldo\s+(inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj)/i;
 const MP_ID_TAIL = /(\d{12,})\s*$/;
 function isMercadoPagoSrv(text) {
     return MP_DETECT.test(text.slice(0, 2000).normalize("NFD").replace(/[̀-ͯ]/g, ""));
@@ -97,13 +104,16 @@ function tryMercadoPagoDeterministic(rawText) {
         const m = line.match(MP_ANCHOR);
         if (!m) {
             const norm = line.normalize("NFD").replace(/[̀-ͯ]/g, "");
-            if (!MP_NOISE.test(norm)) {
+            if (MP_NOISE_SKIP.test(norm)) {
+                // page-break chrome — ignore but keep the buffered description
+            }
+            else if (MP_NOISE_RESET.test(norm)) {
+                descBuf = [];
+            }
+            else {
                 descBuf.push(line);
                 if (descBuf.length > 4)
                     descBuf.shift();
-            }
-            else {
-                descBuf = [];
             }
             continue;
         }
@@ -117,7 +127,13 @@ function tryMercadoPagoDeterministic(rawText) {
         const idm = middle.match(MP_ID_TAIL);
         if (idm)
             inlineDesc = middle.slice(0, idm.index).trim();
-        const description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
+        let description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
+        // Conserto 1 — never emit an empty description: a tx the gate's filter would
+        // drop (and thus break the chain, contradicting the adapter's own reconcile).
+        // Fall back to the operation ID so the row survives the filter and the adapter
+        // and gate reconcile the EXACT same set.
+        if (!description)
+            description = idm ? `Mercado Pago ${idm[1]}` : "Mercado Pago";
         const valueCents = parseBRCentavosSrv(valorRaw);
         const balanceCents = parseBRCentavosSrv(saldoRaw);
         transactions.push({
