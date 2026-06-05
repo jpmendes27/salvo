@@ -93,20 +93,33 @@ const MP_ANCHOR = /^(\d{2}-\d{2}-\d{4})\s+(.*?)\s+R\$\s*([-−]?[\d.]+,\d{2})\s+
 // The description sits in the left column (X ≈ 89). Data is at X ≈ 41, the ID at
 // X ≈ 198, so [70, 190) isolates the description column.
 const DESC_XMIN = 70, DESC_XMAX = 190;
-// A transaction's description spans TWO text lines — one just ABOVE its anchor
-// (Y ≈ anchorY + 7) and one just BELOW (Y ≈ anchorY − 5). The next transaction's
-// description is ~23 away, so a ±12 Y-band captures this transaction's lines and
-// nothing else. This is the fix for the leak: the line BELOW the anchor was being
-// attributed to the NEXT transaction by any line-order parser.
-const Y_BAND = 12;
+// Page chrome that is never part of a description (column header, page numbers,
+// document header lines, legal footer).
+const MP_GEOM_NOISE = /^(data\s+descri|detalhe dos|extrato de|saldo\s+(inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj|mercado\s+pago institu|\d+\/\d+\s*$)/i;
+// A transaction's description and its anchor form a tight vertical cluster: gaps
+// WITHIN a transaction are ≤12, gaps BETWEEN transactions are ≥23 (measured: the
+// 13–22 range is empty). So a gap > 17 marks a transaction boundary. This is far
+// more robust than a fixed Y-band: descriptions have 2 OR 3 lines, above AND
+// below the anchor, with anchor spacing that varies by description length.
+const MP_GAP_SPLIT = 17;
 
 type RawItem = { x: number; y: number; s: string };
+type GLine = { y: number; joined: string; leftText: string; isAnchor: boolean };
+
+function isGeomNoise(s: string): boolean {
+  return MP_GEOM_NOISE.test(s.normalize("NFD").replace(/[̀-ͯ]/g, ""));
+}
 
 // GEOMETRIC Mercado Pago extraction. Works on raw pdfjs item coordinates, not on
 // flattened text, because the description is a 2D layout (a column beside the
 // anchor, on rows above AND below it) that line-order flattening scrambles.
-// Detects by CONTENT (anchor rows + header balances), not a bank-name string.
-// The reconciliation gate downstream rejects any false positive.
+// Strategy: group items into visual lines, cluster lines by vertical gap (each
+// cluster = one transaction: an anchor + its description lines), and CARRY a
+// page's trailing orphan-description cluster onto the first transaction of the
+// next page (handles transactions whose anchor sits at the top of a page while
+// their first description line is at the bottom of the previous one).
+// Detects by CONTENT (anchor rows + header balances), not a bank-name string;
+// the reconciliation gate downstream rejects any false positive.
 export async function tryMercadoPagoGeometric(buffer: Buffer): Promise<ParsedClaudeResponse | null> {
   const pdfjs = await importEsm("pdfjs-dist/legacy/build/pdf.mjs");
   const doc = await pdfjs.getDocument({
@@ -118,6 +131,7 @@ export async function tryMercadoPagoGeometric(buffer: Buffer): Promise<ParsedCla
   let initialBalance: number | undefined;
   let finalBalance: number | undefined;
   const transactions: NonNullable<ParsedClaudeResponse["transactions"]> = [];
+  let carryDown: string[] = []; // description lines from the bottom of the prev page
 
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
@@ -137,49 +151,61 @@ export async function tryMercadoPagoGeometric(buffer: Buffer): Promise<ParsedCla
     if (im && initialBalance === undefined) initialBalance = parseBRCentavosSrv(im[1]) / 100;
     if (fm) finalBalance = parseBRCentavosSrv(fm[1]) / 100;
 
-    // Group items into visual lines by exact Y.
+    // Build visual lines (group items by exact Y); keep only anchor lines and
+    // left-column description lines; drop page chrome.
     const byY = new Map<number, RawItem[]>();
     for (const it of items) {
       if (!byY.has(it.y)) byY.set(it.y, []);
       byY.get(it.y)!.push(it);
     }
-    const lines = [...byY.entries()]
-      .map(([y, its]) => ({ y, joined: its.sort((a, b) => a.x - b.x).map((i) => i.s).join("  ") }))
+    const lines: GLine[] = [...byY.entries()]
+      .map(([y, its]) => {
+        const sorted = its.sort((a, b) => a.x - b.x);
+        const joined = sorted.map((i) => i.s).join("  ");
+        const leftText = sorted.filter((i) => i.x >= DESC_XMIN && i.x < DESC_XMAX).map((i) => i.s).join(" ");
+        return { y, joined, leftText, isAnchor: MP_ANCHOR.test(joined) };
+      })
+      .filter((l) => (l.isAnchor || l.leftText) && !isGeomNoise(l.leftText) && !isGeomNoise(l.joined))
       .sort((a, b) => b.y - a.y);
 
-    for (const line of lines) {
-      const m = line.joined.match(MP_ANCHOR);
-      if (!m) continue;
-      const [, dateRaw, , valorRaw, saldoRaw] = m;
-      const date = parseBRDateSrv(dateRaw);
-      if (!date) continue;
+    // Cluster by vertical gap.
+    const clusters: GLine[][] = [];
+    let cur: GLine[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (i > 0 && lines[i - 1].y - lines[i].y > MP_GAP_SPLIT) { clusters.push(cur); cur = []; }
+      cur.push(lines[i]);
+    }
+    if (cur.length) clusters.push(cur);
 
-      // Description = left-column items within the anchor's Y-band (above + below),
-      // grouped by Y (top-to-bottom), each row's words ordered left-to-right.
-      const descByY = new Map<number, RawItem[]>();
-      for (const it of items) {
-        if (it.x >= DESC_XMIN && it.x < DESC_XMAX && it.y !== line.y && Math.abs(it.y - line.y) <= Y_BAND) {
-          if (!descByY.has(it.y)) descByY.set(it.y, []);
-          descByY.get(it.y)!.push(it);
-        }
+    let firstAnchorDone = false;
+    for (let c = 0; c < clusters.length; c++) {
+      const cl = clusters[c];
+      const anchor = cl.find((l) => l.isAnchor);
+      if (anchor) {
+        const m = anchor.joined.match(MP_ANCHOR)!;
+        const date = parseBRDateSrv(m[1]);
+        if (!date) continue;
+        let descLines = cl.filter((l) => !l.isAnchor && l.leftText).sort((a, b) => b.y - a.y).map((l) => l.leftText);
+        // First transaction on the page inherits the previous page's trailing
+        // orphan description (its "above" line spilled onto the previous page).
+        if (!firstAnchorDone && carryDown.length) { descLines = [...carryDown, ...descLines]; carryDown = []; }
+        firstAnchorDone = true;
+        let description = descLines.join(" ").replace(/\s{2,}/g, " ").trim();
+        if (!description) description = "Mercado Pago"; // never empty (survives the gate filter)
+        const valueCents = parseBRCentavosSrv(m[3]);
+        const balanceCents = parseBRCentavosSrv(m[4]);
+        transactions.push({
+          date,
+          description,
+          amount: Math.abs(valueCents) / 100,
+          type: valueCents >= 0 ? "income" : "expense",
+          balance: balanceCents / 100,
+        });
+      } else if (c === clusters.length - 1) {
+        // Last cluster on the page with no anchor = the "above" description of the
+        // first transaction on the NEXT page. Carry it over.
+        carryDown = cl.filter((l) => l.leftText).sort((a, b) => b.y - a.y).map((l) => l.leftText);
       }
-      let description = [...descByY.entries()]
-        .sort((a, b) => b[0] - a[0])
-        .map(([, its]) => its.sort((a, b) => a.x - b.x).map((i) => i.s).join(" "))
-        .join(" ")
-        .replace(/\s{2,}/g, " ")
-        .trim();
-      if (!description) description = "Mercado Pago"; // never empty (survives the gate filter)
-
-      const valueCents = parseBRCentavosSrv(valorRaw);
-      const balanceCents = parseBRCentavosSrv(saldoRaw);
-      transactions.push({
-        date,
-        description,
-        amount: Math.abs(valueCents) / 100,
-        type: valueCents >= 0 ? "income" : "expense",
-        balance: balanceCents / 100,
-      });
     }
   }
 
