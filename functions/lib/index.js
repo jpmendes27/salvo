@@ -300,6 +300,85 @@ async function categorizeViaClaude(client, descriptions, model = "claude-sonnet-
     const uniqueCodes = (0, pdf_core_1.parseCategoryCodes)(raw, unique.length);
     return descriptions.map((d) => uniqueCodes[indexOf.get(d)]);
 }
+// Firestore doc id from a normalized merchant key (no spaces/slashes, bounded).
+function merchantCacheId(key) {
+    return key.replace(/\s+/g, "_").replace(/[^a-z_]/g, "").slice(0, 200);
+}
+// ─── Deterministic-first categorization cascade ──────────────────────────────
+// Per transaction, in order: (1) direction rule, (2) BR merchant seed, (3)
+// Firestore merchant cache, (4) Claude on the RESIDUE only — batched, deduped by
+// merchant key, with results written back to the cache so next time they're free.
+// Returns one code (or null) per input description. Non-blocking: if the Claude
+// residue call fails, those stay null and the client's rule-based categorizer
+// fills them in.
+async function categorizeCascade(client, db, descriptions) {
+    const valid = new Set(pdf_core_1.IMPORT_CATEGORIES);
+    const n = descriptions.length;
+    const results = new Array(n).fill(null);
+    const keys = new Array(n).fill("");
+    // Layers 1 & 2 — direction rule + merchant seed (free, local).
+    const needCache = [];
+    for (let i = 0; i < n; i++) {
+        const dir = (0, pdf_core_1.directionRule)(descriptions[i]);
+        if (dir) {
+            results[i] = dir;
+            continue;
+        }
+        const seed = (0, pdf_core_1.seedLookup)(descriptions[i]);
+        if (seed) {
+            results[i] = seed;
+            continue;
+        }
+        const key = (0, pdf_core_1.normalizeMerchantKey)(descriptions[i]);
+        keys[i] = key;
+        if (key)
+            needCache.push(i); // else leave null → client rule-based fallback
+    }
+    // Layer 3 — Firestore merchant cache (batched read by normalized key).
+    const uniqueKeys = [...new Set(needCache.map((i) => keys[i]))];
+    const cacheMap = new Map();
+    if (uniqueKeys.length) {
+        const refs = uniqueKeys.map((k) => db.collection("merchantCategories").doc(merchantCacheId(k)));
+        const snaps = await db.getAll(...refs).catch(() => []);
+        snaps.forEach((s, j) => {
+            const c = s.exists ? s.data()?.c : undefined;
+            if (c && valid.has(c))
+                cacheMap.set(uniqueKeys[j], c);
+        });
+    }
+    const residue = [];
+    for (const i of needCache) {
+        const c = cacheMap.get(keys[i]);
+        if (c)
+            results[i] = c;
+        else
+            residue.push(i);
+    }
+    // Layer 4 — Claude on the residue only, deduped by merchant key.
+    if (residue.length) {
+        const residueKeys = [...new Set(residue.map((i) => keys[i]))];
+        const repDesc = residueKeys.map((k) => descriptions[residue.find((i) => keys[i] === k)]);
+        try {
+            // Haiku on the residue: the seed already resolved the known merchants, so
+            // the residue is obscure names where Haiku matches Sonnet (both mostly
+            // "Outros"). Much cheaper/faster for the same result.
+            const codes = await categorizeViaClaude(client, repDesc, "claude-haiku-4-5-20251001");
+            const keyToCode = new Map();
+            residueKeys.forEach((k, j) => keyToCode.set(k, codes[j]));
+            for (const i of residue)
+                results[i] = keyToCode.get(keys[i]) ?? null;
+            // Persist to cache so these merchants are free next time.
+            const batch = db.batch();
+            keyToCode.forEach((code, k) => batch.set(db.collection("merchantCategories").doc(merchantCacheId(k)), { c: code, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }));
+            await batch.commit().catch((e) => console.error("[import-job] merchant cache write failed:", e));
+            console.log(`[import-job] residue: ${residueKeys.length} merchants via Claude (cached for next time)`);
+        }
+        catch (e) {
+            console.error("[import-job] residue categorization failed (non-blocking):", e instanceof Error ? e.message : String(e));
+        }
+    }
+    return results;
+}
 // ─── Chunked text extraction (parallel batches) ───────────────────────────────
 //
 // A single Claude call truncates at max_tokens AND approaches the 300s timeout
@@ -1372,14 +1451,15 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
             dedupKey: `${t.date}|${desc.toLowerCase()}|${amount.toFixed(2)}`,
         };
     });
-    // ── Category enrichment (separate, batched, NON-BLOCKING) ─────────────
-    // Runs after the gate. On any failure (rate limit/timeout/parse), leave the
-    // category null — the client falls back to its rule-based categorizer.
-    // A reconciled import is NEVER failed because of categorization.
+    // ── Category enrichment — deterministic-first cascade, NON-BLOCKING ────
+    // Runs after the gate: direction rule → merchant seed → Firestore cache →
+    // Claude on the residue (cached for next time). Claude is reached only for
+    // merchants no free layer resolved. On any failure the category stays null
+    // and the client's rule-based categorizer fills it in. A reconciled import
+    // is NEVER failed because of categorization.
     try {
-        const codes = await categorizeViaClaude(client, transactions.map((t) => t.description));
+        const codes = await categorizeCascade(client, db, transactions.map((t) => t.description));
         transactions.forEach((t, i) => { t.category = codes[i] ?? t.category; });
-        console.log(`[import-job] categorized ${transactions.length} txs via Claude`);
     }
     catch (catErr) {
         console.error("[import-job] categorization failed (non-blocking):", catErr instanceof Error ? catErr.message : String(catErr));

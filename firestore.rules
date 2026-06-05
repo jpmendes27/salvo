@@ -51,6 +51,12 @@ service cloud.firestore {
       allow delete: if verified() && resource.data.uid == request.auth.uid;
     }
 
+    // Merchant→category cache, written and read ONLY by the import job via the
+    // Admin SDK (which bypasses these rules). Clients have no access.
+    match /merchantCategories/{merchant} {
+      allow read, write: if false;
+    }
+
     match /consents/{consentId} {
       allow create: if verified() && request.resource.data.uid == request.auth.uid;
       allow read: if verified() && resource.data.uid == request.auth.uid;
