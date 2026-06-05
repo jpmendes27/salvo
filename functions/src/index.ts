@@ -4,6 +4,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
 import crypto from "crypto";
 import * as admin from "firebase-admin";
+import {
+  type ParsedClaudeResponse,
+  extractPdfTextServer,
+  tryMercadoPagoDeterministic,
+  reconcileServer,
+  reconcileParsed,
+  classifyServer,
+} from "./pdf-core";
 
 admin.initializeApp();
 
@@ -112,20 +120,6 @@ Categorias disponíveis: ${IMPORT_CATEGORIES.join(", ")}
 - Retorne APENAS o JSON puro, sem markdown, sem texto adicional, sem explicação`;
 }
 
-type ParsedClaudeResponse = {
-  sourceLabel?: string;
-  initialBalance?: number;
-  finalBalance?: number;
-  transactions?: Array<{
-    date: string;
-    description: string;
-    amount: number;           // always positive
-    type: "income" | "expense";
-    category?: string;
-    classification?: "ENTRADA" | "SAIDA" | "IGNORAR";
-    balance?: number;         // running balance after this tx (from Saldo column)
-  }>;
-};
 
 function extractJsonObject(rawText: string): string | null {
   const start = rawText.indexOf("{");
@@ -291,151 +285,6 @@ async function callClaudeExtraction(
   return parseOrRepairJson(client, rawText);
 }
 
-// ─── Server-side PDF text extraction (pdfjs in Node, no worker) ──────────────
-//
-// Mirrors the client's pdf-extract.ts: groups text items by rounded y-coordinate
-// to reconstruct visual rows, so the text fed to Claude matches the desktop path.
-// Running this server-side (instead of in the device) eliminates the mobile OOM
-// and feeds the fast chunked path instead of a slow single raw-PDF call.
-//
-// pdfjs-dist v5 ships ESM only. The runtime dynamic import below is wrapped in
-// new Function so TypeScript (module: commonjs) doesn't down-level it to
-// require(), which would fail on the ESM-only module.
-const importEsm = new Function("s", "return import(s)") as (s: string) => Promise<{
-  getDocument: (opts: unknown) => { promise: Promise<PdfDoc> };
-}>;
-type PdfDoc = {
-  numPages: number;
-  getPage: (n: number) => Promise<{
-    getTextContent: () => Promise<{ items: Array<{ str?: string; transform?: number[] }> }>;
-  }>;
-};
-
-async function extractPdfTextServer(buffer: Buffer): Promise<string> {
-  const pdfjs = await importEsm("pdfjs-dist/legacy/build/pdf.mjs");
-  const doc = await pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-    useSystemFonts: true,
-    isEvalSupported: false,
-  }).promise;
-
-  const pageTexts: string[] = [];
-  for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
-    const page = await doc.getPage(pageNum);
-    const content = await page.getTextContent();
-    const rowMap = new Map<number, Array<{ x: number; text: string }>>();
-    for (const item of content.items) {
-      if (!item.str || !item.str.trim() || !item.transform) continue;
-      const y = Math.round(item.transform[5]);
-      const x = item.transform[4];
-      if (!rowMap.has(y)) rowMap.set(y, []);
-      rowMap.get(y)!.push({ x, text: item.str });
-    }
-    const rows = [...rowMap.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .map(([, items]) =>
-        items.sort((a, b) => a.x - b.x).map((i) => i.text).join("  ").trim()
-      )
-      .filter(Boolean);
-    pageTexts.push(rows.join("\n"));
-  }
-  return pageTexts.join("\n");
-}
-
-// ─── Deterministic Mercado Pago adapter (zero API cost) ──────────────────────
-//
-// Operates on the real pdfjs text layout, where each transaction is a single
-// "anchor line": "DD-MM-YYYY [inline desc] [ID] R$ valor R$ saldo". Long PIX
-// descriptions add lines BEFORE the anchor. Validated against the real 304-tx
-// statement: 304/304, reconciles 25,04 → 16,81.
-//
-// KEEP IN SYNC with src/lib/import/adapters/mercado-pago.ts (anchor-line format).
-// Note: this does NOT categorize — the client categorizes on receipt (avoids
-// duplicating the keyword engine here).
-
-function parseBRCentavosSrv(raw: string): number {
-  let s = raw.replace(/\s/g, "").replace(/R\$/gi, "").trim();
-  const neg = s.startsWith("-") || s.startsWith("−");
-  s = s.replace(/^[-−+]/, "").trim();
-  const br = s.match(/^([\d.]+),(\d{1,2})$/);
-  if (br) {
-    const cents = parseInt(br[1].replace(/\./g, ""), 10) * 100 + parseInt(br[2].padEnd(2, "0"), 10);
-    return neg ? -cents : cents;
-  }
-  return 0;
-}
-
-function parseBRDateSrv(raw: string): string | null {
-  const f = raw.trim().match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
-  if (!f) return null;
-  const y = f[3].length === 2 ? 2000 + parseInt(f[3], 10) : parseInt(f[3], 10);
-  return `${y}-${f[2].padStart(2, "0")}-${f[1].padStart(2, "0")}`;
-}
-
-const MP_DETECT = /mercado\s*pago|mp\s*conta/i;
-const MP_ANCHOR = /^(\d{2}-\d{2}-\d{4})\s+(.*?)\s+R\$\s*([-−]?[\d.]+,\d{2})\s+R\$\s*([-−]?[\d.]+,\d{2})\s*$/;
-const MP_NOISE = /^(data\s+descri|detalhe dos|extrato de|saldo (inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj|\d+\/\d+$)/i;
-const MP_ID_TAIL = /(\d{12,})\s*$/;
-
-function isMercadoPagoSrv(text: string): boolean {
-  return MP_DETECT.test(text.slice(0, 2000).normalize("NFD").replace(/[̀-ͯ]/g, ""));
-}
-
-// Returns a ParsedClaudeResponse-shaped object so it plugs into the same
-// downstream pipeline (reconcile/classify/build) as the Claude path. category
-// is left undefined — the client fills it in.
-function tryMercadoPagoDeterministic(rawText: string): ParsedClaudeResponse | null {
-  if (!isMercadoPagoSrv(rawText)) return null;
-
-  const initM = rawText.match(/saldo\s+inicial[:\s]*R?\$?\s*([\d.,]+)/i);
-  const finM = rawText.match(/saldo\s+final[:\s]*R?\$?\s*([\d.,]+)/i);
-  const initialBalance = initM ? parseBRCentavosSrv(initM[1]) / 100 : undefined;
-  const finalBalance = finM ? parseBRCentavosSrv(finM[1]) / 100 : undefined;
-
-  const lines = rawText.split("\n").map((l) => l.trim());
-  const transactions: NonNullable<ParsedClaudeResponse["transactions"]> = [];
-  let descBuf: string[] = [];
-
-  for (const line of lines) {
-    if (!line) continue;
-    const m = line.match(MP_ANCHOR);
-    if (!m) {
-      const norm = line.normalize("NFD").replace(/[̀-ͯ]/g, "");
-      if (!MP_NOISE.test(norm)) {
-        descBuf.push(line);
-        if (descBuf.length > 4) descBuf.shift();
-      } else {
-        descBuf = [];
-      }
-      continue;
-    }
-    const [, dateRaw, middle, valorRaw, saldoRaw] = m;
-    const date = parseBRDateSrv(dateRaw);
-    if (!date) { descBuf = []; continue; }
-
-    let inlineDesc = middle;
-    const idm = middle.match(MP_ID_TAIL);
-    if (idm) inlineDesc = middle.slice(0, idm.index).trim();
-    const description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
-
-    const valueCents = parseBRCentavosSrv(valorRaw);
-    const balanceCents = parseBRCentavosSrv(saldoRaw);
-    transactions.push({
-      date,
-      description,
-      amount: Math.abs(valueCents) / 100,
-      type: valueCents >= 0 ? "income" : "expense",
-      balance: balanceCents / 100,
-    });
-    descBuf = [];
-  }
-
-  // Too few records → not a layout we recognize; let Claude handle it.
-  if (transactions.length < 3) return null;
-
-  return { sourceLabel: "Mercado Pago", initialBalance, finalBalance, transactions };
-}
-
 // ─── Chunked text extraction (parallel batches) ───────────────────────────────
 //
 // A single Claude call truncates at max_tokens AND approaches the 300s timeout
@@ -515,18 +364,6 @@ function assembleMerged(
     finalBalance: [...headers].reverse().find((r) => r.finalBalance != null)?.finalBalance,
     transactions,
   };
-}
-
-// Reconcile a parsed response (convert to signed centavos, run the balance-column
-// / totals check). KEEP IN SYNC with the conversion in processImportJob.
-function reconcileParsed(parsed: ParsedClaudeResponse): { ok: boolean; validated: boolean; suspectIndices: number[]; reason?: string } {
-  const txs = (parsed.transactions ?? []).map((t) => ({
-    signedCents: Math.round((t.type === "income" ? t.amount : -t.amount) * 100),
-    balanceCents: t.balance != null ? Math.round(t.balance * 100) : undefined,
-  }));
-  const initC = parsed.initialBalance != null ? Math.round(parsed.initialBalance * 100) : undefined;
-  const finC = parsed.finalBalance != null ? Math.round(parsed.finalBalance * 100) : undefined;
-  return reconcileServer(txs, initC, finC);
 }
 
 async function extractTextInChunks(
@@ -1446,100 +1283,6 @@ export const sendAdminAlert = onRequest(
     }
   }
 );
-
-// ─── Server-side reconciliation ──────────────────────────────────────────────
-// KEEP IN SYNC with src/lib/import/reconcile.ts:reconcileWithBalanceColumn
-// Works in integer centavos to avoid floating-point drift.
-// ─── Reconciliation gate ──────────────────────────────────────────────────────
-//
-// The ONLY thing standing between extracted data and the user. It passes ONLY
-// when it has actually VALIDATED completeness — never on a silent skip:
-//   • there are transactions, AND
-//   • the document's final balance is known (anchors the end of the chain), AND
-//   • the per-line balance chain (or the sum, when no per-line balance) closes
-//     at the final balance within tolerance.
-// Anything it cannot validate returns ok:false (blocked). A dropped transaction
-// or a Saldo-as-Valor swap breaks the chain → ok:false → never shown as importable.
-function reconcileServer(
-  txs: Array<{ signedCents: number; balanceCents?: number }>,
-  initialBalanceCents?: number,
-  finalBalanceCents?: number,
-  toleranceCents = 2
-): { ok: boolean; validated: boolean; suspectIndices: number[]; reason?: string } {
-  if (txs.length === 0)
-    return { ok: false, validated: false, suspectIndices: [], reason: "nenhuma transação extraída" };
-
-  // Completeness can only be guaranteed if the final balance anchors the end of
-  // the chain. No final balance → cannot prove nothing was dropped → block.
-  if (finalBalanceCents === undefined)
-    return { ok: false, validated: false, suspectIndices: [], reason: "saldo final não encontrado no documento" };
-
-  const hasBalance = txs.some((t) => t.balanceCents !== undefined);
-
-  if (!hasBalance) {
-    // No per-line balance: validate the sum of all signed amounts against
-    // (final − initial). Requires the initial balance too.
-    if (initialBalanceCents === undefined)
-      return { ok: false, validated: false, suspectIndices: [], reason: "saldo inicial não encontrado" };
-    const sumCents = txs.reduce((s, t) => s + t.signedCents, 0);
-    const ok = Math.abs(sumCents - (finalBalanceCents - initialBalanceCents)) <= toleranceCents;
-    return { ok, validated: true, suspectIndices: ok ? [] : [-1], reason: ok ? undefined : "soma dos valores não bate com os saldos" };
-  }
-
-  // Per-line balance chain anchored at the initial balance, must close at final.
-  const inferredInitial =
-    txs[0].balanceCents !== undefined ? txs[0].balanceCents - txs[0].signedCents : undefined;
-  const initial = initialBalanceCents ?? inferredInitial;
-  if (initial === undefined)
-    return { ok: false, validated: false, suspectIndices: [], reason: "saldo inicial não encontrado" };
-
-  let running = initial;
-  const suspectIndices: number[] = [];
-  for (let i = 0; i < txs.length; i++) {
-    running += txs[i].signedCents;
-    const bc = txs[i].balanceCents;
-    if (bc !== undefined && Math.abs(running - bc) > toleranceCents) {
-      suspectIndices.push(i);
-      running = bc; // reset to authoritative balance to avoid cascade errors
-    }
-  }
-
-  const finalOk = Math.abs(running - finalBalanceCents) <= toleranceCents;
-  const ok = suspectIndices.length === 0 && finalOk;
-  return { ok, validated: true, suspectIndices, reason: ok ? undefined : "cadeia de saldo não fecha no saldo final" };
-}
-
-// ─── Server-side classification ───────────────────────────────────────────────
-// KEEP IN SYNC with src/lib/import/classify.ts
-// Applies IGNORAR overrides before the sign-based default.
-const MP_IGNORE_PATTERNS = [
-  /dinheiro\s+reservado/i,
-  /dinheiro\s+retirado/i,
-  /^reembolso\b/i,
-  /^estorno\b/i,
-];
-
-function classifyServer(
-  description: string,
-  signedCents: number,
-  bankSlug: string,
-  claudeClassification?: "ENTRADA" | "SAIDA" | "IGNORAR"
-): "ENTRADA" | "SAIDA" | "IGNORAR" {
-  if (signedCents === 0) return "IGNORAR";
-
-  const norm = description.normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
-
-  // Bank-specific IGNORAR patterns take priority over Claude's output
-  if (bankSlug === "mercado-pago" && MP_IGNORE_PATTERNS.some((p) => p.test(norm))) {
-    return "IGNORAR";
-  }
-
-  // Claude's IGNORAR hint is trusted for other cases
-  if (claudeClassification === "IGNORAR") return "IGNORAR";
-
-  // Sign-based default (source of truth)
-  return signedCents > 0 ? "ENTRADA" : "SAIDA";
-}
 
 // ─── Background import job (Storage trigger) ─────────────────────────────────
 //
