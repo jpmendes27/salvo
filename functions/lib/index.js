@@ -135,7 +135,7 @@ CRÍTICO — leia com atenção:
 6. "Rendimentos" = ENTRADA (rendimento da conta), type = "income".
 
 === REGRAS PARA category ===
-Categorias disponíveis: ${IMPORT_CATEGORIES.join(", ")}
+Categorias disponíveis: ${pdf_core_1.IMPORT_CATEGORIES.join(", ")}
 - income/ENTRADA → "Recebimentos" como padrão; outra se claramente identificável
 - expense/SAIDA → categoria mais específica
 - IGNORAR → "Transferencias"
@@ -190,12 +190,6 @@ async function parseOrRepairJson(client, rawText) {
     }
 }
 // ─── Import job helpers ──────────────────────────────────────────────────────
-const IMPORT_CATEGORIES = [
-    "Alimentacao", "Mercado", "Transporte", "Carro", "CartaoCredito",
-    "Assinaturas", "Saude", "Varejo", "Educacao", "Moradia", "Contas",
-    "Seguros", "Taxas", "Emprestimos", "Doacoes", "Transferencias",
-    "Hospedagem", "Viagem", "Lazer", "Recebimentos", "Outros",
-];
 // ─── Output-token rate limiter (Anthropic Tier 1: 8K output tokens/min) ──────
 //
 // A sliding 60s window of real output-token usage. Before each Claude call we
@@ -281,6 +275,30 @@ async function callClaudeExtraction(client, data, mimeType, filename, maxTokens 
     recordOutputTokens(message.usage?.output_tokens ?? 0);
     const rawText = message.content.find((b) => b.type === "text")?.text ?? "{}";
     return parseOrRepairJson(client, rawText);
+}
+// ─── Category enrichment (one batched, deduped Claude call) ──────────────────
+// Separate, lightweight pass that runs AFTER extraction + the reconciliation
+// gate. Sends the clean descriptions (deduped) and gets back one category code
+// each (~1 short token run per description), so the whole thing is one fast call
+// that fits the Tier 1 budget. Throws on API failure; the caller treats it as
+// non-blocking and never fails a reconciled import over categorization.
+async function categorizeViaClaude(client, descriptions, model = "claude-sonnet-4-6") {
+    // Dedup: identical descriptions are asked once, then mirrored back.
+    const unique = [...new Set(descriptions)];
+    const indexOf = new Map(unique.map((d, i) => [d, i]));
+    // Output ≈ one short "i":"Code" pair per unique description.
+    await throttleOutput(Math.min(8000, Math.max(400, unique.length * 10)));
+    const message = await client.messages.create({
+        model,
+        max_tokens: 8192,
+        temperature: 0,
+        system: (0, pdf_core_1.buildCategorySystemPrompt)(),
+        messages: [{ role: "user", content: (0, pdf_core_1.buildCategoryUserMessage)(unique) }],
+    });
+    recordOutputTokens(message.usage?.output_tokens ?? 0);
+    const raw = message.content.find((b) => b.type === "text")?.text ?? "";
+    const uniqueCodes = (0, pdf_core_1.parseCategoryCodes)(raw, unique.length);
+    return descriptions.map((d) => uniqueCodes[indexOf.get(d)]);
 }
 // ─── Chunked text extraction (parallel batches) ───────────────────────────────
 //
@@ -1313,39 +1331,12 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
     const reconciliation = (0, pdf_core_1.reconcileServer)(internalTxs, initialCents, finalCents);
     // ── Classification (ENTRADA / SAIDA / IGNORAR) ────────────────────────
     const classified = internalTxs.map((t) => (0, pdf_core_1.classifyServer)(t.description, t.signedCents, bankSlug, t.classification));
-    // ── Build saved transactions (exclude IGNORAR) ────────────────────────
-    const VALID_CATS = new Set(IMPORT_CATEGORIES);
-    const transactions = internalTxs
-        .filter((_, i) => classified[i] !== "IGNORAR")
-        .filter((t) => Math.abs(t.amount) > 0)
-        .map((t) => {
-        const amount = Math.abs(t.amount);
-        const desc = t.description.trim();
-        const cat = t.category && VALID_CATS.has(t.category) ? t.category : "Outros";
-        return {
-            date: t.date,
-            description: desc,
-            amount,
-            type: t.type,
-            category: cat,
-            sourceLabel,
-            source: /cartão|fatura|card/i.test(sourceLabel) ? "card" : "account",
-            monthKey: (t.date ?? "").slice(0, 7),
-            dedupKey: `${t.date}|${desc.toLowerCase()}|${amount.toFixed(2)}`,
-        };
-    });
-    const ignoredCount = classified.filter((c) => c === "IGNORAR").length;
-    const baseUpdate = {
-        transactions,
-        sourceLabel,
-        ignoredCount,
-        processedAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
     // ── THE GATE ──────────────────────────────────────────────────────────
     // Reconciliation is non-negotiable: extracted data is shown to the user
     // ONLY if the balance chain validated completeness. If it didn't (dropped
     // transaction, Saldo-as-Valor swap, missing balances, partial Claude
     // output), the result is BLOCKED — never surfaced as "X de X / importar".
+    // Checked BEFORE building/categorizing, so a blocked import wastes no work.
     if (!reconciliation.ok) {
         console.error(`[import-job] BLOCKED by reconciliation: ${reconciliation.reason} ` +
             `(${allRawTxs.length} txs, ${reconciliation.suspectIndices.length} suspect)`);
@@ -1359,7 +1350,48 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
         }
         return;
     }
-    await jobRef.update({ ...baseUpdate, status: "done" });
+    // ── Build saved transactions (exclude IGNORAR) ────────────────────────
+    const VALID_CATS = new Set(pdf_core_1.IMPORT_CATEGORIES);
+    const transactions = internalTxs
+        .filter((_, i) => classified[i] !== "IGNORAR")
+        .filter((t) => Math.abs(t.amount) > 0)
+        .map((t) => {
+        const amount = Math.abs(t.amount);
+        const desc = t.description.trim();
+        return {
+            date: t.date,
+            description: desc,
+            amount,
+            type: t.type,
+            // Provisional category: a valid one from the Claude extraction path,
+            // otherwise null — filled in by the category pass below.
+            category: (t.category && VALID_CATS.has(t.category) ? t.category : null),
+            sourceLabel,
+            source: /cartão|fatura|card/i.test(sourceLabel) ? "card" : "account",
+            monthKey: (t.date ?? "").slice(0, 7),
+            dedupKey: `${t.date}|${desc.toLowerCase()}|${amount.toFixed(2)}`,
+        };
+    });
+    // ── Category enrichment (separate, batched, NON-BLOCKING) ─────────────
+    // Runs after the gate. On any failure (rate limit/timeout/parse), leave the
+    // category null — the client falls back to its rule-based categorizer.
+    // A reconciled import is NEVER failed because of categorization.
+    try {
+        const codes = await categorizeViaClaude(client, transactions.map((t) => t.description));
+        transactions.forEach((t, i) => { t.category = codes[i] ?? t.category; });
+        console.log(`[import-job] categorized ${transactions.length} txs via Claude`);
+    }
+    catch (catErr) {
+        console.error("[import-job] categorization failed (non-blocking):", catErr instanceof Error ? catErr.message : String(catErr));
+    }
+    const ignoredCount = classified.filter((c) => c === "IGNORAR").length;
+    await jobRef.update({
+        transactions,
+        sourceLabel,
+        ignoredCount,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        status: "done",
+    });
 });
 // ─── Client-side error beacon ─────────────────────────────────────────────────
 // Receives operational errors that die on the device (Storage upload failure,

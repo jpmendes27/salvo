@@ -7,6 +7,7 @@
 // effects, the validator can import the COMPILED version and run the exact same
 // code processImportJob runs. No re-implementation, no drift.
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.IMPORT_CATEGORIES = void 0;
 exports.extractPdfTextServer = extractPdfTextServer;
 exports.parseBRCentavosSrv = parseBRCentavosSrv;
 exports.parseBRDateSrv = parseBRDateSrv;
@@ -14,6 +15,9 @@ exports.tryMercadoPagoGeometric = tryMercadoPagoGeometric;
 exports.reconcileServer = reconcileServer;
 exports.reconcileParsed = reconcileParsed;
 exports.classifyServer = classifyServer;
+exports.buildCategorySystemPrompt = buildCategorySystemPrompt;
+exports.buildCategoryUserMessage = buildCategoryUserMessage;
+exports.parseCategoryCodes = parseCategoryCodes;
 // ─── Server-side PDF text extraction (pdfjs in Node, no worker) ──────────────
 // pdfjs-dist v5 ships ESM only. The runtime dynamic import below is wrapped in
 // new Function so TypeScript (module: commonjs) doesn't down-level it to
@@ -256,5 +260,60 @@ function classifyServer(description, signedCents, bankSlug, claudeClassification
     if (claudeClassification === "IGNORAR")
         return "IGNORAR";
     return signedCents > 0 ? "ENTRADA" : "SAIDA";
+}
+// ─── Category enrichment (separate batched Claude pass) ──────────────────────
+// Pure helpers (prompt + parse). The call itself lives in index.ts, so this
+// module stays free of the Anthropic SDK and the local validator can drive its
+// own Sonnet-vs-Haiku comparison.
+exports.IMPORT_CATEGORIES = [
+    "Alimentacao", "Mercado", "Transporte", "Carro", "CartaoCredito",
+    "Assinaturas", "Saude", "Varejo", "Educacao", "Moradia", "Contas",
+    "Seguros", "Taxas", "Emprestimos", "Doacoes", "Transferencias",
+    "Hospedagem", "Viagem", "Lazer", "Recebimentos", "Outros",
+];
+function buildCategorySystemPrompt() {
+    return `Você categoriza transações financeiras brasileiras. Para cada descrição, escolha UMA destas 21 categorias e responda com o CÓDIGO EXATO (sem acento, como escrito):
+
+Alimentacao, Mercado, Transporte, Carro, CartaoCredito, Assinaturas, Saude, Varejo, Educacao, Moradia, Contas, Seguros, Taxas, Emprestimos, Doacoes, Transferencias, Hospedagem, Viagem, Lazer, Recebimentos, Outros
+
+Guia (exemplos):
+- Alimentacao: restaurante, lanchonete, padaria, bar, delivery. "CAPRICHOS DO TRIGO" → Alimentacao; "IFOOD" → Alimentacao; "RESTAURANTE X" → Alimentacao.
+- Mercado: supermercado, hortifruti, atacado, mercearia.
+- Transporte: Uber, 99, táxi, ônibus, metrô, BRT.
+- Carro: combustível, posto, oficina, pneu, pedágio, estacionamento. "POSTO IPIRANGA" → Carro; "auto posto" → Carro.
+- Saude: farmácia, drogaria, médico, hospital, clínica, plano de saúde, exame.
+- Assinaturas: Netflix, Spotify, streaming, software, academia (Gympass/Wellhub).
+- Varejo: lojas, e-commerce, magazine, shopping, roupas, eletrônicos.
+- Educacao: escola, faculdade, curso, livraria.
+- Moradia: aluguel, condomínio, IPTU.
+- Contas: luz, água, gás, internet, telefone.
+- Seguros, Taxas (IOF, tarifa, juros, multa), Emprestimos, Doacoes, Hospedagem, Viagem, Lazer: conforme o nome.
+- Recebimentos: dinheiro que ENTROU — salário, rendimento, "Pix recebido" de pessoa, depósito. "Pix recebido FABIANA" → Recebimentos; "Rendimentos" → Recebimentos.
+- Transferencias: "Pix enviado" para pessoa, TED, transferência entre contas. "Pix enviado JOAO" → Transferencias.
+- Outros: quando não encaixa com confiança em nenhuma acima.
+
+Você receberá uma lista numerada (índice: descrição). Responda SOMENTE um JSON {"0":"Codigo","1":"Codigo",...} com um código por índice. Nada além do JSON.`;
+}
+function buildCategoryUserMessage(descriptions) {
+    return "Categorize cada descrição:\n\n" +
+        descriptions.map((d, i) => `${i}: ${d}`).join("\n");
+}
+// Parse the model's JSON into a code per index. Anything missing or invalid
+// becomes "Outros" — never throws, so a malformed response degrades gracefully.
+function parseCategoryCodes(rawText, count) {
+    const valid = new Set(exports.IMPORT_CATEGORIES);
+    let obj = {};
+    try {
+        const s = rawText.indexOf("{"), e = rawText.lastIndexOf("}");
+        if (s !== -1 && e > s)
+            obj = JSON.parse(rawText.slice(s, e + 1));
+    }
+    catch { /* degrade to all-Outros */ }
+    const out = [];
+    for (let i = 0; i < count; i++) {
+        const code = obj[String(i)];
+        out.push(typeof code === "string" && valid.has(code) ? code : "Outros");
+    }
+    return out;
 }
 //# sourceMappingURL=pdf-core.js.map
