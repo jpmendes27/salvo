@@ -88,87 +88,104 @@ export function parseBRDateSrv(raw: string): string | null {
   return `${y}-${f[2].padStart(2, "0")}-${f[1].padStart(2, "0")}`;
 }
 
-const MP_DETECT = /mercado\s*pago|mp\s*conta/i;
+// Anchor line (joined left-to-right): "DD-MM-YYYY  ID  R$ valor  R$ saldo".
 const MP_ANCHOR = /^(\d{2}-\d{2}-\d{4})\s+(.*?)\s+R\$\s*([-−]?[\d.]+,\d{2})\s+R\$\s*([-−]?[\d.]+,\d{2})\s*$/;
-// Page-break chrome (column header repeated atop each page, page numbers like
-// "12/25"): SKIP without resetting the description buffer — a transaction's
-// description can straddle a page break, with its anchor line landing on the
-// next page after this chrome. Resetting here was dropping those descriptions.
-const MP_NOISE_SKIP = /^(data\s+descri|\d+\/\d+\s*$)/i;
-// Document-header chrome (holder name area, CPF, period, totals, section title):
-// RESET the buffer so none of it bleeds into the first transaction's description.
-const MP_NOISE_RESET = /^(detalhe dos|extrato de|saldo\s+(inicial|final)|entradas:|saidas:|periodo|cpf\/cnpj)/i;
-const MP_ID_TAIL = /(\d{12,})\s*$/;
+// The description sits in the left column (X ≈ 89). Data is at X ≈ 41, the ID at
+// X ≈ 198, so [70, 190) isolates the description column.
+const DESC_XMIN = 70, DESC_XMAX = 190;
+// A transaction's description spans TWO text lines — one just ABOVE its anchor
+// (Y ≈ anchorY + 7) and one just BELOW (Y ≈ anchorY − 5). The next transaction's
+// description is ~23 away, so a ±12 Y-band captures this transaction's lines and
+// nothing else. This is the fix for the leak: the line BELOW the anchor was being
+// attributed to the NEXT transaction by any line-order parser.
+const Y_BAND = 12;
 
-export function isMercadoPagoSrv(text: string): boolean {
-  return MP_DETECT.test(text.slice(0, 2000).normalize("NFD").replace(/[̀-ͯ]/g, ""));
-}
+type RawItem = { x: number; y: number; s: string };
 
-export function tryMercadoPagoDeterministic(rawText: string): ParsedClaudeResponse | null {
-  // Detect by CONTENT (the anchor-line pattern + header balances), NOT by a
-  // "Mercado Pago" string: the statement header opens with "EXTRATO DE CONTA" and
-  // the holder's name and often doesn't mention the bank in the first lines, so a
-  // string check misses it (this was the production bug — fell back to Claude).
-  // The anchor format (DD-MM-YYYY … ID R$valor R$saldo) plus header balances is
-  // specific enough; the reconciliation gate downstream rejects any false
-  // positive, so a wrong guess can never surface bad data — it just goes to Claude.
-  const initM = rawText.match(/saldo\s+inicial[:\s]*R?\$?\s*([\d.,]+)/i);
-  const finM = rawText.match(/saldo\s+final[:\s]*R?\$?\s*([\d.,]+)/i);
-  const initialBalance = initM ? parseBRCentavosSrv(initM[1]) / 100 : undefined;
-  const finalBalance = finM ? parseBRCentavosSrv(finM[1]) / 100 : undefined;
+// GEOMETRIC Mercado Pago extraction. Works on raw pdfjs item coordinates, not on
+// flattened text, because the description is a 2D layout (a column beside the
+// anchor, on rows above AND below it) that line-order flattening scrambles.
+// Detects by CONTENT (anchor rows + header balances), not a bank-name string.
+// The reconciliation gate downstream rejects any false positive.
+export async function tryMercadoPagoGeometric(buffer: Buffer): Promise<ParsedClaudeResponse | null> {
+  const pdfjs = await importEsm("pdfjs-dist/legacy/build/pdf.mjs");
+  const doc = await pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+    isEvalSupported: false,
+  }).promise;
 
-  const lines = rawText.split("\n").map((l) => l.trim());
+  let initialBalance: number | undefined;
+  let finalBalance: number | undefined;
   const transactions: NonNullable<ParsedClaudeResponse["transactions"]> = [];
-  let descBuf: string[] = [];
 
-  for (const line of lines) {
-    if (!line) continue;
-    const m = line.match(MP_ANCHOR);
-    if (!m) {
-      const norm = line.normalize("NFD").replace(/[̀-ͯ]/g, "");
-      if (MP_NOISE_SKIP.test(norm)) {
-        // page-break chrome — ignore but keep the buffered description
-      } else if (MP_NOISE_RESET.test(norm)) {
-        descBuf = [];
-      } else {
-        descBuf.push(line);
-        if (descBuf.length > 4) descBuf.shift();
-      }
-      continue;
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    const items: RawItem[] = content.items
+      .filter((i) => i.str && i.str.trim() && i.transform)
+      .map((i) => ({
+        x: Math.round(i.transform![4]),
+        y: Math.round(i.transform![5] * 10) / 10,
+        s: i.str!.trim(),
+      }));
+
+    // Header balances (initial = first seen; final = last seen across pages).
+    const pageText = items.map((i) => i.s).join(" ");
+    const im = pageText.match(/saldo\s+inicial[:\s]*R?\$?\s*([\d.,]+)/i);
+    const fm = pageText.match(/saldo\s+final[:\s]*R?\$?\s*([\d.,]+)/i);
+    if (im && initialBalance === undefined) initialBalance = parseBRCentavosSrv(im[1]) / 100;
+    if (fm) finalBalance = parseBRCentavosSrv(fm[1]) / 100;
+
+    // Group items into visual lines by exact Y.
+    const byY = new Map<number, RawItem[]>();
+    for (const it of items) {
+      if (!byY.has(it.y)) byY.set(it.y, []);
+      byY.get(it.y)!.push(it);
     }
-    const [, dateRaw, middle, valorRaw, saldoRaw] = m;
-    const date = parseBRDateSrv(dateRaw);
-    if (!date) { descBuf = []; continue; }
+    const lines = [...byY.entries()]
+      .map(([y, its]) => ({ y, joined: its.sort((a, b) => a.x - b.x).map((i) => i.s).join("  ") }))
+      .sort((a, b) => b.y - a.y);
 
-    let inlineDesc = middle;
-    const idm = middle.match(MP_ID_TAIL);
-    if (idm) inlineDesc = middle.slice(0, idm.index).trim();
-    let description = [...descBuf, inlineDesc].join(" ").replace(/\s{2,}/g, " ").trim();
+    for (const line of lines) {
+      const m = line.joined.match(MP_ANCHOR);
+      if (!m) continue;
+      const [, dateRaw, , valorRaw, saldoRaw] = m;
+      const date = parseBRDateSrv(dateRaw);
+      if (!date) continue;
 
-    // Conserto 1 — never emit an empty description: a tx the gate's filter would
-    // drop (and thus break the chain, contradicting the adapter's own reconcile).
-    // Fall back to the operation ID so the row survives the filter and the adapter
-    // and gate reconcile the EXACT same set.
-    if (!description) description = idm ? `Mercado Pago ${idm[1]}` : "Mercado Pago";
+      // Description = left-column items within the anchor's Y-band (above + below),
+      // grouped by Y (top-to-bottom), each row's words ordered left-to-right.
+      const descByY = new Map<number, RawItem[]>();
+      for (const it of items) {
+        if (it.x >= DESC_XMIN && it.x < DESC_XMAX && it.y !== line.y && Math.abs(it.y - line.y) <= Y_BAND) {
+          if (!descByY.has(it.y)) descByY.set(it.y, []);
+          descByY.get(it.y)!.push(it);
+        }
+      }
+      let description = [...descByY.entries()]
+        .sort((a, b) => b[0] - a[0])
+        .map(([, its]) => its.sort((a, b) => a.x - b.x).map((i) => i.s).join(" "))
+        .join(" ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      if (!description) description = "Mercado Pago"; // never empty (survives the gate filter)
 
-    const valueCents = parseBRCentavosSrv(valorRaw);
-    const balanceCents = parseBRCentavosSrv(saldoRaw);
-    transactions.push({
-      date,
-      description,
-      amount: Math.abs(valueCents) / 100,
-      type: valueCents >= 0 ? "income" : "expense",
-      balance: balanceCents / 100,
-    });
-    descBuf = [];
+      const valueCents = parseBRCentavosSrv(valorRaw);
+      const balanceCents = parseBRCentavosSrv(saldoRaw);
+      transactions.push({
+        date,
+        description,
+        amount: Math.abs(valueCents) / 100,
+        type: valueCents >= 0 ? "income" : "expense",
+        balance: balanceCents / 100,
+      });
+    }
   }
 
-  // Recognized only with enough anchor-format rows AND the header balances the
-  // gate needs. Otherwise → let Claude handle it.
   if (transactions.length < 3 || initialBalance === undefined || finalBalance === undefined) {
     return null;
   }
-
   return { sourceLabel: "Mercado Pago", initialBalance, finalBalance, transactions };
 }
 

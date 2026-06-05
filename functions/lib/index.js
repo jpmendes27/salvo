@@ -1230,27 +1230,28 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
     const doExtraction = async () => {
         const isPdfFile = filename.endsWith(".pdf");
         if (isPdfFile) {
-            let pdfText = "";
+            // Geometric Mercado Pago adapter first (zero API cost, correct 2D
+            // description layout). Accept ONLY if it passes the reconciliation gate;
+            // otherwise fall through to Claude. Logs are data-free: which path ran.
+            let geometric = null;
             try {
-                pdfText = await (0, pdf_core_1.extractPdfTextServer)(fileBuffer);
+                geometric = await (0, pdf_core_1.tryMercadoPagoGeometric)(fileBuffer);
             }
             catch (pdfErr) {
                 const m = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
                 throw new Error(/password/i.test(m) ? "PDF_PASSWORD" : "PDF_UNREADABLE");
             }
+            if (geometric) {
+                const rec = (0, pdf_core_1.reconcileParsed)(geometric);
+                console.log(`[import-job] deterministic adapter: ${geometric.transactions?.length ?? 0} txs, ` +
+                    `reconcile=${rec.ok ? "OK" : `FAIL(${rec.reason})`}`);
+                if (rec.ok)
+                    return geometric;
+            }
+            // Fallback: flatten to text and let Claude extract it.
+            console.log("[import-job] falling back to Claude chunked extraction");
+            const pdfText = await (0, pdf_core_1.extractPdfTextServer)(fileBuffer);
             if (pdfText.trim().length > 100) {
-                // Deterministic adapter first (zero API cost). Accept ONLY if it passes
-                // the reconciliation gate — otherwise fall through to the Claude path.
-                // Logs are data-free: just which path ran, for production validation.
-                const deterministic = (0, pdf_core_1.tryMercadoPagoDeterministic)(pdfText);
-                if (deterministic) {
-                    const detRec = (0, pdf_core_1.reconcileParsed)(deterministic);
-                    console.log(`[import-job] deterministic adapter: ${deterministic.transactions?.length ?? 0} txs, ` +
-                        `reconcile=${detRec.ok ? "OK" : `FAIL(${detRec.reason})`}`);
-                    if (detRec.ok)
-                        return deterministic;
-                }
-                console.log("[import-job] falling back to Claude chunked extraction");
                 return extractTextInChunks(client, pdfText, originalFilename);
             }
             // No text layer (scanned/image-only PDF) → Claude reads the raw PDF.

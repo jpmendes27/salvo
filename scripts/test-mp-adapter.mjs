@@ -3,15 +3,13 @@
  * test-mp-adapter.mjs — reproduces PRODUCTION extraction EXACTLY.
  *
  * Imports the COMPILED pdf-core module (functions/lib/pdf-core.js) — the very
- * same code processImportJob runs — instead of re-implementing it. So whatever
- * the deployed function does (extract, adapt, reconcile) happens here too, and a
- * production FAIL reproduces locally.
+ * same code processImportJob runs — so a production result reproduces locally.
  *
  * Build first:  cd functions && npx tsc
  * Run:          node scripts/test-mp-adapter.mjs "/path/extrato.pdf"
  *
- * DIAGNÓSTICO: prints ONLY counts and the reconciliation break point.
- * NEVER prints the extracted text (it has third-party CPFs).
+ * Prints counts, the reconciliation result, IGNORAR/entradas/saídas, and a
+ * MASKED sample of descriptions. NEVER the real text (third-party CPFs).
  */
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -19,45 +17,50 @@ import { createRequire } from "node:module";
 const pdfPath = process.argv[2];
 if (!pdfPath) { console.error("uso: node scripts/test-mp-adapter.mjs <extrato.pdf>"); process.exit(1); }
 
-// Import the compiled production module. createRequire lets this ESM script load
-// the CommonJS build and resolve its pdfjs dependency from functions/node_modules.
 const require = createRequire(new URL("../functions/lib/", import.meta.url));
 const core = require("./pdf-core.js");
-
 const buffer = fs.readFileSync(pdfPath);
 const ok = (b) => (b ? "✓" : "✗");
+const mask = (s) => s.replace(/[A-Za-zÀ-ÿ]/g, "x").replace(/[0-9]/g, "#");
 
 (async () => {
-  // ── Stage 1: extraction (the exact production extractPdfTextServer) ──
-  const text = await core.extractPdfTextServer(buffer);
-  const lines = text.split("\n");
-  console.log("─── EXTRAÇÃO (produção) ───");
-  console.log(`  chars: ${text.length} · linhas: ${lines.length}`);
-  const anchorLike = lines.filter((l) => /^\d{2}-\d{2}-\d{4}\b.*R\$.*R\$/.test(l.trim())).length;
-  const anyDate = lines.filter((l) => /\d{2}[-/]\d{2}[-/]\d{4}/.test(l)).length;
-  const anyRS = lines.filter((l) => /R\$/.test(l)).length;
-  console.log(`  linhas com data: ${anyDate} · linhas com R$: ${anyRS} · linhas-âncora (data…R$…R$): ${anchorLike}`);
-  console.log(`  ${ok(core.isMercadoPagoSrv(text))} detectado como Mercado Pago`);
+  const parsed = await core.tryMercadoPagoGeometric(buffer);
+  if (!parsed) { console.log("✗ adapter retornou NULL (não reconheceu)"); return; }
 
-  // ── Stage 2: deterministic adapter ──
-  const parsed = core.tryMercadoPagoDeterministic(text);
-  console.log("\n─── ADAPTER DETERMINÍSTICO ───");
-  if (parsed === null) {
-    console.log("  ✗ retornou NULL (não reconheceu / <3 transações)");
-    console.log(`  → DIAGNÓSTICO: padrão não casou (âncoras por heurística: ${anchorLike})`);
-  } else {
-    const n = parsed.transactions?.length ?? 0;
-    console.log(`  transações: ${n}`);
-    console.log(`  saldo inicial: ${parsed.initialBalance} · saldo final: ${parsed.finalBalance}`);
+  const n = parsed.transactions.length;
+  console.log("─── ADAPTER GEOMÉTRICO (código de produção) ───");
+  console.log(`${ok(n === 304)} transações: ${n}`);
+  console.log(`${ok(parsed.initialBalance === 25.04 && parsed.finalBalance === 16.81)} saldos: ${parsed.initialBalance} → ${parsed.finalBalance}`);
 
-    // ── Stage 3: reconciliation gate (the exact production reconcileParsed) ──
-    const rec = core.reconcileParsed(parsed);
-    console.log("\n─── PORTÃO DE RECONCILIAÇÃO ───");
-    console.log(`  ${ok(rec.ok)} reconcile = ${rec.ok ? "OK" : `FAIL — ${rec.reason}`}`);
-    if (!rec.ok && rec.suspectIndices.length) {
-      const first = rec.suspectIndices.find((i) => i >= 0);
-      console.log(`  ponto de quebra: índice ${first} de ${n} (1ª descontinuidade de saldo)`);
-      console.log(`  linhas suspeitas: ${rec.suspectIndices.filter((i) => i >= 0).length}`);
-    }
+  const rec = core.reconcileParsed(parsed);
+  console.log(`${ok(rec.ok)} PORTÃO reconcile = ${rec.ok ? "OK" : `FAIL — ${rec.reason}`}`);
+  const empty = parsed.transactions.filter((t) => !t.description).length;
+  console.log(`${ok(empty === 0)} descrições vazias: ${empty}`);
+
+  // ── side effects ──
+  const slug = "mercado-pago";
+  let ignorar = 0, entradas = 0, saidas = 0;
+  for (const t of parsed.transactions) {
+    const signed = Math.round((t.type === "income" ? t.amount : -t.amount) * 100);
+    const c = core.classifyServer(t.description, signed, slug);
+    if (c === "IGNORAR") ignorar++;
+    else if (c === "ENTRADA") entradas += t.amount;
+    else saidas += t.amount;
   }
+  console.log("\n─── EFEITOS COLATERAIS ───");
+  console.log(`  IGNORAR: ${ignorar} (esperado ~157)`);
+  console.log(`  Entradas reais: R$ ${entradas.toFixed(2)} (esperado ~7K, não ~13K)`);
+  console.log(`  Saídas reais: R$ ${saidas.toFixed(2)}`);
+  // any "reservado/retirado" leaking into non-IGNORAR?
+  const leak = parsed.transactions.filter((t) => {
+    const signed = Math.round((t.type === "income" ? t.amount : -t.amount) * 100);
+    const c = core.classifyServer(t.description, signed, slug);
+    return c !== "IGNORAR" && /reservad|retirad/i.test(t.description);
+  }).length;
+  console.log(`  ${ok(leak === 0)} "reservado/retirado" vazando pras entradas/saídas: ${leak}`);
+
+  console.log("\n─── amostra de descrições (mascaradas) ───");
+  [0, 2, 24, 100, 175, 253, 300].forEach((i) => {
+    if (parsed.transactions[i]) console.log(`  #${i}: ${mask(parsed.transactions[i].description).slice(0, 48)}`);
+  });
 })().catch((e) => { console.error("ERRO:", e.message); process.exit(1); });
