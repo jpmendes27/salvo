@@ -9,7 +9,7 @@ import { deleteDoc, doc, getDoc } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { ArrowLeft, CreditCard, ChevronRight, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuthUser } from "@/app/auth-provider";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { TxRow } from "@/components/TxRow";
@@ -18,7 +18,7 @@ import { useCardData, currentFatura, limitInfo, cardToneLine } from "@/lib/cards
 import { detectBank } from "@/lib/banks";
 import { isCardsEnabled } from "@/lib/flags";
 import { colors, radius, typography } from "@/lib/design-system";
-import { formatCurrency, monthLabel } from "@/lib/money";
+import { currentMonthKey, formatCurrency, monthLabel } from "@/lib/money";
 import { CATEGORY_LABELS } from "@/lib/parsers";
 import type { Card, Fatura, RecurringItem, Transaction } from "@/lib/types";
 
@@ -70,7 +70,9 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
     });
   }, [cards, faturas]);
 
-  const card = ordered.find((c) => c.id === selectedId) ?? ordered[0] ?? null;
+  // Active tab: "all" (aggregated) or a card id. Default "all" with >1 card;
+  // a one-shot hint or a single card collapses to that card.
+  const tab: string | null = selectedId ?? (ordered.length > 1 ? "all" : ordered[0]?.id ?? null);
 
   if (loading) return <Shell text="Carregando..." />;
 
@@ -94,15 +96,15 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
           </div>
         ) : (
           <>
-            {/* Card selector (when more than one) */}
+            {/* Tabs: [Todos] + one per card (only with >1 card) */}
             {ordered.length > 1 && (
               <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 16, paddingBottom: 4 }}>
-                {ordered.map((c) => {
-                  const active = c.id === card?.id;
+                {[{ id: "all", label: "Todos" }, ...ordered.map((c) => ({ id: c.id, label: `${c.name || c.bank}${c.last4 ? ` ••${c.last4}` : ""}` }))].map((t) => {
+                  const active = t.id === tab;
                   return (
                     <button
-                      key={c.id}
-                      onClick={() => setSelectedId(c.id)}
+                      key={t.id}
+                      onClick={() => setSelectedId(t.id)}
                       style={{
                         flexShrink: 0,
                         background: active ? colors.accentMuted : colors.card,
@@ -116,14 +118,21 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {c.name || c.bank}{c.last4 ? ` ••${c.last4}` : ""}
+                      {t.label}
                     </button>
                   );
                 })}
               </div>
             )}
 
-            {card && <CardDetail workspaceId={workspaceId} card={card} faturas={faturas} cardTx={cardTx} />}
+            {tab === "all" ? (
+              <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} />
+            ) : (
+              (() => {
+                const c = ordered.find((x) => x.id === tab) ?? ordered[0];
+                return c ? <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} /> : null;
+              })()
+            )}
           </>
         )}
       </div>
@@ -135,8 +144,6 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
   const fatura = currentFatura(faturas, card.id);
   const lim = limitInfo(card);
   const bank = detectBank(card.bank || card.name);
-  const [search, setSearch] = useState("");
-  const [catFilter, setCatFilter] = useState<string>("all");
 
   // Purchases of the current fatura period for this card.
   const periodTx = useMemo(
@@ -146,22 +153,8 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
     [cardTx, card.id, fatura]
   );
 
-  const byCategory = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const t of periodTx) m[t.category] = (m[t.category] ?? 0) + t.amount;
-    return Object.entries(m).sort((a, b) => b[1] - a[1]);
-  }, [periodTx]);
+  const byCategory = useMemo(() => aggregateByCategory(periodTx), [periodTx]);
   const totalCompras = byCategory.reduce((s, [, v]) => s + v, 0);
-
-  // Transactions list filtered by search + category (same UX as /transactions).
-  const listTx = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return periodTx.filter((t) => {
-      const catOk = catFilter === "all" || t.category === catFilter;
-      const qOk = !q || t.description.toLowerCase().includes(q);
-      return catOk && qOk;
-    });
-  }, [periodTx, search, catFilter]);
 
   // Parcelamentos: purchases carrying installment info.
   const parcelamentos = useMemo(
@@ -236,103 +229,9 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
         </div>
       </div>
 
-      {/* Compras por categoria */}
-      {byCategory.length > 0 && (
-        <div style={cardBox()}>
-          <div style={{ ...typography.labelSmall, marginBottom: 14 }}>Compras por categoria</div>
-          <div style={{ display: "grid", gap: 12 }}>
-            {byCategory.map(([cat, total]) => {
-              const pct = totalCompras > 0 ? Math.round((total / totalCompras) * 100) : 0;
-              return (
-                <div key={cat} style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                  <CategoryAvatar categoria={cat} size={30} radius={9} />
-                  <span style={{ flex: 1, fontSize: 13, color: colors.textPrimary, opacity: 0.82, fontWeight: 600 }}>{catLabel(cat)}</span>
-                  <span style={{ fontSize: 11, color: colors.textMuted, minWidth: 30, textAlign: "right" }}>{pct}%</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: colors.textPrimary, opacity: 0.82, minWidth: 78, textAlign: "right" }}>{formatCurrency(total)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Transações (mesmas capacidades de /transactions: ver, recategorizar,
-          buscar, filtrar) — só source='card', do cartão/period exibido. */}
-      {periodTx.length > 0 && (
-        <div style={cardBox()}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <div style={typography.labelSmall}>Transações</div>
-            <div style={{ fontSize: 11, color: colors.textMuted }}>{listTx.length} de {periodTx.length}</div>
-          </div>
-
-          {/* Search */}
-          <div style={{ position: "relative", marginBottom: 12 }}>
-            <Search size={14} color={colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar compra..."
-              style={{
-                width: "100%",
-                background: "rgba(255,255,255,0.04)",
-                border: `1px solid ${colors.border}`,
-                borderRadius: 10,
-                outline: "none",
-                color: colors.textPrimary,
-                fontSize: 13,
-                fontFamily: typography.fontUI,
-                padding: "9px 12px 9px 34px",
-              }}
-            />
-          </div>
-
-          {/* Category filter (chips) */}
-          {byCategory.length > 1 && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-              {["all", ...byCategory.map(([c]) => c)].map((c) => {
-                const active = catFilter === c;
-                return (
-                  <button
-                    key={c}
-                    onClick={() => setCatFilter(c)}
-                    style={{
-                      fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
-                      border: `1px solid ${active ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
-                      background: active ? "rgba(255,255,255,0.10)" : "transparent",
-                      color: active ? colors.textPrimary : colors.textMuted,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {c === "all" ? "Todas" : catLabel(c)}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* List — reuses the same TxRow as /transactions (recategorize, etc.) */}
-          {listTx.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "28px 0", color: colors.textFaint, fontSize: 13 }}>
-              Nenhuma compra encontrada.
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: 2 }}>
-              {listTx.map((tx) => (
-                <TxRow
-                  key={tx.id}
-                  tx={tx}
-                  workspaceId={workspaceId}
-                  onDelete={() => deleteDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id))}
-                  selectMode={false}
-                  isSelected={false}
-                  onToggleSelect={() => {}}
-                  parceladaMap={EMPTY_PARCELADA}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Compras por categoria + Transações — componentes reusados na aba "Todos" */}
+      <CategoryBreakdown byCategory={byCategory} total={totalCompras} />
+      <CardTxList workspaceId={workspaceId} txs={periodTx} byCategory={byCategory} />
 
       {/* Parcelamentos */}
       {parcelamentos.length > 0 && (
@@ -376,74 +275,131 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
 
 type CardDiag = { headline: string | null; insights: string[] };
 
-function CardDiagnosis({
-  workspaceId, card, fatura, prevFatura, byCategory, totalCompras, lim,
-}: {
-  workspaceId: string;
-  card: Card;
-  fatura: Fatura;
-  prevFatura: Fatura | null;
-  byCategory: [string, number][];
-  totalCompras: number;
-  lim: ReturnType<typeof limitInfo>;
-}) {
+// code → "Label". Aggregate a list of card transactions into [code, total] desc.
+function aggregateByCategory(txs: Transaction[]): [string, number][] {
+  const m: Record<string, number> = {};
+  for (const t of txs) m[t.category] = (m[t.category] ?? 0) + t.amount;
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+// ─── Reused sections (single card AND aggregated "Todos") ────────────────────
+
+function CategoryBreakdown({ byCategory, total }: { byCategory: [string, number][]; total: number }) {
+  if (byCategory.length === 0) return null;
+  return (
+    <div style={cardBox()}>
+      <div style={{ ...typography.labelSmall, marginBottom: 14 }}>Compras por categoria</div>
+      <div style={{ display: "grid", gap: 12 }}>
+        {byCategory.map(([cat, val]) => {
+          const pct = total > 0 ? Math.round((val / total) * 100) : 0;
+          return (
+            <div key={cat} style={{ display: "flex", alignItems: "center", gap: 11 }}>
+              <CategoryAvatar categoria={cat} size={30} radius={9} />
+              <span style={{ flex: 1, fontSize: 13, color: colors.textPrimary, opacity: 0.82, fontWeight: 600 }}>{catLabel(cat)}</span>
+              <span style={{ fontSize: 11, color: colors.textMuted, minWidth: 30, textAlign: "right" }}>{pct}%</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: colors.textPrimary, opacity: 0.82, minWidth: 78, textAlign: "right" }}>{formatCurrency(val)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Transactions list (source='card'): search + category filter + the SAME TxRow
+// as /transactions. Each row already shows the card in its subtitle.
+function CardTxList({ workspaceId, txs, byCategory }: { workspaceId: string; txs: Transaction[]; byCategory: [string, number][] }) {
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState<string>("all");
+  const listTx = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return txs.filter((t) => {
+      const catOk = catFilter === "all" || t.category === catFilter;
+      const qOk = !q || t.description.toLowerCase().includes(q);
+      return catOk && qOk;
+    });
+  }, [txs, search, catFilter]);
+
+  if (txs.length === 0) return null;
+  return (
+    <div style={cardBox()}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={typography.labelSmall}>Transações</div>
+        <div style={{ fontSize: 11, color: colors.textMuted }}>{listTx.length} de {txs.length}</div>
+      </div>
+
+      <div style={{ position: "relative", marginBottom: 12 }}>
+        <Search size={14} color={colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar compra..."
+          style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: `1px solid ${colors.border}`, borderRadius: 10, outline: "none", color: colors.textPrimary, fontSize: 13, fontFamily: typography.fontUI, padding: "9px 12px 9px 34px" }}
+        />
+      </div>
+
+      {byCategory.length > 1 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          {["all", ...byCategory.map(([c]) => c)].map((c) => {
+            const active = catFilter === c;
+            return (
+              <button
+                key={c}
+                onClick={() => setCatFilter(c)}
+                style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999, border: `1px solid ${active ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`, background: active ? "rgba(255,255,255,0.10)" : "transparent", color: active ? colors.textPrimary : colors.textMuted, cursor: "pointer" }}
+              >
+                {c === "all" ? "Todas" : catLabel(c)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {listTx.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "28px 0", color: colors.textFaint, fontSize: 13 }}>Nenhuma compra encontrada.</div>
+      ) : (
+        <div style={{ display: "grid", gap: 2 }}>
+          {listTx.map((tx) => (
+            <TxRow
+              key={tx.id}
+              tx={tx}
+              workspaceId={workspaceId}
+              onDelete={() => deleteDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id))}
+              selectMode={false}
+              isSelected={false}
+              onToggleSelect={() => {}}
+              parceladaMap={EMPTY_PARCELADA}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Diagnosis: Firestore-cached, AI only when the fingerprint changes ───────
+
+function useDiagnosis(workspaceId: string, docId: string, fingerprint: string, callableData: Record<string, unknown>) {
   const [diag, setDiag] = useState<CardDiag | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // Inputs + fingerprint: changes only when a new fatura lands or a
-  // recategorization shifts the numbers → cache stays warm otherwise.
-  const { fingerprint, payload } = useMemo(() => {
-    const topCat = byCategory[0]
-      ? {
-          nome: catLabel(byCategory[0][0]),
-          valor: byCategory[0][1],
-          pct: totalCompras > 0 ? Math.round((byCategory[0][1] / totalCompras) * 100) : 0,
-        }
-      : null;
-    const totalAtual = fatura.totalAPagar;
-    const totalAnterior = prevFatura?.totalAPagar ?? null;
-    const fp = [
-      fatura.period,
-      totalAtual.toFixed(2),
-      totalAnterior?.toFixed(2) ?? "none",
-      topCat ? `${byCategory[0][0]}:${topCat.valor.toFixed(2)}` : "none",
-      lim.pct ?? "none",
-      byCategory.slice(0, 5).map(([c, v]) => `${c}:${v.toFixed(2)}`).join(","),
-    ].join("|");
-    return {
-      fingerprint: fp,
-      payload: {
-        cardLabel: card.name || card.bank,
-        monthLabel: monthLabel(fatura.period),
-        prevMonthLabel: prevFatura ? monthLabel(prevFatura.period) : null,
-        totalAtual,
-        totalAnterior,
-        topCat,
-        limitPct: lim.pct,
-        limitUsado: lim.usado,
-        limitTotal: lim.total,
-        byCategory: byCategory.slice(0, 5).map(([c, v]) => ({ nome: catLabel(c), valor: v })),
-      },
-    };
-  }, [card, fatura, prevFatura, byCategory, totalCompras, lim]);
+  const dataRef = useRef(callableData);
+  dataRef.current = callableData;
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // 1. Read the Firestore cache. Warm + same fingerprint → no AI, no call.
       try {
-        const snap = await getDoc(doc(db, "workspaces", workspaceId, "cardDiagnoses", `${card.id}_${fatura.period}`));
+        const snap = await getDoc(doc(db, "workspaces", workspaceId, "cardDiagnoses", docId));
         if (cancelled) return;
         if (snap.exists() && snap.data().fingerprint === fingerprint) {
           setDiag({ headline: snap.data().headline ?? null, insights: snap.data().insights ?? [] });
           return;
         }
       } catch { /* fall through to generate */ }
-      // 2. Stale or missing → generate (the callable writes the cache).
       setLoading(true);
       try {
         const fn = httpsCallable<unknown, CardDiag>(getFunctions(app, "us-central1"), "generateCardDiagnosis");
-        const res = await fn({ workspaceId, cardId: card.id, period: fatura.period, fingerprint, payload });
+        const res = await fn(dataRef.current);
         if (!cancelled) setDiag({ headline: res.data.headline ?? null, insights: res.data.insights ?? [] });
       } catch (e) {
         if (!cancelled) console.error("[card-diagnosis] failed:", e);
@@ -452,25 +408,25 @@ function CardDiagnosis({
       }
     })();
     return () => { cancelled = true; };
-  }, [fingerprint, workspaceId, card.id, fatura.period, payload]);
+  }, [workspaceId, docId, fingerprint]);
 
-  // Nothing to show yet and nothing cached → render nothing (no empty state).
+  return { diag, loading };
+}
+
+function DiagnosisCard({ label, diag, loading, loadingText }: { label: string; diag: CardDiag | null; loading: boolean; loadingText: string }) {
   if (!diag?.headline && !loading) return null;
-
   return (
     <div style={{ ...cardBox(), background: `linear-gradient(135deg, ${colors.accentMuted}, rgba(184,245,90,0.02))`, border: `1px solid ${colors.borderAccent}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
         <Sparkles size={13} color={colors.accent} strokeWidth={2.2} />
-        <span style={typography.labelSmall}>Diagnóstico do cartão</span>
+        <span style={typography.labelSmall}>{label}</span>
       </div>
       {loading && !diag?.headline ? (
-        <div style={{ fontSize: 13, color: colors.textMuted }}>Analisando a fatura…</div>
+        <div style={{ fontSize: 13, color: colors.textMuted }}>{loadingText}</div>
       ) : (
         <>
           {diag?.headline && (
-            <div style={{ fontSize: 15, fontWeight: 800, color: colors.textPrimary, lineHeight: 1.35, letterSpacing: "-0.01em" }}>
-              {diag.headline}
-            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: colors.textPrimary, lineHeight: 1.35, letterSpacing: "-0.01em" }}>{diag.headline}</div>
           )}
           {diag?.insights && diag.insights.length > 0 && (
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
@@ -484,6 +440,156 @@ function CardDiagnosis({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function CardDiagnosis({
+  workspaceId, card, fatura, prevFatura, byCategory, totalCompras, lim,
+}: {
+  workspaceId: string;
+  card: Card;
+  fatura: Fatura;
+  prevFatura: Fatura | null;
+  byCategory: [string, number][];
+  totalCompras: number;
+  lim: ReturnType<typeof limitInfo>;
+}) {
+  const { fingerprint, payload } = useMemo(() => {
+    const topCat = byCategory[0]
+      ? { nome: catLabel(byCategory[0][0]), valor: byCategory[0][1], pct: totalCompras > 0 ? Math.round((byCategory[0][1] / totalCompras) * 100) : 0 }
+      : null;
+    const totalAtual = fatura.totalAPagar;
+    const totalAnterior = prevFatura?.totalAPagar ?? null;
+    const fp = [
+      fatura.period, totalAtual.toFixed(2), totalAnterior?.toFixed(2) ?? "none",
+      topCat ? `${byCategory[0][0]}:${topCat.valor.toFixed(2)}` : "none",
+      lim.pct ?? "none",
+      byCategory.slice(0, 5).map(([c, v]) => `${c}:${v.toFixed(2)}`).join(","),
+    ].join("|");
+    return {
+      fingerprint: fp,
+      payload: {
+        cardLabel: card.name || card.bank,
+        monthLabel: monthLabel(fatura.period),
+        prevMonthLabel: prevFatura ? monthLabel(prevFatura.period) : null,
+        totalAtual, totalAnterior, topCat,
+        limitPct: lim.pct, limitUsado: lim.usado, limitTotal: lim.total,
+        byCategory: byCategory.slice(0, 5).map(([c, v]) => ({ nome: catLabel(c), valor: v })),
+      },
+    };
+  }, [card, fatura, prevFatura, byCategory, totalCompras, lim]);
+
+  const { diag, loading } = useDiagnosis(workspaceId, `${card.id}_${fatura.period}`, fingerprint, {
+    workspaceId, cardId: card.id, period: fatura.period, mode: "single", fingerprint, payload,
+  });
+  return <DiagnosisCard label="Diagnóstico do cartão" diag={diag} loading={loading} loadingText="Analisando a fatura…" />;
+}
+
+// ─── Aggregated "Todos os cartões" view ──────────────────────────────────────
+
+function AllCardsView({ workspaceId, cards, faturas, cardTx }: { workspaceId: string; cards: Card[]; faturas: Fatura[]; cardTx: Transaction[] }) {
+  // One current fatura per card = one open bill.
+  const bills = useMemo(
+    () => cards.map((card) => ({ card, fatura: currentFatura(faturas, card.id) }))
+      .filter((b): b is { card: Card; fatura: Fatura } => !!b.fatura),
+    [cards, faturas]
+  );
+
+  const thisMonth = currentMonthKey();
+  const vencendoMes = bills
+    .filter((b) => b.fatura.vencimento && b.fatura.vencimento.slice(0, 7) === thisMonth)
+    .reduce((s, b) => s + b.fatura.totalAPagar, 0);
+  const totalAberto = bills.reduce((s, b) => s + b.fatura.totalAPagar, 0);
+  const semVencimento = bills.filter((b) => !b.fatura.vencimento).length;
+  const mesLabel = (() => { const [y, m] = thisMonth.split("-").map(Number); return new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(new Date(y, m - 1, 1)); })();
+
+  // Aggregated transactions: each card's current-period purchases.
+  const aggTx = useMemo(() => {
+    const periods = new Map(bills.map((b) => [b.card.id, b.fatura.period]));
+    return cardTx
+      .filter((t) => t.cardId && periods.get(t.cardId) === t.faturaPeriod)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [cardTx, bills]);
+
+  const byCategory = useMemo(() => aggregateByCategory(aggTx), [aggTx]);
+  const totalCompras = byCategory.reduce((s, [, v]) => s + v, 0);
+
+  // Aggregated diagnosis (mode "todos"): one cached doc, refreshes when any
+  // fatura changes (fingerprint covers every bill + the category mix).
+  const { fingerprint, payload } = useMemo(() => {
+    const topCat = byCategory[0]
+      ? { nome: catLabel(byCategory[0][0]), valor: byCategory[0][1], pct: totalCompras > 0 ? Math.round((byCategory[0][1] / totalCompras) * 100) : 0 }
+      : null;
+    const fp = [
+      thisMonth, totalAberto.toFixed(2), vencendoMes.toFixed(2),
+      bills.map((b) => `${b.card.id}:${b.fatura.period}:${b.fatura.totalAPagar.toFixed(2)}`).sort().join(";"),
+      byCategory.slice(0, 5).map(([c, v]) => `${c}:${v.toFixed(2)}`).join(","),
+    ].join("|");
+    return {
+      fingerprint: fp,
+      payload: {
+        cardLabel: "seus cartões",
+        monthLabel: mesLabel,
+        prevMonthLabel: null,
+        totalAtual: totalAberto,
+        totalAnterior: null,
+        topCat,
+        limitPct: null, limitUsado: null, limitTotal: null,
+        byCategory: byCategory.slice(0, 5).map(([c, v]) => ({ nome: catLabel(c), valor: v })),
+        vencendoMes: vencendoMes > 0 ? vencendoMes : null,
+        cardsCount: bills.length,
+      },
+    };
+  }, [thisMonth, totalAberto, vencendoMes, bills, byCategory, totalCompras, mesLabel]);
+
+  const { diag, loading } = useDiagnosis(workspaceId, "all", fingerprint, {
+    workspaceId, cardId: "all", period: "all", mode: "todos", fingerprint, payload,
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <DiagnosisCard label="Diagnóstico dos cartões" diag={diag} loading={loading} loadingText="Analisando os cartões…" />
+
+      {/* Header agregado: total em aberto + vencendo no mês + lista por fatura */}
+      <div style={{ ...cardBox(), background: `linear-gradient(135deg, ${colors.accentMuted}, rgba(184,245,90,0.02))`, border: `1px solid ${colors.borderAccent}` }}>
+        <div style={typography.labelSmall}>Total em aberto</div>
+        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em", marginTop: 2 }}>{formatCurrency(totalAberto)}</div>
+        {vencendoMes > 0 && (
+          <div style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 4 }}>
+            Vencendo em {mesLabel}: <span style={{ color: colors.textPrimary, fontWeight: 700 }}>{formatCurrency(vencendoMes)}</span>
+          </div>
+        )}
+        {semVencimento > 0 && (
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+            {semVencimento === 1 ? "1 fatura sem vencimento" : `${semVencimento} faturas sem vencimento`} — fora do total do mês.
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 2, marginTop: 14 }}>
+          {bills.map(({ card, fatura }) => {
+            const bank = detectBank(card.bank || card.name);
+            const day = fatura.vencimento ? parseInt(fatura.vencimento.slice(8, 10), 10) : null;
+            return (
+              <div key={fatura.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${colors.border}` }}>
+                <div style={{ width: 30, height: 30, borderRadius: 9, background: bank.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <CreditCard size={15} color={bank.glyph} strokeWidth={2} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: colors.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {card.name || card.bank}{card.last4 ? ` ••• ${card.last4}` : ""}
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>{day ? `vence dia ${day}` : "sem vencimento"}</div>
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: "-0.02em", color: colors.textPrimary }}>{formatCurrency(fatura.totalAPagar)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <CategoryBreakdown byCategory={byCategory} total={totalCompras} />
+      <CardTxList workspaceId={workspaceId} txs={aggTx} byCategory={byCategory} />
     </div>
   );
 }

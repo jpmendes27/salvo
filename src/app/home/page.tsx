@@ -479,9 +479,22 @@ const GENERATE_DIAGNOSIS_URL =
 
 type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
 
+// One file in a multi-file import batch (each file = one async job).
+type BatchItem = {
+  id: string;            // jobId
+  filename: string;
+  status: "queued" | "processing" | "done" | "failed";
+  kind?: "fatura" | "account";
+  cardLabel?: string;
+  comprasCount?: number;
+  accountCount?: number;
+  error?: string;
+};
+
 type ImportState =
   | { phase: "parsing" }
   | { phase: "background"; jobId: string; filename: string }
+  | { phase: "batch"; items: BatchItem[]; accountRows: ParsedWithMeta[] }
   | { phase: "preview"; rows: ParsedWithMeta[]; error?: string }
   | { phase: "saving"; rows: ParsedWithMeta[] };
 
@@ -489,6 +502,80 @@ function inferSource(sourceLabel?: string): "account" | "card" | undefined {
   if (!sourceLabel) return undefined;
   if (/cartão|fatura|card/i.test(sourceLabel)) return "card";
   return "account";
+}
+
+function isPdfFile(file: File): boolean {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const mime = file.type || `application/${ext}`;
+  return ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf");
+}
+
+// Client-side parse of a NON-PDF file (CSV/OFX/image) into preview rows. PDFs
+// never come here — they go through the async job pipeline. Extracted so the
+// single-file loop and the multi-file batch share one implementation.
+async function parseClientFile(file: File): Promise<ParsedWithMeta[]> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const mime = file.type || `application/${ext}`;
+  const out: ParsedWithMeta[] = [];
+
+  if (ext === "csv" || mime.includes("csv")) {
+    const text = await file.text();
+    let csvTxs: ParsedTransaction[] = [];
+    try { csvTxs = parseCSV(text, file.name); } catch { /* fallback pra IA */ }
+    if (csvTxs.length >= 3) {
+      csvTxs.forEach((t) => out.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true }));
+    } else {
+      const resp = await fetch(PARSE_FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ textData: text, mimeType: "text/csv", filename: file.name }),
+      });
+      if (!resp.ok) throw new Error(await resp.text().catch(() => resp.statusText));
+      const data = await resp.json();
+      const csvLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
+      (data.transactions ?? []).forEach((t: ParsedTransaction) => {
+        if (Math.abs(t.amount ?? 0) === 0) return;
+        if (isStopDescription(t.description ?? "")) return;
+        const type = t.type ?? (t.amount < 0 ? "expense" : "income");
+        out.push({ ...t, type, amount: Math.abs(t.amount ?? 0), category: categorizeTransaction(t.description ?? "", type), sourceLabel: csvLabel, source: inferSource(csvLabel), _id: crypto.randomUUID(), selected: true });
+      });
+    }
+  } else if (ext === "ofx" || ext === "qfx" || mime.includes("ofx")) {
+    const text = await file.text();
+    parseOFX(text, file.name).forEach((t) =>
+      out.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
+    );
+  } else if (mime.startsWith("image/")) {
+    const base64 = await fileToBase64(file);
+    const resp = await fetch(PARSE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileData: base64, mimeType: mime }),
+    });
+    if (!resp.ok) throw new Error(await resp.text().catch(() => resp.statusText));
+    const data = await resp.json();
+    const imageLabel: string = normalizeSourceLabel(data.sourceLabel || "Comprovante");
+    (data.transactions ?? []).forEach((t: ParsedTransaction) => {
+      if (Math.abs(t.amount ?? 0) === 0) return;
+      if (isStopDescription(t.description ?? "")) return;
+      const type = t.type ?? (t.amount < 0 ? "expense" : "income");
+      out.push({ ...t, type, amount: Math.abs(t.amount ?? 0), category: categorizeTransaction(t.description ?? "", type), sourceLabel: imageLabel, source: inferSource(imageLabel), _id: crypto.randomUUID(), selected: true });
+    });
+  }
+  return out;
+}
+
+// Map an account-extrato job's staged transactions into preview rows.
+function jobTxToRows(txs: ParsedTransaction[]): ParsedWithMeta[] {
+  return (txs ?? []).map((t) => ({
+    ...t,
+    category: (t.category && (CATEGORIES as readonly string[]).includes(t.category))
+      ? t.category
+      : categorizeTransaction(t.description ?? "", t.type),
+    source: inferSource(t.sourceLabel),
+    _id: crypto.randomUUID(),
+    selected: true,
+  }));
 }
 
 function categoryColor(cat: string): string {
@@ -543,6 +630,9 @@ function WorkspaceApp({
   const [renameWsValue, setRenameWsValue] = useState("");
   const [editRecurringItem, setEditRecurringItem] = useState<RecurringItem | null>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
+  // Multi-file batch: upload pool (concurrency cap) + settled-job guard.
+  const batchPoolRef = useRef<{ files: File[]; ids: string[]; next: number; active: number } | null>(null);
+  const settledRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!avatarOpen) return;
@@ -893,114 +983,164 @@ function WorkspaceApp({
     return () => unsub();
   }, [bgJobId, workspace.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleFiles(files: File[]) {
-    setImportState({ phase: "parsing" });
-    const ext = files[0]?.name.split(".").pop()?.toLowerCase() ?? "unknown";
-    track("extrato_import_started", { file_type: ext, file_count: files.length });
-    const rows: ParsedWithMeta[] = [];
-
-    for (const file of files) {
-      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-      const mime = file.type || `application/${ext}`;
-      try {
-        if (ext === "csv" || mime.includes("csv")) {
-          const text = await file.text();
-          let csvTxs: ParsedTransaction[] = [];
-          try { csvTxs = parseCSV(text, file.name); } catch { /* fallback pra IA */ }
-          if (csvTxs.length >= 3) {
-            csvTxs.forEach((t) => rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true }));
+  // Track every job in the active batch (one subscription per job). Keyed on the
+  // stable set of job ids so it subscribes once per batch, not on each update.
+  const batchIds = importState?.phase === "batch" ? importState.items.map((i) => i.id).join(",") : "";
+  useEffect(() => {
+    if (!batchIds) return;
+    const ids = batchIds.split(",");
+    const ws = workspace.id;
+    const unsubs = ids.map((id) =>
+      onSnapshot(doc(db, "workspaces", ws, "importJobs", id), (snap) => {
+        if (!snap.exists()) return;
+        const d = snap.data() as {
+          status: string; type?: string; transactions?: ParsedTransaction[];
+          error?: string; cardLabel?: string; comprasCount?: number;
+        };
+        if (d.status === "done") {
+          if (d.type === "fatura") {
+            settleBatchItem(id, { status: "done", kind: "fatura", cardLabel: d.cardLabel ?? "cartão", comprasCount: d.comprasCount ?? 0 }, []);
           } else {
-            const resp = await fetch(PARSE_FUNCTION_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ textData: text, mimeType: "text/csv", filename: file.name })
-            });
-            if (!resp.ok) {
-              throw new Error(await resp.text().catch(() => resp.statusText));
-            }
-            const data = await resp.json();
-            const csvLabel: string = normalizeSourceLabel(data.sourceLabel || sourceLabelFromFilename(file.name));
-            (data.transactions ?? []).forEach((t: ParsedTransaction) => {
-              if (Math.abs(t.amount ?? 0) === 0) return;
-              if (isStopDescription(t.description ?? "")) return;
-              const type = t.type ?? (t.amount < 0 ? "expense" : "income");
-              rows.push({
-                ...t, type,
-                amount: Math.abs(t.amount ?? 0),
-                category: categorizeTransaction(t.description ?? "", type),
-                sourceLabel: csvLabel,
-                source: inferSource(csvLabel),
-                _id: crypto.randomUUID(),
-                selected: true
-              });
-            });
+            const rows = jobTxToRows(d.transactions ?? []);
+            autoDeselectDuplicates(rows);
+            settleBatchItem(id, { status: "done", kind: "account", accountCount: rows.length }, rows);
           }
-        } else if (ext === "ofx" || ext === "qfx" || mime.includes("ofx")) {
-          const text = await file.text();
-          parseOFX(text, file.name).forEach((t) =>
-            rows.push({ ...t, source: inferSource(t.sourceLabel), _id: crypto.randomUUID(), selected: true })
-          );
-        } else if (ext === "pdf" || mime === "application/pdf" || (mime === "application/octet-stream" && ext === "pdf")) {
-          // SINGLE PATH for PDF: always the server. No client-side pdfjs/parsing.
-          // Desktop and mobile behave identically — the raw PDF is uploaded and
-          // the server extracts, reconciles, and gates it. This kills the old
-          // desktop path (client parser that confused Saldo with Valor and showed
-          // unvalidated data) and the two-parser KEEP-IN-SYNC drift. Every PDF now
-          // passes through the same reconciliation gate before anything is shown.
-          await startBackgroundJob(file, "pdf", null);
-          return;
-        } else if (mime.startsWith("image/")) {
-          const base64 = await fileToBase64(file);
-          const resp = await fetch(PARSE_FUNCTION_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileData: base64, mimeType: mime })
-          });
-          if (!resp.ok) {
-            throw new Error(await resp.text().catch(() => resp.statusText));
-          }
-          const data = await resp.json();
-          const imageLabel: string = normalizeSourceLabel(data.sourceLabel || "Comprovante");
-          (data.transactions ?? []).forEach((t: ParsedTransaction) => {
-            if (Math.abs(t.amount ?? 0) === 0) return;
-            if (isStopDescription(t.description ?? "")) return;
-            const type = t.type ?? (t.amount < 0 ? "expense" : "income");
-            rows.push({
-              ...t,
-              type,
-              amount: Math.abs(t.amount ?? 0),
-              category: categorizeTransaction(t.description ?? "", type),
-              sourceLabel: imageLabel,
-              source: inferSource(imageLabel),
-              _id: crypto.randomUUID(),
-              selected: true
-            });
-          });
+        } else if (d.status === "failed") {
+          settleBatchItem(id, {
+            status: "failed",
+            kind: d.type === "fatura" ? "fatura" : "account",
+            cardLabel: d.cardLabel,
+            error: d.error ?? "Não consegui processar este arquivo.",
+          }, []);
         }
-      } catch (err) {
-        track("extrato_import_error", { stage: "parse", file_type: ext });
-        setImportState({
-          phase: "preview",
-          rows,
-          error: getUserFacingError(err, "import")
-        });
-        return;
-      }
-    }
+      })
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [batchIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Auto-deselect duplicates
+  // Auto-deselect rows that duplicate an existing transaction (by dedupKey).
+  // Re-importing the same extrato won't double-count: matching rows arrive
+  // unchecked in the preview.
+  function autoDeselectDuplicates(rows: ParsedWithMeta[]) {
     const existingKeys = new Set(
       transactions.map((t) => {
         const raw = (t as Transaction & { dedupKey?: string }).dedupKey;
-        if (raw) return raw;
-        return `${t.date}|${t.description.toLowerCase().trim()}|${t.amount.toFixed(2)}`;
+        return raw ?? `${t.date}|${t.description.toLowerCase().trim()}|${t.amount.toFixed(2)}`;
       })
     );
-    rows.forEach((r) => {
-      if (existingKeys.has(r.dedupKey)) r.selected = false;
-    });
+    rows.forEach((r) => { if (r.dedupKey && existingKeys.has(r.dedupKey)) r.selected = false; });
+    return rows;
+  }
 
+  async function handleFiles(files: File[]) {
+    track("extrato_import_started", {
+      file_type: files[0]?.name.split(".").pop()?.toLowerCase() ?? "unknown",
+      file_count: files.length,
+    });
+    const pdfs = files.filter(isPdfFile);
+    const others = files.filter((f) => !isPdfFile(f));
+
+    // Multi-file (or any mix with a PDF) → async batch: one job per PDF, the
+    // server autodetects fatura vs extrato and routes each. Non-PDFs are
+    // client-parsed (account) and merged into the eventual review.
+    if (pdfs.length >= 1 && files.length >= 2) {
+      setImportState({ phase: "parsing" });
+      let clientRows: ParsedWithMeta[] = [];
+      for (const f of others) {
+        try { clientRows = clientRows.concat(await parseClientFile(f)); }
+        catch (err) { console.error("[import] client file failed:", err); }
+      }
+      autoDeselectDuplicates(clientRows);
+      startImportBatch(pdfs, clientRows);
+      return;
+    }
+
+    // Single PDF → the existing, well-tested background flow.
+    if (pdfs.length === 1 && others.length === 0) {
+      setImportState({ phase: "parsing" });
+      try { await startBackgroundJob(pdfs[0], "pdf", null); }
+      catch (err) { setImportState({ phase: "preview", rows: [], error: getUserFacingError(err, "import") }); }
+      return;
+    }
+
+    // No PDFs (one or more CSV/OFX/image) → existing single-preview flow.
+    setImportState({ phase: "parsing" });
+    const rows: ParsedWithMeta[] = [];
+    for (const file of files) {
+      try { rows.push(...(await parseClientFile(file))); }
+      catch (err) {
+        track("extrato_import_error", { stage: "parse", file_type: file.name.split(".").pop()?.toLowerCase() ?? "unknown" });
+        setImportState({ phase: "preview", rows, error: getUserFacingError(err, "import") });
+        return;
+      }
+    }
+    autoDeselectDuplicates(rows);
     setImportState({ phase: "preview", rows });
+  }
+
+  // ── Multi-file batch ───────────────────────────────────────────────────────
+  // One async job per PDF, uploaded with a concurrency cap so N files don't
+  // burst the Anthropic Tier-1 rate limit. Faturas persist server-side; account
+  // extratos stage rows that are merged into one review at the end.
+  function startImportBatch(pdfs: File[], clientRows: ParsedWithMeta[]) {
+    const ids = pdfs.map(() => crypto.randomUUID());
+    const items: BatchItem[] = pdfs.map((f, i) => ({ id: ids[i], filename: f.name, status: "queued" }));
+    settledRef.current = new Set();
+    batchPoolRef.current = { files: pdfs, ids, next: 0, active: 0 };
+    setImportState({ phase: "batch", items, accountRows: clientRows });
+    pumpBatch();
+  }
+
+  function pumpBatch() {
+    const pool = batchPoolRef.current;
+    if (!pool) return;
+    const CONCURRENCY = 3;
+    while (pool.active < CONCURRENCY && pool.next < pool.files.length) {
+      const i = pool.next++;
+      pool.active++;
+      const file = pool.files[i];
+      const jobId = pool.ids[i];
+      void (async () => {
+        try {
+          await setDoc(doc(db, "workspaces", workspace.id, "importJobs", jobId), {
+            status: "processing",
+            filename: file.name,
+            createdAt: serverTimestamp(),
+            uid: user.uid,
+            createdByName: profile.displayName || user.displayName || user.email?.split("@")[0] || "Alguém",
+          });
+          updateBatchItem(jobId, { status: "processing" });
+          const ref = storageRef(storage, `imports/${workspace.id}/${jobId}/raw.pdf`);
+          await uploadBytes(ref, file, { contentType: "application/pdf", customMetadata: { originalFilename: file.name } });
+        } catch (err) {
+          console.error("[import-batch] upload failed:", err);
+          settleBatchItem(jobId, { status: "failed", error: "Falha no upload do arquivo." }, []);
+        }
+      })();
+    }
+  }
+
+  function updateBatchItem(id: string, patch: Partial<BatchItem>) {
+    setImportState((prev) => {
+      if (!prev || prev.phase !== "batch") return prev;
+      return { ...prev, items: prev.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) };
+    });
+  }
+
+  function settleBatchItem(id: string, patch: Partial<BatchItem>, rows: ParsedWithMeta[]) {
+    if (settledRef.current.has(id)) return;
+    settledRef.current.add(id);
+    const pool = batchPoolRef.current;
+    if (pool) pool.active = Math.max(0, pool.active - 1);
+    setImportState((prev) => {
+      if (!prev || prev.phase !== "batch") return prev;
+      return {
+        ...prev,
+        items: prev.items.map((it) => (it.id === id ? { ...it, ...patch } : it)),
+        accountRows: rows.length ? prev.accountRows.concat(rows) : prev.accountRows,
+      };
+    });
+    pumpBatch();
   }
 
   async function confirmImport(rows: ParsedWithMeta[]) {
@@ -2123,7 +2263,17 @@ function WorkspaceApp({
       )}
 
       {/* Import preview modal */}
-      {importState && (
+      {importState?.phase === "batch" && (
+        <BatchModal
+          items={importState.items}
+          accountRows={importState.accountRows}
+          onReview={() => setImportState({ phase: "preview", rows: importState.accountRows })}
+          onOpenCards={() => { localStorage.setItem("fincheck_workspace", workspace.id); setImportState(null); router.push("/cards"); }}
+          onClose={() => setImportState(null)}
+        />
+      )}
+
+      {importState && importState.phase !== "batch" && (
         <ImportModal
           state={importState}
           onCancel={() => setImportState(null)}
@@ -3500,6 +3650,111 @@ function TxRow({
     </div>
   );
 }
+
+// ─── Multi-file batch modal ───────────────────────────────────────────────────
+// Progress + honest per-file summary for a multi-file import. Faturas persist
+// server-side; account extratos are merged into one review the user opens at the
+// end. A file that fails never drops the others.
+
+function BatchModal({
+  items, accountRows, onReview, onOpenCards, onClose,
+}: {
+  items: BatchItem[];
+  accountRows: ParsedWithMeta[];
+  onReview: () => void;
+  onOpenCards: () => void;
+  onClose: () => void;
+}) {
+  const settled = items.filter((i) => i.status === "done" || i.status === "failed");
+  const allSettled = settled.length === items.length;
+  const faturasOk = items.filter((i) => i.status === "done" && i.kind === "fatura");
+  const contasOk = items.filter((i) => i.status === "done" && i.kind === "account");
+  const failed = items.filter((i) => i.status === "failed");
+
+  const summaryParts: string[] = [];
+  if (faturasOk.length) summaryParts.push(`${faturasOk.length} ${faturasOk.length === 1 ? "cartão" : "cartões"}`);
+  if (contasOk.length) summaryParts.push(`${contasOk.length} ${contasOk.length === 1 ? "conta" : "contas"}`);
+  const summaryLine = summaryParts.length
+    ? `${summaryParts.join(" + ")} ${faturasOk.length + contasOk.length === 1 ? "importado" : "importados"}`
+    : "Nada importado";
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+      onClick={(e) => e.target === e.currentTarget && allSettled && onClose()}
+    >
+      <div style={{ background: "#0e0f11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 18, width: "100%", maxWidth: 460, padding: "24px 24px 22px", boxShadow: "0 40px 100px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>
+            {allSettled ? "Importação concluída" : `Lendo ${items.length} arquivos…`}
+          </h2>
+          {allSettled && (
+            <button onClick={onClose} style={{ background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 8, color: "rgba(255,255,255,0.55)", cursor: "pointer", padding: "6px 8px", display: "flex" }}>
+              <X size={15} />
+            </button>
+          )}
+        </div>
+        <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.4)", marginBottom: 16 }}>
+          {allSettled ? summaryLine : `${settled.length} de ${items.length} prontos`}
+        </p>
+
+        <div style={{ display: "grid", gap: 8, maxHeight: "46vh", overflow: "auto", marginBottom: failed.length || allSettled ? 18 : 0 }}>
+          {items.map((it) => {
+            const done = it.status === "done";
+            const fail = it.status === "failed";
+            const detail = fail
+              ? (it.error ?? "Falhou")
+              : done && it.kind === "fatura"
+              ? `Fatura ${it.cardLabel ?? ""} · ${it.comprasCount ?? 0} compras`
+              : done
+              ? `Extrato · ${it.accountCount ?? 0} lançamentos`
+              : it.status === "processing" ? "Lendo…" : "Na fila";
+            return (
+              <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: fail ? "rgba(255,92,92,0.12)" : done ? "rgba(184,245,90,0.12)" : "rgba(255,255,255,0.05)" }}>
+                  {done ? <Check size={13} color={G} /> : fail ? <X size={13} color="#ff5c5c" /> : (
+                    <div style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.18)", borderTopColor: G, borderRadius: "50%", animation: "spin .8s linear infinite" }} />
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: "#e8e9ec", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.filename}</div>
+                  <div style={{ fontSize: 11, color: fail ? "#ff8080" : "rgba(255,255,255,0.4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detail}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {allSettled && (
+          <div style={{ display: "flex", gap: 10 }}>
+            {accountRows.length > 0 ? (
+              <>
+                <button onClick={onClose} style={btnSecondary}>Fechar</button>
+                <button onClick={onReview} style={btnPrimary}>Revisar {accountRows.length} lançamento{accountRows.length === 1 ? "" : "s"}</button>
+              </>
+            ) : faturasOk.length > 0 ? (
+              <>
+                <button onClick={onClose} style={btnSecondary}>Fechar</button>
+                <button onClick={onOpenCards} style={btnPrimary}>Ver cartões</button>
+              </>
+            ) : (
+              <button onClick={onClose} style={{ ...btnPrimary, flex: 1 }}>Fechar</button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const btnPrimary: React.CSSProperties = {
+  flex: 1, background: G, border: "none", borderRadius: 10, color: "#0a0a0a",
+  fontSize: 13.5, fontWeight: 700, padding: "11px 0", cursor: "pointer",
+};
+const btnSecondary: React.CSSProperties = {
+  flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: 10, color: "rgba(255,255,255,0.6)", fontSize: 13.5, fontWeight: 600, padding: "11px 0", cursor: "pointer",
+};
 
 // ─── Fatura completion modal (card lens) ──────────────────────────────────────
 // Shown when a fatura import finishes. Data is already persisted server-side;

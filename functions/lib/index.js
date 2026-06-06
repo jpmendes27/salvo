@@ -1093,7 +1093,7 @@ exports.generateCardDiagnosis = (0, https_1.onCall)({ secrets: ["ANTHROPIC_API_K
     const uid = request.auth?.uid;
     if (!uid)
         throw new https_1.HttpsError("unauthenticated", "Faça login pra continuar.");
-    const { workspaceId, cardId, period, fingerprint, payload } = (request.data ?? {});
+    const { workspaceId, cardId, period, fingerprint, mode, payload } = (request.data ?? {});
     if (!workspaceId || !cardId || !period || !fingerprint || !payload) {
         throw new https_1.HttpsError("invalid-argument", "Dados incompletos.");
     }
@@ -1123,10 +1123,40 @@ exports.generateCardDiagnosis = (0, https_1.onCall)({ secrets: ["ANTHROPIC_API_K
         ? `- Limite: ${payload.limitPct}% comprometido${payload.limitTotal != null ? ` (${fmt(payload.limitUsado ?? 0)} de ${fmt(payload.limitTotal)})` : ""}`
         : "- Limite: sem dados (não mencione limite)";
     const byCatLines = payload.byCategory.slice(0, 5).map((c) => `  • ${c.nome}: ${fmt(c.valor)}`).join("\n");
-    const prompt = `Você é o Salvô — o conselheiro financeiro honesto que o brasileiro nunca teve.
+    const voz = `Você é o Salvô — o conselheiro financeiro honesto que o brasileiro nunca teve.
 Fala direto, sem enrolação, sem julgamento moral. Tom popular, neutro em gênero.
 Sem vocativos (sem "irmão", "cara", "mano"). Frases curtas e precisas.
-Sem termos técnicos: nunca use "otimizar", "alocar", "comprometer renda", "déficit".
+Sem termos técnicos: nunca use "otimizar", "alocar", "comprometer renda", "déficit".`;
+    const formato = `Retorne APENAS um JSON válido, sem markdown:
+{
+  "headline": "1 frase curta e direta (o resultado principal).",
+  "insights": ["1 a 2 observações curtas com impacto real. Cada item é uma frase."]
+}`;
+    const prompt = mode === "todos"
+        ? `${voz}
+
+Este é o diagnóstico do CONJUNTO DE CARTÕES de crédito (${payload.cardsCount ?? "vários"} cartões) — NÃO é o fluxo de caixa do mês.
+
+Dados somados de todos os cartões:
+- Total em aberto (soma das faturas): ${fmt(payload.totalAtual)}
+${payload.vencendoMes != null ? `- Vencendo em ${payload.monthLabel}: ${fmt(payload.vencendoMes)}` : "- Vencimento no mês: sem dados"}
+${topCatLine.replace("da fatura", "do conjunto")}
+- Categorias somadas dos cartões:
+${byCatLines}
+
+REGRAS CRÍTICAS:
+1. Use APENAS os números enviados. Nunca invente valores.
+2. Não há limite combinado — NÃO mencione limite no conjunto.
+3. Para dar peso, use proporções dos próprios dados ("metade do total", "27%").
+4. São os cartões — fale de compras/gastos nos cartões, não de salário ou renda.
+
+${formato}
+
+Exemplos de tom:
+- headline: "Você tem R$1.240 em aberto nos cartões."
+- insight: "R$568 vencem em junho."
+- insight: "Varejo é o que mais pesa no conjunto: R$390."`
+        : `${voz}
 
 Este é o diagnóstico da FATURA DE CARTÃO de crédito (${payload.cardLabel}) — NÃO é o fluxo de caixa do mês.
 
@@ -1145,11 +1175,7 @@ REGRAS CRÍTICAS:
 4. Para dar peso, use proporções dos próprios dados ("metade da fatura", "27% do total").
 5. É a fatura do cartão — fale de compras/gastos no cartão, não de salário ou renda.
 
-Retorne APENAS um JSON válido, sem markdown:
-{
-  "headline": "1 frase curta e direta sobre a fatura (o resultado principal).",
-  "insights": ["1 a 2 observações curtas com impacto real (categoria que pesou, variação, limite). Cada item é uma frase."]
-}
+${formato}
 
 Exemplos de tom:
 - headline: "Fatura subiu 18% vs maio — fechou em R$568."
