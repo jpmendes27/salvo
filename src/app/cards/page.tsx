@@ -5,7 +5,7 @@
 // previous faturas. A separate lens from cash flow: card data only, never mixed
 // into the account diagnosis. Follows the Salvô! design system.
 
-import { deleteDoc, doc, getDoc, writeBatch } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, onSnapshot, writeBatch } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { ArrowLeft, CreditCard, ChevronRight, ChevronLeft, Search, Sparkles } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -33,6 +33,70 @@ function Shell({ text }: { text: string }) {
 }
 
 const catLabel = (c: string) => (CATEGORY_LABELS as Record<string, string>)[c] ?? c;
+
+// Horizontal tab strip with custom scroll: native scrollbar hidden, edge fade
+// affordance (to --bg #050505), pointer drag on desktop, native swipe on mobile.
+function ScrollTabs({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [fade, setFade] = useState({ left: false, right: false });
+  const [grabbing, setGrabbing] = useState(false);
+  const drag = useRef({ active: false, startX: 0, startLeft: 0, moved: false });
+
+  const updateFade = () => {
+    const el = ref.current;
+    if (!el) return;
+    setFade({ left: el.scrollLeft > 4, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4 });
+  };
+  useEffect(() => {
+    updateFade();
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(updateFade);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    const el = ref.current;
+    if (!el) return;
+    drag.current = { active: true, startX: e.clientX, startLeft: el.scrollLeft, moved: false };
+    setGrabbing(true);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const el = ref.current;
+    if (!drag.current.active || !el) return;
+    const dx = e.clientX - drag.current.startX;
+    if (Math.abs(dx) > 3) drag.current.moved = true;
+    el.scrollLeft = drag.current.startLeft - dx;
+  };
+  const endDrag = () => { drag.current.active = false; setGrabbing(false); };
+
+  const fadeStyle = (side: "left" | "right"): React.CSSProperties => ({
+    position: "absolute", top: 0, bottom: 4, [side]: 0, width: 36, pointerEvents: "none",
+    background: `linear-gradient(to ${side === "left" ? "right" : "left"}, ${colors.bg}, rgba(5,5,5,0))`,
+  });
+
+  return (
+    <div style={{ position: "relative", marginBottom: 16 }}>
+      <div
+        ref={ref}
+        className="cards-tabs-scroll"
+        onScroll={updateFade}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerLeave={endDrag}
+        onClickCapture={(e) => { if (drag.current.moved) { e.preventDefault(); e.stopPropagation(); } }}
+        style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, cursor: grabbing ? "grabbing" : "grab", scrollbarWidth: "none", msOverflowStyle: "none", WebkitOverflowScrolling: "touch" }}
+      >
+        {children}
+      </div>
+      {fade.left && <div style={fadeStyle("left")} />}
+      {fade.right && <div style={fadeStyle("right")} />}
+      <style>{`.cards-tabs-scroll::-webkit-scrollbar{display:none}`}</style>
+    </div>
+  );
+}
 
 export default function CardsPage() {
   return (
@@ -79,6 +143,16 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
     router.replace(`/cards?${q.toString()}`);
   };
 
+  // Income reference (same primary base as the home cash-flow diagnosis:
+  // workspace.monthlyIncome). The card diagnosis anchors its tone on % of income;
+  // when there's no declared income it degrades honestly (rendaRef = null).
+  const [monthlyIncome, setMonthlyIncome] = useState(0);
+  useEffect(
+    () => onSnapshot(doc(db, "workspaces", workspaceId), (s) => setMonthlyIncome((s.data()?.monthlyIncome as number) ?? 0)),
+    [workspaceId]
+  );
+  const rendaRef = monthlyIncome > 0 ? monthlyIncome : null;
+
   // Default selection: the card with the most recent fatura.
   const ordered = useMemo(() => {
     return [...cards].sort((a, b) => {
@@ -116,7 +190,7 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
           <>
             {/* Tabs: [Todos] + one per card (only with >1 card) */}
             {ordered.length > 1 && (
-              <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 16, paddingBottom: 4 }}>
+              <ScrollTabs>
                 {[{ id: "all", label: "Todos" }, ...ordered.map((c) => ({ id: c.id, label: `${c.name || c.bank}${c.last4 ? ` ••${c.last4}` : ""}` }))].map((t) => {
                   const active = t.id === tab;
                   return (
@@ -140,15 +214,15 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
                     </button>
                   );
                 })}
-              </div>
+              </ScrollTabs>
             )}
 
             {tab === "all" ? (
-              <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} />
+              <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} />
             ) : (
               (() => {
                 const c = ordered.find((x) => x.id === tab) ?? ordered[0];
-                return c ? <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} /> : null;
+                return c ? <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} /> : null;
               })()
             )}
           </>
@@ -180,7 +254,7 @@ function PeriodNav({ periods, current, onChange }: { periods: string[]; current:
   );
 }
 
-function CardDetail({ workspaceId, card, faturas, cardTx, mes, setMes }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void }) {
+function CardDetail({ workspaceId, card, faturas, cardTx, mes, setMes, rendaRef }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void; rendaRef: number | null }) {
   const lim = limitInfo(card);
   const bank = detectBank(card.bank || card.name);
 
@@ -231,6 +305,7 @@ function CardDetail({ workspaceId, card, faturas, cardTx, mes, setMes }: { works
           byCategory={byCategory}
           totalCompras={totalCompras}
           lim={lim}
+          rendaRef={rendaRef}
         />
       )}
 
@@ -540,7 +615,7 @@ function DiagnosisCard({ label, diag, loading, loadingText }: { label: string; d
 }
 
 function CardDiagnosis({
-  workspaceId, card, fatura, prevFatura, byCategory, totalCompras, lim,
+  workspaceId, card, fatura, prevFatura, byCategory, totalCompras, lim, rendaRef,
 }: {
   workspaceId: string;
   card: Card;
@@ -549,6 +624,7 @@ function CardDiagnosis({
   byCategory: [string, number][];
   totalCompras: number;
   lim: ReturnType<typeof limitInfo>;
+  rendaRef: number | null;
 }) {
   const { fingerprint, payload } = useMemo(() => {
     const topCat = byCategory[0]
@@ -560,6 +636,7 @@ function CardDiagnosis({
       fatura.period, totalAtual.toFixed(2), totalAnterior?.toFixed(2) ?? "none",
       topCat ? `${byCategory[0][0]}:${topCat.valor.toFixed(2)}` : "none",
       lim.pct ?? "none",
+      rendaRef ? rendaRef.toFixed(2) : "none",
       byCategory.slice(0, 5).map(([c, v]) => `${c}:${v.toFixed(2)}`).join(","),
     ].join("|");
     return {
@@ -570,10 +647,11 @@ function CardDiagnosis({
         prevMonthLabel: prevFatura ? monthLabel(prevFatura.period) : null,
         totalAtual, totalAnterior, topCat,
         limitPct: lim.pct, limitUsado: lim.usado, limitTotal: lim.total,
+        renda: rendaRef,
         byCategory: byCategory.slice(0, 5).map(([c, v]) => ({ nome: catLabel(c), valor: v })),
       },
     };
-  }, [card, fatura, prevFatura, byCategory, totalCompras, lim]);
+  }, [card, fatura, prevFatura, byCategory, totalCompras, lim, rendaRef]);
 
   const { diag, loading } = useDiagnosis(workspaceId, `${card.id}_${fatura.period}`, fingerprint, {
     workspaceId, cardId: card.id, period: fatura.period, mode: "single", fingerprint, payload,
@@ -583,7 +661,7 @@ function CardDiagnosis({
 
 // ─── Aggregated "Todos os cartões" view ──────────────────────────────────────
 
-function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, setMes }: { workspaceId: string; cards: Card[]; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void }) {
+function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, setMes, rendaRef }: { workspaceId: string; cards: Card[]; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void; rendaRef: number | null }) {
   // Periods = competências (faturaPeriod) across all cards, newest first.
   const allPeriods = useMemo(
     () => [...new Set(faturas.map((f) => f.period))].sort((a, b) => b.localeCompare(a)),
@@ -629,6 +707,7 @@ function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, setMes }: { wo
       : null;
     const fp = [
       selectedPeriod ?? "none", totalPeriodo.toFixed(2), prevTotal?.toFixed(2) ?? "none", vencendoMes.toFixed(2),
+      rendaRef ? rendaRef.toFixed(2) : "none",
       bills.map((b) => `${b.card.id}:${b.fatura.totalAPagar.toFixed(2)}`).sort().join(";"),
       byCategory.slice(0, 5).map(([c, v]) => `${c}:${v.toFixed(2)}`).join(","),
     ].join("|");
@@ -642,12 +721,13 @@ function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, setMes }: { wo
         totalAnterior: prevTotal && prevTotal > 0 ? prevTotal : null,
         topCat,
         limitPct: null, limitUsado: null, limitTotal: null,
+        renda: rendaRef,
         byCategory: byCategory.slice(0, 5).map(([c, v]) => ({ nome: catLabel(c), valor: v })),
         vencendoMes: isLatest && vencendoMes > 0 ? vencendoMes : null,
         cardsCount: bills.length,
       },
     };
-  }, [selectedPeriod, prevPeriod, totalPeriodo, prevTotal, vencendoMes, isLatest, bills, byCategory, totalCompras, mesCalLabel]);
+  }, [selectedPeriod, prevPeriod, totalPeriodo, prevTotal, vencendoMes, isLatest, bills, byCategory, totalCompras, mesCalLabel, rendaRef]);
 
   const { diag, loading } = useDiagnosis(workspaceId, `all_${selectedPeriod ?? "none"}`, fingerprint, {
     workspaceId, cardId: "all", period: selectedPeriod ?? "none", mode: "todos", fingerprint, payload,

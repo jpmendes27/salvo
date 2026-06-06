@@ -1258,6 +1258,10 @@ export const generateCardDiagnosis = onCall(
         limitUsado: number | null;
         limitTotal: number | null;
         byCategory: Array<{ nome: string; valor: number }>;
+        // Income reference (same base as the home cash-flow diagnosis). When > 0,
+        // the diagnosis anchors its tone on % of income; null/<=0 → honest no-
+        // income mode (no % of income fabricated).
+        renda?: number | null;
         // "todos" mode only:
         vencendoMes?: number | null;
         cardsCount?: number;
@@ -1288,20 +1292,35 @@ export const generateCardDiagnosis = onCall(
     const fmt = (v: number) =>
       `R$${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+    // Income anchor (rendaRef = same base the home cash-flow diagnosis uses).
+    // When present, the diagnosis calibrates tone on % of income; when absent,
+    // it degrades honestly (no % of income fabricated — Bug 1 rule).
+    const renda = payload.renda != null && payload.renda > 0 ? payload.renda : null;
+    const pctRenda = (v: number) => Math.round((v / (renda as number)) * 100);
+
     const variacaoLine =
       payload.totalAnterior != null && payload.totalAnterior > 0
         ? `- Fatura anterior (${payload.prevMonthLabel}): ${fmt(payload.totalAnterior)} (variação ${
             Math.round(((payload.totalAtual - payload.totalAnterior) / payload.totalAnterior) * 100)
           }%)`
         : "- Fatura anterior: sem dados (não compare, é a primeira fatura deste cartão)";
+    // Category headline is anchored on INCOME when available — never on the
+    // card's own spend ("% da fatura"), which is self-referential.
     const topCatLine = payload.topCat
-      ? `- Categoria que mais pesou: ${payload.topCat.nome} — ${fmt(payload.topCat.valor)} (${payload.topCat.pct}% da fatura)`
+      ? `- Categoria que mais pesou: ${payload.topCat.nome} — ${fmt(payload.topCat.valor)}${renda ? ` (${pctRenda(payload.topCat.valor)}% da renda)` : ` (${payload.topCat.pct}% da fatura)`}`
       : "- Categoria que mais pesou: sem dados";
     const limitLine =
       payload.limitPct != null
         ? `- Limite: ${payload.limitPct}% comprometido${payload.limitTotal != null ? ` (${fmt(payload.limitUsado ?? 0)} de ${fmt(payload.limitTotal)})` : ""}`
         : "- Limite: sem dados (não mencione limite)";
     const byCatLines = payload.byCategory.slice(0, 5).map((c) => `  • ${c.nome}: ${fmt(c.valor)}`).join("\n");
+
+    const rendaLine = renda
+      ? `- Renda de referência do mês: ${fmt(renda)}\n- Total ${mode === "todos" ? "das faturas" : "da fatura"} = ${pctRenda(payload.totalAtual)}% da renda`
+      : "- Renda de referência: INDISPONÍVEL — não calcule nem afirme % da renda";
+    const rendaRule = renda
+      ? `ÂNCORA PRIMÁRIA = o % da RENDA. A headline ancora nisso (ex: "Suas faturas somam R$2.425 — 38% do que entrou no mês"). A categoria principal vai CONTRA A RENDA (ex: "Varejo levou R$891 — 14% da renda"), nunca "% do gasto no cartão". CALIBRE O TOM por esse %: baixo (até ~15%) = tranquilo; médio = atenção leve; alto (acima de ~40%) = pesado/cuidado. Não alarme o que é 5% da renda, nem minimize 60%.`
+      : `Sem renda de referência: ancore em VALORES ABSOLUTOS + limite + tendência. NÃO afirme nenhum % da renda.`;
 
     const voz = `Você é o Salvô — o conselheiro financeiro honesto que o brasileiro nunca teve.
 Fala direto, sem enrolação, sem julgamento moral. Tom popular, neutro em gênero.
@@ -1321,6 +1340,7 @@ Este é o diagnóstico do CONJUNTO DE CARTÕES de crédito (${payload.cardsCount
 
 Dados somados de todos os cartões (competência ${payload.monthLabel}):
 - Total da competência (soma das faturas): ${fmt(payload.totalAtual)}
+${rendaLine}
 ${payload.totalAnterior != null && payload.totalAnterior > 0
   ? `- Competência anterior (${payload.prevMonthLabel}): ${fmt(payload.totalAnterior)} (variação ${Math.round(((payload.totalAtual - payload.totalAnterior) / payload.totalAnterior) * 100)}%)`
   : "- Competência anterior: sem dados (não compare)"}
@@ -1331,23 +1351,26 @@ ${byCatLines}
 
 REGRAS CRÍTICAS:
 1. Use APENAS os números enviados. Nunca invente valores nem variação.
-2. Se não há competência anterior, NÃO compare — fale só da atual.
-3. Não há limite combinado — NÃO mencione limite no conjunto.
-4. Para dar peso, use proporções dos próprios dados ("metade do total", "27%").
-5. São os cartões — fale de compras/gastos nos cartões, não de salário ou renda.
+2. ${rendaRule}
+3. Se não há competência anterior, NÃO compare — fale só da atual.
+4. Não há limite combinado — NÃO mencione limite no conjunto.
+5. A renda é só a BASE pra dar peso (denominador). As compras são dos CARTÕES — não trate como fluxo de caixa do mês.
 
 ${formato}
 
-Exemplos de tom:
+Exemplos de tom (com renda):
+- headline: "Suas faturas somam R$2.425 — 38% do que entrou no mês."
+- insight: "Varejo levou R$891 — 14% da renda."
+Exemplos (sem renda):
 - headline: "Você tem R$1.240 em aberto nos cartões."
-- insight: "R$568 vencem em junho."
-- insight: "Varejo é o que mais pesa no conjunto: R$390."`
+- insight: "Varejo é o que mais pesa: R$390."`
       : `${voz}
 
 Este é o diagnóstico da FATURA DE CARTÃO de crédito (${payload.cardLabel}) — NÃO é o fluxo de caixa do mês.
 
 Dados da fatura de ${payload.monthLabel}:
 - Total da fatura: ${fmt(payload.totalAtual)}
+${rendaLine}
 ${variacaoLine}
 ${topCatLine}
 ${limitLine}
@@ -1356,17 +1379,20 @@ ${byCatLines}
 
 REGRAS CRÍTICAS:
 1. Use APENAS os números enviados. Nunca invente valores nem variação.
-2. Se não há fatura anterior, NÃO compare com mês passado — fale só do mês atual.
-3. Se não há dado de limite, NÃO mencione limite.
-4. Para dar peso, use proporções dos próprios dados ("metade da fatura", "27% do total").
-5. É a fatura do cartão — fale de compras/gastos no cartão, não de salário ou renda.
+2. ${rendaRule}
+3. Se não há fatura anterior, NÃO compare com mês passado — fale só do mês atual.
+4. Se não há dado de limite, NÃO mencione limite (quando existe, é âncora secundária).
+5. A renda é só a BASE pra dar peso (denominador). As compras são do CARTÃO — não trate como fluxo de caixa do mês.
 
 ${formato}
 
-Exemplos de tom:
+Exemplos de tom (com renda):
+- headline: "Sua fatura fechou em R$2.425 — 38% do que entrou no mês."
+- insight: "Varejo levou R$891 — 14% da renda."
+- insight: "98% do limite comprometido."
+Exemplos (sem renda):
 - headline: "Fatura subiu 18% vs maio — fechou em R$568."
-- insight: "Varejo levou metade: R$274."
-- insight: "98% do limite comprometido. Sobrou quase nada."`;
+- insight: "Varejo levou metade: R$274."`;
 
     const client = new Anthropic({ apiKey, maxRetries: 4 });
     let headline: string | null = null;
