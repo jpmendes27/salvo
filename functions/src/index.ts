@@ -1,4 +1,4 @@
-import { onCall, onRequest } from "firebase-functions/v2/https";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onObjectFinalized } from "firebase-functions/v2/storage";
 import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
@@ -403,6 +403,80 @@ async function categorizeCascade(
 
   return results;
 }
+
+// ─── Recategorize (callable) ──────────────────────────────────────────────────
+// A user changing a transaction's category. Does THREE things, atomically from
+// the caller's view:
+//   1. Updates that transaction's category (NEVER its source).
+//   2. Feeds the shared merchant cache (merchantCategories), so future imports of
+//      the same merchant categorize correctly with zero API cost.
+//   3. Optionally applies the category to every transaction of the SAME merchant
+//      (same normalized key) in the workspace — account AND card alike (source
+//      is never touched). This is why it's a function: clients can't write the
+//      merchant cache (rules forbid it) and a cross-collection sweep needs admin.
+export const recategorize = onCall({ maxInstances: 10 }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Faça login pra continuar.");
+
+  const { workspaceId, transactionId, category, applyToAll } = (request.data ?? {}) as {
+    workspaceId?: string; transactionId?: string; category?: string; applyToAll?: boolean;
+  };
+  if (!workspaceId || !transactionId || !category) {
+    throw new HttpsError("invalid-argument", "Dados incompletos.");
+  }
+  if (!(IMPORT_CATEGORIES as readonly string[]).includes(category)) {
+    throw new HttpsError("invalid-argument", "Categoria inválida.");
+  }
+
+  const db = admin.firestore();
+  const FieldValue = admin.firestore.FieldValue;
+
+  // Membership gate (active member of this workspace).
+  const memberSnap = await db.doc(`workspaces/${workspaceId}/members/${uid}`).get();
+  if (!memberSnap.exists || memberSnap.data()?.status !== "active") {
+    throw new HttpsError("permission-denied", "Você não participa deste workspace.");
+  }
+
+  const txRef = db.doc(`workspaces/${workspaceId}/transactions/${transactionId}`);
+  const txSnap = await txRef.get();
+  if (!txSnap.exists) throw new HttpsError("not-found", "Lançamento não encontrado.");
+  const description = String(txSnap.data()?.description ?? "");
+  const key = normalizeMerchantKey(description);
+
+  // 1 + 2: this transaction's category + the shared merchant cache.
+  const base = db.batch();
+  base.update(txRef, { category, updatedAt: FieldValue.serverTimestamp() });
+  if (key) {
+    base.set(
+      db.collection("merchantCategories").doc(merchantCacheId(key)),
+      { c: category, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+  }
+  await base.commit();
+  let updated = 1;
+
+  // 3: sweep the workspace for the same merchant (chunked; 500-op batch limit).
+  if (applyToAll && key) {
+    const allSnap = await db.collection(`workspaces/${workspaceId}/transactions`).get();
+    const matches = allSnap.docs.filter((d) => {
+      if (d.id === transactionId) return false;
+      const data = d.data();
+      return data.category !== category &&
+        normalizeMerchantKey(String(data.description ?? "")) === key;
+    });
+    for (let i = 0; i < matches.length; i += 450) {
+      const b = db.batch();
+      for (const d of matches.slice(i, i + 450)) {
+        b.update(d.ref, { category, updatedAt: FieldValue.serverTimestamp() });
+      }
+      await b.commit();
+    }
+    updated += matches.length;
+  }
+
+  return { updated };
+});
 
 // ─── Chunked text extraction (parallel batches) ───────────────────────────────
 //

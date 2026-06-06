@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = void 0;
+exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = exports.recategorize = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const storage_1 = require("firebase-functions/v2/storage");
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
@@ -379,6 +379,69 @@ async function categorizeCascade(client, db, descriptions) {
     }
     return results;
 }
+// ─── Recategorize (callable) ──────────────────────────────────────────────────
+// A user changing a transaction's category. Does THREE things, atomically from
+// the caller's view:
+//   1. Updates that transaction's category (NEVER its source).
+//   2. Feeds the shared merchant cache (merchantCategories), so future imports of
+//      the same merchant categorize correctly with zero API cost.
+//   3. Optionally applies the category to every transaction of the SAME merchant
+//      (same normalized key) in the workspace — account AND card alike (source
+//      is never touched). This is why it's a function: clients can't write the
+//      merchant cache (rules forbid it) and a cross-collection sweep needs admin.
+exports.recategorize = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid)
+        throw new https_1.HttpsError("unauthenticated", "Faça login pra continuar.");
+    const { workspaceId, transactionId, category, applyToAll } = (request.data ?? {});
+    if (!workspaceId || !transactionId || !category) {
+        throw new https_1.HttpsError("invalid-argument", "Dados incompletos.");
+    }
+    if (!pdf_core_1.IMPORT_CATEGORIES.includes(category)) {
+        throw new https_1.HttpsError("invalid-argument", "Categoria inválida.");
+    }
+    const db = admin.firestore();
+    const FieldValue = admin.firestore.FieldValue;
+    // Membership gate (active member of this workspace).
+    const memberSnap = await db.doc(`workspaces/${workspaceId}/members/${uid}`).get();
+    if (!memberSnap.exists || memberSnap.data()?.status !== "active") {
+        throw new https_1.HttpsError("permission-denied", "Você não participa deste workspace.");
+    }
+    const txRef = db.doc(`workspaces/${workspaceId}/transactions/${transactionId}`);
+    const txSnap = await txRef.get();
+    if (!txSnap.exists)
+        throw new https_1.HttpsError("not-found", "Lançamento não encontrado.");
+    const description = String(txSnap.data()?.description ?? "");
+    const key = (0, pdf_core_1.normalizeMerchantKey)(description);
+    // 1 + 2: this transaction's category + the shared merchant cache.
+    const base = db.batch();
+    base.update(txRef, { category, updatedAt: FieldValue.serverTimestamp() });
+    if (key) {
+        base.set(db.collection("merchantCategories").doc(merchantCacheId(key)), { c: category, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    await base.commit();
+    let updated = 1;
+    // 3: sweep the workspace for the same merchant (chunked; 500-op batch limit).
+    if (applyToAll && key) {
+        const allSnap = await db.collection(`workspaces/${workspaceId}/transactions`).get();
+        const matches = allSnap.docs.filter((d) => {
+            if (d.id === transactionId)
+                return false;
+            const data = d.data();
+            return data.category !== category &&
+                (0, pdf_core_1.normalizeMerchantKey)(String(data.description ?? "")) === key;
+        });
+        for (let i = 0; i < matches.length; i += 450) {
+            const b = db.batch();
+            for (const d of matches.slice(i, i + 450)) {
+                b.update(d.ref, { category, updatedAt: FieldValue.serverTimestamp() });
+            }
+            await b.commit();
+        }
+        updated += matches.length;
+    }
+    return { updated };
+});
 // ─── Chunked text extraction (parallel batches) ───────────────────────────────
 //
 // A single Claude call truncates at max_tokens AND approaches the 300s timeout

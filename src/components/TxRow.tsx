@@ -6,10 +6,10 @@
 // the single doc — never the source. Reused verbatim so the two lists stay in
 // parity; no parallel implementation.
 
-import { doc, updateDoc } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { db } from "@/lib/firebase";
+import { app } from "@/lib/firebase";
 import { formatCurrency } from "@/lib/money";
 import { CATEGORY_COLORS, CATEGORY_LABELS } from "@/lib/parsers";
 import type { RecurringItem, Transaction } from "@/lib/types";
@@ -50,6 +50,8 @@ export function TxRow({
 }) {
   const [hov, setHov] = useState(false);
   const [editingCat, setEditingCat] = useState(false);
+  const [applyAll, setApplyAll] = useState(false);
+  const [saving, setSaving] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isIncome = tx.type === "income";
   const parts = tx.date.split("-");
@@ -77,10 +79,22 @@ export function TxRow({
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [editingCat]);
 
+  // Recategorize via the callable: it updates this transaction's category AND
+  // the shared merchant cache (and, when applyAll is on, every transaction of
+  // the same merchant). Never changes source.
   async function recategorize(newCat: string) {
-    if (newCat === tx.category) { setEditingCat(false); return; }
-    await updateDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id), { category: newCat });
-    setEditingCat(false);
+    if (newCat === tx.category && !applyAll) { setEditingCat(false); return; }
+    setSaving(true);
+    try {
+      const fn = httpsCallable(getFunctions(app, "us-central1"), "recategorize");
+      await fn({ workspaceId, transactionId: tx.id, category: newCat, applyToAll: applyAll });
+    } catch (e) {
+      console.error("[recategorize] failed:", e);
+    } finally {
+      setSaving(false);
+      setApplyAll(false);
+      setEditingCat(false);
+    }
   }
 
   return (
@@ -173,27 +187,55 @@ export function TxRow({
       </div>
 
       {!selectMode && editingCat && (
-        <div style={{ padding: "0 12px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {ALL_CATEGORIES.map(([key, label]) => {
-            const active = key === tx.category;
-            return (
-              <button
-                key={key}
-                onClick={() => recategorize(key)}
-                style={{
-                  fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
-                  border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.09)"}`,
-                  background: active ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.03)",
-                  color: active ? "#fff" : "rgba(255,255,255,0.45)",
-                  cursor: active ? "default" : "pointer",
-                  display: "flex", alignItems: "center", gap: 5,
-                }}
-              >
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: categoryColor(key), flexShrink: 0 }} />
-                {label}
-              </button>
-            );
-          })}
+        <div style={{ padding: "0 12px 12px" }}>
+          {/* Apply-to-all: set intent BEFORE picking a category. */}
+          <button
+            onClick={() => setApplyAll((v) => !v)}
+            disabled={saving}
+            style={{
+              display: "flex", alignItems: "center", gap: 7, marginBottom: 9,
+              background: "none", border: "none", padding: 0, cursor: saving ? "default" : "pointer",
+            }}
+          >
+            <span style={{
+              width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+              border: `1.5px solid ${applyAll ? G : "rgba(255,255,255,0.25)"}`,
+              background: applyAll ? G : "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {applyAll && (
+                <svg width="9" height="7" viewBox="0 0 10 8" fill="none">
+                  <path d="M1 4l3 3 5-6" stroke="#09090b" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </span>
+            <span style={{ fontSize: 11.5, color: applyAll ? "#fff" : "rgba(255,255,255,0.42)", fontWeight: 600 }}>
+              Aplicar a todos desse estabelecimento
+            </span>
+          </button>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, opacity: saving ? 0.5 : 1, pointerEvents: saving ? "none" : "auto" }}>
+            {ALL_CATEGORIES.map(([key, label]) => {
+              const active = key === tx.category;
+              return (
+                <button
+                  key={key}
+                  onClick={() => recategorize(key)}
+                  style={{
+                    fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
+                    border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.09)"}`,
+                    background: active ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.03)",
+                    color: active ? "#fff" : "rgba(255,255,255,0.45)",
+                    cursor: active && !applyAll ? "default" : "pointer",
+                    display: "flex", alignItems: "center", gap: 5,
+                  }}
+                >
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: categoryColor(key), flexShrink: 0 }} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
