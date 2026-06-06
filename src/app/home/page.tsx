@@ -35,6 +35,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CreditCard,
   Crown,
   Eye,
   EyeOff,
@@ -521,6 +522,9 @@ function WorkspaceApp({
   const [txFilter, setTxFilter] = useState<"all" | "income" | "expense">("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [importState, setImportState] = useState<ImportState | null>(null);
+  // Fatura completion is a SEPARATE lens from the account import: a small
+  // dedicated confirmation (never the account "Revisar importação" modal).
+  const [faturaResult, setFaturaResult] = useState<{ cardLabel: string; comprasCount: number; error?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
@@ -807,9 +811,26 @@ function WorkspaceApp({
         if (!snap.exists()) return;
         const data = snap.data() as {
           status: string;
+          type?: string;
           transactions?: ParsedTransaction[];
           error?: string;
+          cardLabel?: string;
+          comprasCount?: number;
         };
+
+        // Fatura (card statement): a SEPARATE lens. It persists server-side and
+        // must NEVER open the account "Revisar importação" modal. Close the
+        // analyzing modal and show a dedicated completion (the modal itself
+        // branches on the cards flag for the message / redirect).
+        if (data.status === "done" && data.type === "fatura") {
+          setImportState(null);
+          setFaturaResult({
+            cardLabel: data.cardLabel ?? "cartão",
+            comprasCount: data.comprasCount ?? 0,
+          });
+          unsub();
+          return;
+        }
 
         // Only "done" is shown — it means the server's reconciliation gate
         // passed (count complete + balance chain closed). "partial" no longer
@@ -841,11 +862,22 @@ function WorkspaceApp({
           setImportState({ phase: "preview", rows });
           unsub();
         } else if (data.status === "failed") {
-          setImportState({
-            phase: "preview",
-            rows: [],
-            error: data.error ?? "Erro ao processar o arquivo. Tenta de novo.",
-          });
+          // A failed fatura shows its honest error in the card lens, never the
+          // account review modal.
+          if (data.type === "fatura") {
+            setImportState(null);
+            setFaturaResult({
+              cardLabel: data.cardLabel ?? "cartão",
+              comprasCount: 0,
+              error: data.error ?? "Não consegui importar essa fatura. Tenta de novo.",
+            });
+          } else {
+            setImportState({
+              phase: "preview",
+              rows: [],
+              error: data.error ?? "Erro ao processar o arquivo. Tenta de novo.",
+            });
+          }
           unsub();
         }
       },
@@ -2111,6 +2143,22 @@ function WorkspaceApp({
               )
             })
           }
+        />
+      )}
+
+      {/* Fatura completion (separate lens — never the account review modal) */}
+      {faturaResult && (
+        <FaturaDoneModal
+          cardLabel={faturaResult.cardLabel}
+          comprasCount={faturaResult.comprasCount}
+          error={faturaResult.error}
+          cardsEnabled={cardsEnabled}
+          onClose={() => setFaturaResult(null)}
+          onOpenCards={() => {
+            localStorage.setItem("fincheck_workspace", workspace.id);
+            setFaturaResult(null);
+            router.push("/cards");
+          }}
         />
       )}
 
@@ -3446,6 +3494,145 @@ function TxRow({
           <Trash2 size={14} />
         </button>
       )}
+    </div>
+  );
+}
+
+// ─── Fatura completion modal (card lens) ──────────────────────────────────────
+// Shown when a fatura import finishes. Data is already persisted server-side;
+// this only confirms and (when the cards flag is on) routes to /cards. Never the
+// account review modal. Matches the import-modal design language.
+
+function FaturaDoneModal({
+  cardLabel,
+  comprasCount,
+  error,
+  cardsEnabled,
+  onClose,
+  onOpenCards,
+}: {
+  cardLabel: string;
+  comprasCount: number;
+  error?: string;
+  cardsEnabled: boolean;
+  onClose: () => void;
+  onOpenCards: () => void;
+}) {
+  const comprasLabel = comprasCount === 1 ? "1 compra" : `${comprasCount} compras`;
+  const isError = !!error;
+  const accent = isError ? "#ff5c5c" : G;
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)",
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: "#0e0f11",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 18,
+          width: "100%",
+          maxWidth: 420,
+          padding: "28px 26px",
+          boxShadow: "0 40px 100px rgba(0,0,0,0.6)",
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 12,
+            background: isError ? "rgba(255,92,92,0.12)" : "rgba(184,245,90,0.12)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "0 auto 16px",
+          }}
+        >
+          <CreditCard size={24} color={accent} strokeWidth={2} />
+        </div>
+        <h2 style={{ fontSize: 17, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em" }}>
+          {isError ? "Não importei essa fatura" : `Li tua fatura do ${cardLabel}`}
+        </h2>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginTop: 6, lineHeight: 1.5 }}>
+          {isError
+            ? error
+            : cardsEnabled
+            ? `${comprasLabel} organizadas no teu cartão.`
+            : "Visão de cartão chegando em breve."}
+        </p>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+          {cardsEnabled && !isError ? (
+            <>
+              <button
+                onClick={onClose}
+                style={{
+                  flex: 1,
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 10,
+                  color: "rgba(255,255,255,0.6)",
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  padding: "11px 0",
+                  cursor: "pointer",
+                }}
+              >
+                Fechar
+              </button>
+              <button
+                onClick={onOpenCards}
+                style={{
+                  flex: 1,
+                  background: G,
+                  border: "none",
+                  borderRadius: 10,
+                  color: "#0a0a0a",
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  padding: "11px 0",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                Ver cartão <ArrowRight size={15} />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onClose}
+              style={{
+                flex: 1,
+                background: G,
+                border: "none",
+                borderRadius: 10,
+                color: "#0a0a0a",
+                fontSize: 13.5,
+                fontWeight: 700,
+                padding: "11px 0",
+                cursor: "pointer",
+              }}
+            >
+              Fechar
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1483,6 +1483,7 @@ async function processFatura(
     console.error("[fatura-job] parse error:", msg);
     await jobRef.update({
       status: "failed",
+      type: "fatura", // so the client shows a fatura error, never the account modal
       error: "Não consegui ler essa fatura. Tenta exportar de novo.",
       failedAt: admin.firestore.FieldValue.serverTimestamp(),
     }).catch(() => {});
@@ -1492,6 +1493,7 @@ async function processFatura(
   if (!fatura || !fatura.card?.bank) {
     await jobRef.update({
       status: "failed",
+      type: "fatura",
       error: "Não consegui identificar os dados dessa fatura. Confere se é uma fatura de cartão e envia de novo.",
       failedAt: admin.firestore.FieldValue.serverTimestamp(),
     }).catch(() => {});
@@ -1504,6 +1506,7 @@ async function processFatura(
     console.error(`[fatura-job] BLOCKED by totals: ${gate.reason}`);
     await jobRef.update({
       status: "failed",
+      type: "fatura",
       error: "Não consegui bater os totais dessa fatura. Pra não importar nada errado, parei aqui — confere se o PDF tá completo e tenta de novo.",
       failedAt: admin.firestore.FieldValue.serverTimestamp(),
     }).catch(() => {});
@@ -1599,7 +1602,9 @@ async function processFatura(
   // 6 ─ Done. Job doc carries a small summary for the client toast/redirect.
   await jobRef.update({
     status: "done",
-    kind: "fatura",
+    // Discriminator the client branches on at completion: a fatura must route
+    // to the card lens, never to the account "Revisar importação" modal.
+    type: "fatura",
     cardId,
     cardLabel,
     period,
