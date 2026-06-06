@@ -1137,18 +1137,22 @@ Sem termos técnicos: nunca use "otimizar", "alocar", "comprometer renda", "déf
 
 Este é o diagnóstico do CONJUNTO DE CARTÕES de crédito (${payload.cardsCount ?? "vários"} cartões) — NÃO é o fluxo de caixa do mês.
 
-Dados somados de todos os cartões:
-- Total em aberto (soma das faturas): ${fmt(payload.totalAtual)}
-${payload.vencendoMes != null ? `- Vencendo em ${payload.monthLabel}: ${fmt(payload.vencendoMes)}` : "- Vencimento no mês: sem dados"}
+Dados somados de todos os cartões (competência ${payload.monthLabel}):
+- Total da competência (soma das faturas): ${fmt(payload.totalAtual)}
+${payload.totalAnterior != null && payload.totalAnterior > 0
+            ? `- Competência anterior (${payload.prevMonthLabel}): ${fmt(payload.totalAnterior)} (variação ${Math.round(((payload.totalAtual - payload.totalAnterior) / payload.totalAnterior) * 100)}%)`
+            : "- Competência anterior: sem dados (não compare)"}
+${payload.vencendoMes != null ? `- Vencendo em ${payload.monthLabel}: ${fmt(payload.vencendoMes)}` : ""}
 ${topCatLine.replace("da fatura", "do conjunto")}
 - Categorias somadas dos cartões:
 ${byCatLines}
 
 REGRAS CRÍTICAS:
-1. Use APENAS os números enviados. Nunca invente valores.
-2. Não há limite combinado — NÃO mencione limite no conjunto.
-3. Para dar peso, use proporções dos próprios dados ("metade do total", "27%").
-4. São os cartões — fale de compras/gastos nos cartões, não de salário ou renda.
+1. Use APENAS os números enviados. Nunca invente valores nem variação.
+2. Se não há competência anterior, NÃO compare — fale só da atual.
+3. Não há limite combinado — NÃO mencione limite no conjunto.
+4. Para dar peso, use proporções dos próprios dados ("metade do total", "27%").
+5. São os cartões — fale de compras/gastos nos cartões, não de salário ou renda.
 
 ${formato}
 

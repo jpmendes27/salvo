@@ -5,11 +5,11 @@
 // previous faturas. A separate lens from cash flow: card data only, never mixed
 // into the account diagnosis. Follows the Salvô! design system.
 
-import { deleteDoc, doc, getDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, writeBatch } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { ArrowLeft, CreditCard, ChevronRight, Search, Sparkles } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, CreditCard, ChevronRight, ChevronLeft, Search, Sparkles } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useAuthUser } from "@/app/auth-provider";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { TxRow } from "@/components/TxRow";
@@ -35,6 +35,14 @@ function Shell({ text }: { text: string }) {
 const catLabel = (c: string) => (CATEGORY_LABELS as Record<string, string>)[c] ?? c;
 
 export default function CardsPage() {
+  return (
+    <Suspense fallback={<Shell text="Carregando..." />}>
+      <CardsFlow />
+    </Suspense>
+  );
+}
+
+function CardsFlow() {
   const { user, authLoading } = useAuthUser();
   const router = useRouter();
 
@@ -54,12 +62,22 @@ export default function CardsPage() {
 
 function CardsView({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
+  const params = useSearchParams();
   const { cards, faturas, cardTx, loading } = useCardData(workspaceId);
   // One-shot hint from the home grouped view: open on the tapped card.
   const [selectedId, setSelectedId] = useState<string | null>(
     () => (typeof window !== "undefined" ? localStorage.getItem("fincheck_card") : null)
   );
   useEffect(() => { localStorage.removeItem("fincheck_card"); }, []);
+
+  // Selected statement period (faturaPeriod) from the URL — NOT a calendar month.
+  // Scopes the whole view. Navigation updates ?mes, mirroring /transactions.
+  const mes = params.get("mes");
+  const setMes = (p: string) => {
+    const q = new URLSearchParams(params.toString());
+    q.set("mes", p);
+    router.replace(`/cards?${q.toString()}`);
+  };
 
   // Default selection: the card with the most recent fatura.
   const ordered = useMemo(() => {
@@ -126,11 +144,11 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
             )}
 
             {tab === "all" ? (
-              <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} />
+              <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} />
             ) : (
               (() => {
                 const c = ordered.find((x) => x.id === tab) ?? ordered[0];
-                return c ? <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} /> : null;
+                return c ? <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} /> : null;
               })()
             )}
           </>
@@ -140,12 +158,44 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[] }) {
-  const fatura = currentFatura(faturas, card.id);
+// Period navigator (statement period = competência, NOT a calendar month).
+// Mirrors the /transactions month nav, but over the fatura periods that exist.
+function PeriodNav({ periods, current, onChange }: { periods: string[]; current: string | null; onChange: (p: string) => void }) {
+  if (!current) return null;
+  const idx = periods.indexOf(current);
+  const older = idx >= 0 && idx < periods.length - 1 ? periods[idx + 1] : null;
+  const newer = idx > 0 ? periods[idx - 1] : null;
+  const label = monthLabel(current).replace(/^./, (c) => c.toUpperCase());
+  const navBtn = (enabled: boolean): React.CSSProperties => ({
+    background: "transparent", border: "none", padding: 4, display: "flex",
+    color: enabled ? colors.textPrimary : colors.textFaint,
+    cursor: enabled ? "pointer" : "default", opacity: enabled ? 1 : 0.4,
+  });
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 18, padding: "9px 14px", borderRadius: 12, background: colors.card, border: `1px solid ${colors.border}` }}>
+      <button disabled={!older} onClick={() => older && onChange(older)} style={navBtn(!!older)} aria-label="Fatura anterior"><ChevronLeft size={18} /></button>
+      <span style={{ fontSize: 13.5, fontWeight: 700, minWidth: 130, textAlign: "center" }}>{label}</span>
+      <button disabled={!newer} onClick={() => newer && onChange(newer)} style={navBtn(!!newer)} aria-label="Próxima fatura"><ChevronRight size={18} /></button>
+    </div>
+  );
+}
+
+function CardDetail({ workspaceId, card, faturas, cardTx, mes, setMes }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void }) {
   const lim = limitInfo(card);
   const bank = detectBank(card.bank || card.name);
 
-  // Purchases of the current fatura period for this card.
+  // This card's faturas, newest first. The selected period comes from ?mes,
+  // defaulting to the most recent; prevFatura is the one immediately older.
+  const cardFaturas = useMemo(
+    () => faturas.filter((f) => f.cardId === card.id).sort((a, b) => b.period.localeCompare(a.period)),
+    [faturas, card.id]
+  );
+  const periods = useMemo(() => cardFaturas.map((f) => f.period), [cardFaturas]);
+  const idx = (() => { const i = mes ? periods.indexOf(mes) : -1; return i >= 0 ? i : 0; })();
+  const fatura = cardFaturas[idx] ?? null;
+  const prevFatura = cardFaturas[idx + 1] ?? null;
+
+  // Purchases of the SELECTED fatura period for this card.
   const periodTx = useMemo(
     () => cardTx
       .filter((t) => t.cardId === card.id && (!fatura || t.faturaPeriod === fatura.period))
@@ -156,28 +206,28 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
   const byCategory = useMemo(() => aggregateByCategory(periodTx), [periodTx]);
   const totalCompras = byCategory.reduce((s, [, v]) => s + v, 0);
 
-  // Parcelamentos: purchases carrying installment info.
   const parcelamentos = useMemo(
     () => periodTx.filter((t) => t.parcela && t.parcela.total > 1),
     [periodTx]
   );
 
-  // Previous faturas (this card), most recent first, excluding the current one.
-  const historico = useMemo(() => {
-    return faturas
-      .filter((f) => f.cardId === card.id && (!fatura || f.period !== fatura.period))
-      .sort((a, b) => b.period.localeCompare(a.period));
-  }, [faturas, card.id, fatura]);
+  // Other faturas (this card), newest first, excluding the selected one.
+  const historico = useMemo(
+    () => cardFaturas.filter((f) => !fatura || f.period !== fatura.period),
+    [cardFaturas, fatura]
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {periods.length > 1 && <PeriodNav periods={periods} current={fatura?.period ?? null} onChange={setMes} />}
+
       {/* Diagnóstico do cartão (lente separada — cache Firestore, IA só quando muda) */}
       {fatura && (
         <CardDiagnosis
           workspaceId={workspaceId}
           card={card}
           fatura={fatura}
-          prevFatura={historico[0] ?? null}
+          prevFatura={prevFatura}
           byCategory={byCategory}
           totalCompras={totalCompras}
           lim={lim}
@@ -311,6 +361,8 @@ function CategoryBreakdown({ byCategory, total }: { byCategory: [string, number]
 function CardTxList({ workspaceId, txs, byCategory }: { workspaceId: string; txs: Transaction[]; byCategory: [string, number][] }) {
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState<string>("all");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const listTx = useMemo(() => {
     const q = search.trim().toLowerCase();
     return txs.filter((t) => {
@@ -320,13 +372,56 @@ function CardTxList({ workspaceId, txs, byCategory }: { workspaceId: string; txs
     });
   }, [txs, search, catFilter]);
 
+  function toggleSelect(id: string) {
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  // Deleting a card transaction only updates the DERIVED views (list, categories,
+  // diagnosis recompute from what's left). It does NOT touch the fatura's
+  // authoritative total (the bank's saldoDestaFatura) nor the merchant cache.
+  async function deleteSelected() {
+    if (selected.size === 0) return;
+    const batch = writeBatch(db);
+    selected.forEach((id) => batch.delete(doc(db, "workspaces", workspaceId, "transactions", id)));
+    await batch.commit();
+    setSelected(new Set());
+    setSelectMode(false);
+  }
+
   if (txs.length === 0) return null;
   return (
     <div style={cardBox()}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <div style={typography.labelSmall}>Transações</div>
-        <div style={{ fontSize: 11, color: colors.textMuted }}>{listTx.length} de {txs.length}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 11, color: colors.textMuted }}>{listTx.length} de {txs.length}</div>
+          <button
+            onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
+            style={{ fontSize: 11.5, fontWeight: 600, padding: "4px 10px", borderRadius: 999, border: `1px solid ${selectMode ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`, background: selectMode ? "rgba(255,255,255,0.10)" : "transparent", color: selectMode ? colors.textPrimary : colors.textMuted, cursor: "pointer" }}
+          >
+            {selectMode ? "Cancelar" : "Selecionar"}
+          </button>
+        </div>
       </div>
+
+      {selectMode && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, padding: "8px 12px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: `1px solid ${colors.border}` }}>
+          <span style={{ fontSize: 12, color: colors.textSecondary, flex: 1 }}>
+            {selected.size === 0 ? "Nenhuma selecionada" : `${selected.size} selecionada${selected.size !== 1 ? "s" : ""}`}
+          </span>
+          {selected.size < listTx.length ? (
+            <button onClick={() => setSelected(new Set(listTx.map((t) => t.id)))} style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: colors.textSecondary, cursor: "pointer" }}>Selecionar todas</button>
+          ) : (
+            <button onClick={() => setSelected(new Set())} style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: colors.textSecondary, cursor: "pointer" }}>Limpar seleção</button>
+          )}
+          <button
+            onClick={deleteSelected}
+            disabled={selected.size === 0}
+            style={{ fontSize: 12, fontWeight: 700, padding: "4px 12px", borderRadius: 999, border: "1px solid rgba(255,92,92,0.35)", background: selected.size > 0 ? "rgba(255,92,92,0.15)" : "transparent", color: selected.size > 0 ? "#ff8080" : "rgba(255,92,92,0.3)", cursor: selected.size > 0 ? "pointer" : "default" }}
+          >
+            Excluir {selected.size > 0 ? `(${selected.size})` : ""}
+          </button>
+        </div>
+      )}
 
       <div style={{ position: "relative", marginBottom: 12 }}>
         <Search size={14} color={colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
@@ -365,9 +460,9 @@ function CardTxList({ workspaceId, txs, byCategory }: { workspaceId: string; txs
               tx={tx}
               workspaceId={workspaceId}
               onDelete={() => deleteDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id))}
-              selectMode={false}
-              isSelected={false}
-              onToggleSelect={() => {}}
+              selectMode={selectMode}
+              isSelected={selected.has(tx.id)}
+              onToggleSelect={() => toggleSelect(tx.id)}
               parceladaMap={EMPTY_PARCELADA}
             />
           ))}
@@ -488,79 +583,92 @@ function CardDiagnosis({
 
 // ─── Aggregated "Todos os cartões" view ──────────────────────────────────────
 
-function AllCardsView({ workspaceId, cards, faturas, cardTx }: { workspaceId: string; cards: Card[]; faturas: Fatura[]; cardTx: Transaction[] }) {
-  // One current fatura per card = one open bill.
-  const bills = useMemo(
-    () => cards.map((card) => ({ card, fatura: currentFatura(faturas, card.id) }))
-      .filter((b): b is { card: Card; fatura: Fatura } => !!b.fatura),
-    [cards, faturas]
+function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, setMes }: { workspaceId: string; cards: Card[]; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void }) {
+  // Periods = competências (faturaPeriod) across all cards, newest first.
+  const allPeriods = useMemo(
+    () => [...new Set(faturas.map((f) => f.period))].sort((a, b) => b.localeCompare(a)),
+    [faturas]
   );
+  const pIdx = (() => { const i = mes ? allPeriods.indexOf(mes) : -1; return i >= 0 ? i : 0; })();
+  const selectedPeriod = allPeriods[pIdx] ?? null;
+  const prevPeriod = allPeriods[pIdx + 1] ?? null;
+  const isLatest = pIdx === 0;
+
+  // Bills of the selected competência (one fatura per card for that period).
+  const bills = useMemo(
+    () => cards.map((card) => ({ card, fatura: faturas.find((f) => f.cardId === card.id && f.period === selectedPeriod) }))
+      .filter((b): b is { card: Card; fatura: Fatura } => !!b.fatura),
+    [cards, faturas, selectedPeriod]
+  );
+
+  const totalPeriodo = bills.reduce((s, b) => s + b.fatura.totalAPagar, 0);
+  const prevTotal = prevPeriod ? faturas.filter((f) => f.period === prevPeriod).reduce((s, f) => s + f.totalAPagar, 0) : null;
 
   const thisMonth = currentMonthKey();
   const vencendoMes = bills
     .filter((b) => b.fatura.vencimento && b.fatura.vencimento.slice(0, 7) === thisMonth)
     .reduce((s, b) => s + b.fatura.totalAPagar, 0);
-  const totalAberto = bills.reduce((s, b) => s + b.fatura.totalAPagar, 0);
   const semVencimento = bills.filter((b) => !b.fatura.vencimento).length;
-  const mesLabel = (() => { const [y, m] = thisMonth.split("-").map(Number); return new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(new Date(y, m - 1, 1)); })();
+  const mesCalLabel = (() => { const [y, m] = thisMonth.split("-").map(Number); return new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(new Date(y, m - 1, 1)); })();
 
-  // Aggregated transactions: each card's current-period purchases.
-  const aggTx = useMemo(() => {
-    const periods = new Map(bills.map((b) => [b.card.id, b.fatura.period]));
-    return cardTx
-      .filter((t) => t.cardId && periods.get(t.cardId) === t.faturaPeriod)
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [cardTx, bills]);
+  // Aggregated transactions of the selected competência (all cards).
+  const aggTx = useMemo(
+    () => cardTx.filter((t) => t.faturaPeriod === selectedPeriod).sort((a, b) => b.date.localeCompare(a.date)),
+    [cardTx, selectedPeriod]
+  );
 
   const byCategory = useMemo(() => aggregateByCategory(aggTx), [aggTx]);
   const totalCompras = byCategory.reduce((s, [, v]) => s + v, 0);
 
-  // Aggregated diagnosis (mode "todos"): one cached doc, refreshes when any
-  // fatura changes (fingerprint covers every bill + the category mix).
+  // Aggregated diagnosis (mode "todos") for the selected competência vs the
+  // previous one. Cached per period (doc all_<period>); refreshes when the set
+  // of bills or the category mix changes.
   const { fingerprint, payload } = useMemo(() => {
     const topCat = byCategory[0]
       ? { nome: catLabel(byCategory[0][0]), valor: byCategory[0][1], pct: totalCompras > 0 ? Math.round((byCategory[0][1] / totalCompras) * 100) : 0 }
       : null;
     const fp = [
-      thisMonth, totalAberto.toFixed(2), vencendoMes.toFixed(2),
-      bills.map((b) => `${b.card.id}:${b.fatura.period}:${b.fatura.totalAPagar.toFixed(2)}`).sort().join(";"),
+      selectedPeriod ?? "none", totalPeriodo.toFixed(2), prevTotal?.toFixed(2) ?? "none", vencendoMes.toFixed(2),
+      bills.map((b) => `${b.card.id}:${b.fatura.totalAPagar.toFixed(2)}`).sort().join(";"),
       byCategory.slice(0, 5).map(([c, v]) => `${c}:${v.toFixed(2)}`).join(","),
     ].join("|");
     return {
       fingerprint: fp,
       payload: {
         cardLabel: "seus cartões",
-        monthLabel: mesLabel,
-        prevMonthLabel: null,
-        totalAtual: totalAberto,
-        totalAnterior: null,
+        monthLabel: selectedPeriod ? monthLabel(selectedPeriod) : mesCalLabel,
+        prevMonthLabel: prevPeriod ? monthLabel(prevPeriod) : null,
+        totalAtual: totalPeriodo,
+        totalAnterior: prevTotal && prevTotal > 0 ? prevTotal : null,
         topCat,
         limitPct: null, limitUsado: null, limitTotal: null,
         byCategory: byCategory.slice(0, 5).map(([c, v]) => ({ nome: catLabel(c), valor: v })),
-        vencendoMes: vencendoMes > 0 ? vencendoMes : null,
+        vencendoMes: isLatest && vencendoMes > 0 ? vencendoMes : null,
         cardsCount: bills.length,
       },
     };
-  }, [thisMonth, totalAberto, vencendoMes, bills, byCategory, totalCompras, mesLabel]);
+  }, [selectedPeriod, prevPeriod, totalPeriodo, prevTotal, vencendoMes, isLatest, bills, byCategory, totalCompras, mesCalLabel]);
 
-  const { diag, loading } = useDiagnosis(workspaceId, "all", fingerprint, {
-    workspaceId, cardId: "all", period: "all", mode: "todos", fingerprint, payload,
+  const { diag, loading } = useDiagnosis(workspaceId, `all_${selectedPeriod ?? "none"}`, fingerprint, {
+    workspaceId, cardId: "all", period: selectedPeriod ?? "none", mode: "todos", fingerprint, payload,
   });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {allPeriods.length > 1 && <PeriodNav periods={allPeriods} current={selectedPeriod} onChange={setMes} />}
+
       <DiagnosisCard label="Diagnóstico dos cartões" diag={diag} loading={loading} loadingText="Analisando os cartões…" />
 
-      {/* Header agregado: total em aberto + vencendo no mês + lista por fatura */}
+      {/* Header agregado: total da competência + vencendo (quando atual) + lista */}
       <div style={{ ...cardBox(), background: `linear-gradient(135deg, ${colors.accentMuted}, rgba(184,245,90,0.02))`, border: `1px solid ${colors.borderAccent}` }}>
-        <div style={typography.labelSmall}>Total em aberto</div>
-        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em", marginTop: 2 }}>{formatCurrency(totalAberto)}</div>
-        {vencendoMes > 0 && (
+        <div style={typography.labelSmall}>{isLatest ? "Total em aberto" : `Fatura ${selectedPeriod ? monthLabel(selectedPeriod) : ""}`}</div>
+        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em", marginTop: 2 }}>{formatCurrency(totalPeriodo)}</div>
+        {isLatest && vencendoMes > 0 && (
           <div style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 4 }}>
-            Vencendo em {mesLabel}: <span style={{ color: colors.textPrimary, fontWeight: 700 }}>{formatCurrency(vencendoMes)}</span>
+            Vencendo em {mesCalLabel}: <span style={{ color: colors.textPrimary, fontWeight: 700 }}>{formatCurrency(vencendoMes)}</span>
           </div>
         )}
-        {semVencimento > 0 && (
+        {isLatest && semVencimento > 0 && (
           <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
             {semVencimento === 1 ? "1 fatura sem vencimento" : `${semVencimento} faturas sem vencimento`} — fora do total do mês.
           </div>
