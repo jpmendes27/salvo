@@ -68,6 +68,8 @@ import { defaultCategories, demoTransactions } from "@/lib/demo";
 import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, normalizeSourceLabel, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
+import { CardHomeSummary } from "@/components/CardHomeSummary";
+import { isCardsEnabled } from "@/lib/flags";
 import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
 import { getUserFacingError } from "@/lib/errors";
@@ -552,6 +554,7 @@ function WorkspaceApp({
   const workspace = activeEntry.workspace;
   const member = activeEntry.member;
   const isOwner = member.role === "owner";
+  const cardsEnabled = isCardsEnabled(user);
 
   const [monthlyIncome, setMonthlyIncome] = useState<number>(workspace.monthlyIncome ?? 0);
 
@@ -567,11 +570,15 @@ function WorkspaceApp({
   const showDemo = false;
   const visibleTx = showDemo ? demoTransactions : transactions;
   const sources = useMemo(() => {
-    const labels = [...new Set(transactions.map((t) => t.sourceLabel).filter(Boolean))] as string[];
+    const labels = [...new Set(
+      transactions.filter((t) => t.source !== "card").map((t) => t.sourceLabel).filter(Boolean)
+    )] as string[];
     return labels.sort();
   }, [transactions]);
 
   const filteredTx = visibleTx.filter((t) => {
+    // Card is a separate lens (/cards) — never in the account list.
+    if (t.source === "card") return false;
     const typeOk = txFilter === "all" || t.type === txFilter;
     const sourceOk = sourceFilter === "all" || t.sourceLabel === sourceFilter;
     return typeOk && sourceOk;
@@ -641,7 +648,11 @@ function WorkspaceApp({
       where("monthKey", "==", prevMonthKey)
     );
     return onSnapshot(q,
-      (snap) => setPrevTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)),
+      // Bug 3: prevTransactions feeds ONLY the cash-flow diagnosis (month-over-
+      // month comparison), so credit-card rows are excluded at the source.
+      (snap) => setPrevTransactions(
+        snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction).filter((t) => t.source !== "card")
+      ),
       () => {}
     );
   }, [workspace.id, prevMonthKey]);
@@ -756,6 +767,9 @@ function WorkspaceApp({
       filename: file.name,
       createdAt: serverTimestamp(),
       uid: user.uid,
+      // Carried for the server-side fatura pipeline (which persists directly,
+      // unlike the extrato staging that commits client-side).
+      createdByName: profile.displayName || user.displayName || user.email?.split("@")[0] || "Alguém",
     });
 
     const storagePath =
@@ -1061,10 +1075,14 @@ function WorkspaceApp({
     for (const md of membersSnap.docs) await deleteDoc(md.ref);
   }
 
-  // Mobile insights computations
-  const mobExpenses = useMemo(() => visibleTx.filter(t => t.type === "expense"), [visibleTx]);
+  // Mobile insights computations.
+  // Bug 3 — credit card is a SEPARATE lens: the cash-flow diagnosis uses ONLY
+  // source='account'. Card purchases (source='card') never enter these totals,
+  // because the statement already pays the card off as an account outflow.
+  const mobAccountTx = useMemo(() => visibleTx.filter(t => t.source !== "card"), [visibleTx]);
+  const mobExpenses = useMemo(() => mobAccountTx.filter(t => t.type === "expense"), [mobAccountTx]);
   const mobTotalGasto = useMemo(() => mobExpenses.reduce((s, t) => s + t.amount, 0), [mobExpenses]);
-  const mobTotalEntradas = useMemo(() => visibleTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [visibleTx]);
+  const mobTotalEntradas = useMemo(() => mobAccountTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [mobAccountTx]);
   const mobDaysWithExpenses = useMemo(() => new Set(mobExpenses.map(t => t.date)).size, [mobExpenses]);
   const mobMediaDia = mobDaysWithExpenses > 0 ? mobTotalGasto / mobDaysWithExpenses : 0;
   const mobRendaRef = monthlyIncome > 0 ? monthlyIncome : (mobTotalEntradas > 0 ? mobTotalEntradas : 1);
@@ -1096,7 +1114,7 @@ function WorkspaceApp({
     for (const tx of subs) byDesc[tx.description] = (byDesc[tx.description] ?? 0) + tx.amount;
     return Object.entries(byDesc).sort((a, b) => b[1] - a[1]);
   }, [visibleTx]);
-  const mobRecentTx = useMemo(() => [...visibleTx].slice(0, 6), [visibleTx]);
+  const mobRecentTx = useMemo(() => [...mobAccountTx].slice(0, 6), [mobAccountTx]);
   const mobPrevExpense = useMemo(() => prevTransactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0), [prevTransactions]);
   const mobPrevIncome = useMemo(() => prevTransactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [prevTransactions]);
   const mobIncomeChange = mobPrevIncome > 0 && summary.income > 0 ? Math.round(((summary.income - mobPrevIncome) / mobPrevIncome) * 100) : null;
@@ -1873,6 +1891,9 @@ function WorkspaceApp({
 
         {/* 4. Importar extrato */}
         <UploadZone onFiles={handleFiles} onAddManual={() => setAddOpen(true)} />
+
+        {/* 4b. Cartão de crédito (atrás da flag, lente separada) */}
+        {cardsEnabled && <CardHomeSummary workspaceId={workspace.id} />}
 
         {/* 5. Plano do mês */}
         <PlanCard
@@ -2860,9 +2881,12 @@ function InsightsView({
   const [editingRenda, setEditingRenda] = useState(false);
   const [rendaText, setRendaText] = useState("");
 
-  const expenses = transactions.filter((t) => t.type === "expense");
+  // Bug 3: the cash-flow diagnosis uses ONLY account transactions. Card
+  // purchases (source='card') are a separate lens and never counted here.
+  const accountTx = transactions.filter((t) => t.source !== "card");
+  const expenses = accountTx.filter((t) => t.type === "expense");
   const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
-  const totalEntradas = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const totalEntradas = accountTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
 
   const prevExpenses = prevTransactions.filter((t) => t.type === "expense");
   const prevTotalGasto = prevExpenses.reduce((s, t) => s + t.amount, 0);

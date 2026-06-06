@@ -1242,6 +1242,191 @@ exports.sendAdminAlert = (0, https_1.onRequest)({
         res.status(500).json({ error: msg });
     }
 });
+// ─── Credit-card statement (fatura) pipeline ─────────────────────────────────
+//
+// A fatura is a SEPARATE LENS from the cash-flow account extrato — it never
+// touches the account pipeline, the account gate, or the account UI. Faturas
+// are small, so a single Claude call extracts the whole document. The gate
+// reconciles by TOTALS (SaldoAnterior + Despesas − Pagamentos − Créditos =
+// SaldoDestaFatura), not by a balance chain. Doesn't close → failed, honest,
+// never partial. Persistence is direct and idempotent (deterministic IDs), so a
+// re-import overwrites in place.
+// Stable, filesystem/Firestore-safe slug from arbitrary text.
+function faturaSlug(s) {
+    return s
+        .normalize("NFD").replace(/[̀-ͯ]/g, "")
+        .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+        .slice(0, 40) || "x";
+}
+// Deterministic card id: bank + last4 (falls back to bank+name when no last4).
+function cardIdFor(card) {
+    const bank = faturaSlug(card.bank || "cartao");
+    const tail = card.last4 ? faturaSlug(card.last4) : faturaSlug(card.name || "card");
+    return `${bank}_${tail}`;
+}
+// Single-call fatura extraction via Claude. Faturas are small, so the flattened
+// statement text goes in one bounded call (works for both upload modes: the
+// client's pdfjs text, or server-extracted text from a raw PDF).
+async function parseFaturaViaClaude(client, statementText, filename) {
+    await throttleOutput(4000);
+    const message = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8192,
+        system: (0, pdf_core_1.buildFaturaSystemPrompt)(),
+        messages: [{
+                role: "user",
+                content: [{
+                        type: "text",
+                        text: `Fatura de cartão de crédito (${filename}):\n\n${statementText.slice(0, 120000)}`,
+                    }],
+            }],
+    });
+    recordOutputTokens(message.usage?.output_tokens ?? 0);
+    const raw = message.content.find((b) => b.type === "text")?.text ?? "";
+    return (0, pdf_core_1.parseFaturaJson)(raw);
+}
+// Full fatura job: parse → gate (totals) → categorize purchases → persist
+// cards/faturas/transactions(source='card'). Idempotent by deterministic IDs.
+async function processFatura(client, db, jobRef, workspaceId, statementText, filename, uid, displayName, resendKey, jobId) {
+    // 1 ─ Parse (watchdog so a stuck call fails cleanly, never a stuck job).
+    let fatura = null;
+    try {
+        fatura = await Promise.race([
+            parseFaturaViaClaude(client, statementText, filename),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("WATCHDOG_TIMEOUT")), 500000)),
+        ]);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[fatura-job] parse error:", msg);
+        await jobRef.update({
+            status: "failed",
+            error: "Não consegui ler essa fatura. Tenta exportar de novo.",
+            failedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(() => { });
+        if (resendKey)
+            await alertJobFailure(resendKey, `fatura parse: ${msg}`, jobId, workspaceId);
+        return;
+    }
+    if (!fatura || !fatura.card?.bank) {
+        await jobRef.update({
+            status: "failed",
+            error: "Não consegui identificar os dados dessa fatura. Confere se é uma fatura de cartão e envia de novo.",
+            failedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(() => { });
+        return;
+    }
+    // 2 ─ THE GATE — reconcile by totals. Doesn't close → failed, never partial.
+    const gate = (0, pdf_core_1.reconcileFatura)(fatura.totals);
+    if (!gate.ok) {
+        console.error(`[fatura-job] BLOCKED by totals: ${gate.reason}`);
+        await jobRef.update({
+            status: "failed",
+            error: "Não consegui bater os totais dessa fatura. Pra não importar nada errado, parei aqui — confere se o PDF tá completo e tenta de novo.",
+            failedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(() => { });
+        if (resendKey) {
+            await alertJobFailure(resendKey, `Fatura blocked: ${gate.reason}. bank=${fatura.card.bank}`, jobId, workspaceId);
+        }
+        return;
+    }
+    // 3 ─ Identity & period.
+    const cardId = cardIdFor(fatura.card);
+    const period = fatura.period ??
+        (fatura.vencimento ? fatura.vencimento.slice(0, 7) : new Date().toISOString().slice(0, 7));
+    const faturaId = `${cardId}_${period}`;
+    const cardLabel = fatura.card.name || fatura.card.bank;
+    // 4 ─ Categorize purchases only (same cascade as the account pipeline;
+    // source='card'). Payments/credits are statement totals, not purchases.
+    const compras = fatura.lancamentos.filter((l) => l.kind === "compra" && l.amount > 0);
+    let codes = new Array(compras.length).fill(null);
+    try {
+        codes = await categorizeCascade(client, db, compras.map((c) => c.description));
+    }
+    catch (catErr) {
+        console.error("[fatura-job] categorization failed (non-blocking):", catErr instanceof Error ? catErr.message : String(catErr));
+    }
+    // 5 ─ Persist (one batch, idempotent by deterministic IDs).
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const batch = db.batch();
+    const cardDoc = {
+        id: cardId,
+        bank: fatura.card.bank,
+        name: cardLabel,
+        createdBy: uid,
+        createdByName: displayName,
+        updatedAt: now,
+        createdAt: now,
+    };
+    if (fatura.card.last4 != null)
+        cardDoc.last4 = fatura.card.last4;
+    if (fatura.card.limitTotal != null)
+        cardDoc.limitTotal = fatura.card.limitTotal;
+    if (fatura.card.limitUsado != null)
+        cardDoc.limitUsado = fatura.card.limitUsado;
+    if (fatura.card.limitDisponivel != null)
+        cardDoc.limitDisponivel = fatura.card.limitDisponivel;
+    if (fatura.card.closingDay != null)
+        cardDoc.closingDay = fatura.card.closingDay;
+    if (fatura.card.dueDay != null)
+        cardDoc.dueDay = fatura.card.dueDay;
+    batch.set(db.doc(`workspaces/${workspaceId}/cards/${cardId}`), cardDoc, { merge: true });
+    const t = fatura.totals;
+    batch.set(db.doc(`workspaces/${workspaceId}/faturas/${faturaId}`), {
+        id: faturaId,
+        cardId,
+        period,
+        saldoAnterior: t.saldoAnterior ?? 0,
+        totalDespesas: t.totalDespesas ?? 0,
+        totalPagamentos: t.totalPagamentos ?? 0,
+        totalCreditos: t.totalCreditos ?? 0,
+        totalAPagar: t.totalAPagar ?? 0,
+        ...(fatura.vencimento ? { vencimento: fatura.vencimento } : {}),
+        ...(fatura.historico?.length ? { historico: fatura.historico } : {}),
+        updatedAt: now,
+        createdAt: now,
+    }, { merge: true });
+    // Purchases → transactions(source='card'). Deterministic id so re-import
+    // overwrites the same docs instead of duplicating.
+    compras.forEach((c, i) => {
+        const dedupKey = `${cardId}|${period}|${c.date}|${c.description.toLowerCase()}|${c.amount.toFixed(2)}|${c.parcela ? `${c.parcela.atual}/${c.parcela.total}` : ""}`;
+        const txId = `card_${crypto_1.default.createHash("sha1").update(dedupKey).digest("hex").slice(0, 24)}`;
+        const tx = {
+            id: txId,
+            type: "expense",
+            description: c.description,
+            amount: c.amount,
+            category: codes[i] ?? "outros",
+            date: c.date,
+            monthKey: (c.date ?? "").slice(0, 7),
+            source: "card",
+            cardId,
+            faturaPeriod: period,
+            sourceLabel: cardLabel,
+            createdBy: uid,
+            createdByName: displayName,
+            updatedAt: now,
+            createdAt: now,
+        };
+        if (c.parcela)
+            tx.parcela = c.parcela;
+        batch.set(db.doc(`workspaces/${workspaceId}/transactions/${txId}`), tx, { merge: true });
+    });
+    await batch.commit();
+    // 6 ─ Done. Job doc carries a small summary for the client toast/redirect.
+    await jobRef.update({
+        status: "done",
+        kind: "fatura",
+        cardId,
+        cardLabel,
+        period,
+        comprasCount: compras.length,
+        totalDespesas: t.totalDespesas ?? 0,
+        totalAPagar: t.totalAPagar ?? 0,
+        processedAt: now,
+    }).catch(() => { });
+    console.log(`[fatura-job] done: card=${cardId} period=${period} compras=${compras.length}`);
+}
 // ─── Background import job (Storage trigger) ─────────────────────────────────
 //
 // Triggered when a file lands at imports/{workspaceId}/{jobId}/{filename}.
@@ -1314,6 +1499,29 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
         return;
     }
     const client = new sdk_1.default({ apiKey, maxRetries: 6 });
+    // ── Fatura detour ───────────────────────────────────────────────────────
+    // Detect a credit-card statement (fatura) BEFORE the account pipeline and
+    // route it to its own pipeline (separate lens, separate gate, direct
+    // persistence). Detection is text-based: the client's pdfjs text, or text
+    // extracted server-side from a raw PDF. If it's not a fatura, fall through
+    // untouched to the account extrato pipeline below.
+    {
+        const isPdf = filename.endsWith(".pdf");
+        let statementText = "";
+        if (isPdf) {
+            statementText = await (0, pdf_core_1.extractPdfTextServer)(fileBuffer).catch(() => "");
+        }
+        else {
+            statementText = fileBuffer.toString("utf-8");
+        }
+        if (statementText && (0, pdf_core_1.isCreditCardStatement)(statementText)) {
+            console.log("[import-job] detected fatura → card pipeline");
+            const uid = jobData.uid || "";
+            const displayName = jobData.createdByName || "Alguém";
+            await processFatura(client, db, jobRef, workspaceId, statementText, originalFilename, uid, displayName, resendKey, jobId);
+            return;
+        }
+    }
     // ── Extraction ────────────────────────────────────────────────────────
     // Text path (pdfjs extracted client-side, common case): chunked parallel
     // extraction — scales to any size and stays well under the 300s timeout.

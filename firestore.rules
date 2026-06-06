@@ -178,6 +178,17 @@ service cloud.firestore {
           && request.resource.data.status == "processing";
         allow update, delete: if false;
       }
+
+      // Credit cards and faturas — written ONLY by the fatura pipeline
+      // (Admin SDK, bypasses rules). Members read; clients never write.
+      match /cards/{cardId} {
+        allow read: if isMember(workspaceId);
+        allow write: if false;
+      }
+      match /faturas/{faturaId} {
+        allow read: if isMember(workspaceId);
+        allow write: if false;
+      }
     }
   }
 }

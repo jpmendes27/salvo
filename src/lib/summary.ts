@@ -23,13 +23,15 @@ export function buildMonthlySummary(
   const accountExpense = accountTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const cardExpense    = cardTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
-  const income  = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const expense = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  // Bug 3: income/expense are the CASH-FLOW figures — account only. Card
+  // purchases are a separate lens (cardExpense above), never mixed in here.
+  const income  = accountIncome;
+  const expense = accountExpense;
 
   const balance     = accountIncome - accountExpense;
   const savingsRate = accountIncome > 0 ? Math.round((balance / accountIncome) * 100) : null;
 
-  const categoryTotals = transactions
+  const categoryTotals = accountTxs
     .filter((t) => t.type === "expense")
     .reduce<Record<string, number>>((acc, t) => {
       acc[t.category] = (acc[t.category] || 0) + t.amount;

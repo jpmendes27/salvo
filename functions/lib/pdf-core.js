@@ -21,6 +21,10 @@ exports.parseCategoryCodes = parseCategoryCodes;
 exports.directionRule = directionRule;
 exports.seedLookup = seedLookup;
 exports.normalizeMerchantKey = normalizeMerchantKey;
+exports.isCreditCardStatement = isCreditCardStatement;
+exports.buildFaturaSystemPrompt = buildFaturaSystemPrompt;
+exports.parseFaturaJson = parseFaturaJson;
+exports.reconcileFatura = reconcileFatura;
 // ─── Server-side PDF text extraction (pdfjs in Node, no worker) ──────────────
 // pdfjs-dist v5 ships ESM only. The runtime dynamic import below is wrapped in
 // new Function so TypeScript (module: commonjs) doesn't down-level it to
@@ -379,5 +383,111 @@ function normalizeMerchantKey(description) {
     s = s.replace(/\s+/g, " ").trim();
     const words = s.split(" ").filter((w) => w.length >= 3);
     return words.slice(0, 3).join(" ");
+}
+// ─── Credit-card statement (fatura) detection, parsing prompt, and gate ──────
+// Markers that distinguish a credit-card statement from a bank account extrato.
+// Two or more present ⇒ treat as a fatura and route to the card pipeline.
+const FATURA_MARKERS = [
+    /pagamento\s+m[ií]nimo/i,
+    /vencimento/i,
+    /saldo\s+anterior/i,
+    /saldo\s+desta\s+fatura/i,
+    /limite\s+(total|utilizado|disponiv|de\s+cr[eé]dito)/i,
+    /anuidade/i,
+    /\bcet\b|custo\s+efetivo\s+total/i,
+    /rotativo/i,
+    /fatura/i,
+    /\b\d{4}\s+\*{2,}\s*\*{2,}\s+\d{4}\b|\bxxxx\s+xxxx/i, // masked card
+];
+function isCreditCardStatement(text) {
+    const t = text.slice(0, 4000).normalize("NFD").replace(/[̀-ͯ]/g, "");
+    let hits = 0;
+    for (const m of FATURA_MARKERS)
+        if (m.test(t)) {
+            hits++;
+            if (hits >= 2)
+                return true;
+        }
+    return false;
+}
+function buildFaturaSystemPrompt() {
+    return `Você extrai dados de uma FATURA de cartão de crédito brasileira. Retorne SOMENTE um JSON válido neste formato:
+
+{
+  "card": { "bank": "string", "name": "string|null", "last4": "string|null", "limitTotal": number|null, "limitUsado": number|null, "limitDisponivel": number|null, "closingDay": number|null, "dueDay": number|null },
+  "period": "YYYY-MM|null",
+  "vencimento": "YYYY-MM-DD|null",
+  "totals": { "saldoAnterior": number|null, "totalDespesas": number|null, "totalPagamentos": number|null, "totalCreditos": number|null, "totalAPagar": number|null },
+  "historico": [ { "period": "YYYY-MM", "total": number } ],
+  "lancamentos": [ { "date": "YYYY-MM-DD", "description": "string", "amount": number, "kind": "compra|pagamento|credito", "parcela": { "atual": number, "total": number }|null } ]
+}
+
+REGRAS:
+- "bank": emissor do cartão (Nubank, Itaú, Bradesco, C6, Inter, etc.). "name": apelido do cartão se houver ("Nubank Gold", "Itaú Click").
+- "last4": últimos 4 dígitos do cartão mascarado (XXXX XXXX XXXX 1234 → "1234").
+- Limites e saldos: valor numérico exato, SEM símbolo de moeda (ex: 2500.00, não "R$ 2.500,00"). null se ausente.
+- closingDay/dueDay: só o dia (número 1–31).
+- "period": mês de referência da fatura (YYYY-MM). "vencimento": data de vencimento (YYYY-MM-DD).
+- totals: SaldoAnterior, TotalDespesas (soma das compras), TotalPagamentos (pagamentos recebidos), TotalCreditos (estornos/créditos), TotalAPagar (saldo desta fatura). Use os valores IMPRESSOS na fatura. null se não houver.
+- "historico": tabela de faturas anteriores (mês → total), se a fatura listar. [] se não houver.
+- "lancamentos": TODOS os lançamentos:
+  • "compra": uma compra (amount positivo). Se parcelada (ex "PARC 03/10", "3/10"), preencha parcela { atual, total }; senão parcela=null.
+  • "pagamento": pagamento da fatura recebido (amount positivo).
+  • "credito": estorno/crédito/reembolso (amount positivo).
+- "amount" SEMPRE positivo. "date" ISO YYYY-MM-DD.
+- "description": texto do estabelecimento, limpo (sem o "PARC X/Y", que vai em parcela).
+- Retorne APENAS o JSON puro, sem markdown, sem texto extra.`;
+}
+function parseFaturaJson(rawText) {
+    let obj;
+    try {
+        const s = rawText.indexOf("{"), e = rawText.lastIndexOf("}");
+        if (s === -1 || e <= s)
+            return null;
+        obj = JSON.parse(rawText.slice(s, e + 1));
+    }
+    catch {
+        return null;
+    }
+    const o = obj;
+    if (!o || typeof o !== "object" || !o.card || !Array.isArray(o.lancamentos))
+        return null;
+    // Coerce lancamentos defensively.
+    const lancamentos = o.lancamentos
+        .filter((l) => !!l && typeof l.amount === "number" && !!l.date && !!l.description)
+        .map((l) => ({
+        date: l.date,
+        description: String(l.description).trim(),
+        amount: Math.abs(l.amount),
+        kind: l.kind === "pagamento" || l.kind === "credito" ? l.kind : "compra",
+        parcela: l.parcela && typeof l.parcela.atual === "number" && typeof l.parcela.total === "number"
+            ? { atual: l.parcela.atual, total: l.parcela.total }
+            : undefined,
+    }));
+    return {
+        card: o.card,
+        period: o.period ?? undefined,
+        vencimento: o.vencimento ?? undefined,
+        totals: o.totals ?? {},
+        historico: Array.isArray(o.historico) ? o.historico : [],
+        lancamentos,
+    };
+}
+// ─── Fatura gate — reconciliation by TOTALS (not a balance chain) ────────────
+// SaldoAnterior + TotalDespesas − TotalPagamentos − TotalCreditos = SaldoDestaFatura.
+// All four are printed on the statement. Doesn't reconcile → blocked (failed),
+// never a partial import. Does NOT reuse the account extrato's balance chain.
+function reconcileFatura(totals, toleranceCents = 2) {
+    const { saldoAnterior, totalDespesas, totalPagamentos, totalCreditos, totalAPagar } = totals;
+    if (totalAPagar === undefined)
+        return { ok: false, reason: "saldo desta fatura não encontrado" };
+    if (saldoAnterior === undefined && totalDespesas === undefined)
+        return { ok: false, reason: "totais insuficientes para validar a fatura" };
+    const c = (v) => Math.round((v ?? 0) * 100);
+    const expected = c(saldoAnterior) + c(totalDespesas) - c(totalPagamentos) - c(totalCreditos);
+    const diff = Math.abs(expected - c(totalAPagar));
+    return diff <= toleranceCents
+        ? { ok: true }
+        : { ok: false, reason: `totais não fecham (diferença de ${(diff / 100).toFixed(2)})` };
 }
 //# sourceMappingURL=pdf-core.js.map

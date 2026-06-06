@@ -30,6 +30,8 @@ export type Category = {
   type: TransactionType | "both";
 };
 
+export type Parcela = { atual: number; total: number };
+
 export type Transaction = {
   id: string;
   type: TransactionType;
@@ -42,6 +44,11 @@ export type Transaction = {
   createdByName: string;
   sourceLabel?: string;
   source?: "account" | "card";
+  // Card-only fields (source === "card"): which card and statement period this
+  // belongs to, and installment info when the purchase is parcelada.
+  cardId?: string;
+  faturaPeriod?: string; // YYYY-MM of the statement
+  parcela?: Parcela;
   createdAt?: unknown;
   updatedAt?: unknown;
 };
@@ -128,4 +135,36 @@ export type Invite = {
   status: "active" | "revoked" | "accepted";
   expiresAt: unknown;
   createdAt?: unknown;
+};
+
+// ─── Credit card (separate lens from cash flow) ──────────────────────────────
+
+export type Card = {
+  id: string;            // deterministic: bank+last4 normalized
+  bank: string;
+  name: string;          // e.g. "Nubank Gold"
+  last4?: string;
+  limitTotal?: number;
+  limitUsado?: number;
+  limitDisponivel?: number;
+  closingDay?: number;   // dia de fechamento
+  dueDay?: number;       // dia de vencimento
+  createdBy: string;
+  createdByName: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
+export type Fatura = {
+  id: string;            // deterministic: cardId_period
+  cardId: string;
+  period: string;        // YYYY-MM
+  saldoAnterior: number;
+  totalDespesas: number;
+  totalPagamentos: number;
+  totalCreditos: number;
+  totalAPagar: number;   // saldo desta fatura
+  vencimento?: string;   // YYYY-MM-DD
+  createdAt?: unknown;
+  updatedAt?: unknown;
 };
