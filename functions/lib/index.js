@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = exports.recategorize = void 0;
+exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateCardDiagnosis = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = exports.recategorize = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const storage_1 = require("firebase-functions/v2/storage");
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
@@ -1081,6 +1081,103 @@ Exemplos de tom:
         console.error("generateDiagnosis error:", msg);
         res.status(500).json({ error: msg });
     }
+});
+// ─── generateCardDiagnosis (callable, cached in Firestore) ────────────────────
+// Pocket diagnosis for the CARD lens — separate from the cash-flow diagnosis,
+// never touches it. Cached at workspaces/{ws}/cardDiagnoses/{cardId}_{period}
+// keyed by a fingerprint of the inputs: regenerates ONLY when a new fatura lands
+// or a recategorization changes the numbers (fingerprint changes). A warm cache
+// returns with zero AI calls. Month-over-month when a previous fatura exists;
+// degrades honestly (no prev fatura → read-only; no limit → skip limit).
+exports.generateCardDiagnosis = (0, https_1.onCall)({ secrets: ["ANTHROPIC_API_KEY"], maxInstances: 10, timeoutSeconds: 30, memory: "256MiB" }, async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid)
+        throw new https_1.HttpsError("unauthenticated", "Faça login pra continuar.");
+    const { workspaceId, cardId, period, fingerprint, payload } = (request.data ?? {});
+    if (!workspaceId || !cardId || !period || !fingerprint || !payload) {
+        throw new https_1.HttpsError("invalid-argument", "Dados incompletos.");
+    }
+    const db = admin.firestore();
+    const member = await db.doc(`workspaces/${workspaceId}/members/${uid}`).get();
+    if (!member.exists || member.data()?.status !== "active") {
+        throw new https_1.HttpsError("permission-denied", "Você não participa deste workspace.");
+    }
+    const docRef = db.doc(`workspaces/${workspaceId}/cardDiagnoses/${cardId}_${period}`);
+    // Warm cache → return without calling the model (zero cost on screen open).
+    const existing = await docRef.get();
+    if (existing.exists && existing.data()?.fingerprint === fingerprint) {
+        const d = existing.data();
+        return { headline: d.headline ?? null, insights: d.insights ?? [], cached: true };
+    }
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey)
+        throw new https_1.HttpsError("internal", "Configuração ausente.");
+    const fmt = (v) => `R$${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const variacaoLine = payload.totalAnterior != null && payload.totalAnterior > 0
+        ? `- Fatura anterior (${payload.prevMonthLabel}): ${fmt(payload.totalAnterior)} (variação ${Math.round(((payload.totalAtual - payload.totalAnterior) / payload.totalAnterior) * 100)}%)`
+        : "- Fatura anterior: sem dados (não compare, é a primeira fatura deste cartão)";
+    const topCatLine = payload.topCat
+        ? `- Categoria que mais pesou: ${payload.topCat.nome} — ${fmt(payload.topCat.valor)} (${payload.topCat.pct}% da fatura)`
+        : "- Categoria que mais pesou: sem dados";
+    const limitLine = payload.limitPct != null
+        ? `- Limite: ${payload.limitPct}% comprometido${payload.limitTotal != null ? ` (${fmt(payload.limitUsado ?? 0)} de ${fmt(payload.limitTotal)})` : ""}`
+        : "- Limite: sem dados (não mencione limite)";
+    const byCatLines = payload.byCategory.slice(0, 5).map((c) => `  • ${c.nome}: ${fmt(c.valor)}`).join("\n");
+    const prompt = `Você é o Salvô — o conselheiro financeiro honesto que o brasileiro nunca teve.
+Fala direto, sem enrolação, sem julgamento moral. Tom popular, neutro em gênero.
+Sem vocativos (sem "irmão", "cara", "mano"). Frases curtas e precisas.
+Sem termos técnicos: nunca use "otimizar", "alocar", "comprometer renda", "déficit".
+
+Este é o diagnóstico da FATURA DE CARTÃO de crédito (${payload.cardLabel}) — NÃO é o fluxo de caixa do mês.
+
+Dados da fatura de ${payload.monthLabel}:
+- Total da fatura: ${fmt(payload.totalAtual)}
+${variacaoLine}
+${topCatLine}
+${limitLine}
+- Categorias da fatura:
+${byCatLines}
+
+REGRAS CRÍTICAS:
+1. Use APENAS os números enviados. Nunca invente valores nem variação.
+2. Se não há fatura anterior, NÃO compare com mês passado — fale só do mês atual.
+3. Se não há dado de limite, NÃO mencione limite.
+4. Para dar peso, use proporções dos próprios dados ("metade da fatura", "27% do total").
+5. É a fatura do cartão — fale de compras/gastos no cartão, não de salário ou renda.
+
+Retorne APENAS um JSON válido, sem markdown:
+{
+  "headline": "1 frase curta e direta sobre a fatura (o resultado principal).",
+  "insights": ["1 a 2 observações curtas com impacto real (categoria que pesou, variação, limite). Cada item é uma frase."]
+}
+
+Exemplos de tom:
+- headline: "Fatura subiu 18% vs maio — fechou em R$568."
+- insight: "Varejo levou metade: R$274."
+- insight: "98% do limite comprometido. Sobrou quase nada."`;
+    const client = new sdk_1.default({ apiKey, maxRetries: 4 });
+    let headline = null;
+    let insights = [];
+    try {
+        const message = await client.messages.create({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 400,
+            messages: [{ role: "user", content: prompt }],
+        });
+        const rawText = message.content.find((b) => b.type === "text")?.text ?? "{}";
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+        headline = typeof parsed.headline === "string" ? parsed.headline : null;
+        insights = Array.isArray(parsed.insights)
+            ? parsed.insights.filter((s) => typeof s === "string").slice(0, 2)
+            : [];
+    }
+    catch (err) {
+        console.error("generateCardDiagnosis error:", err instanceof Error ? err.message : String(err));
+        throw new https_1.HttpsError("internal", "Não consegui gerar o diagnóstico agora.");
+    }
+    await docRef.set({ fingerprint, headline, insights, period, cardId, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    return { headline, insights, cached: false };
 });
 // ─── suggestGoal ─────────────────────────────────────────────────────────────
 exports.suggestGoal = (0, https_1.onRequest)({

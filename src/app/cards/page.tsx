@@ -5,15 +5,17 @@
 // previous faturas. A separate lens from cash flow: card data only, never mixed
 // into the account diagnosis. Follows the Salvô! design system.
 
-import { deleteDoc, doc } from "firebase/firestore";
-import { ArrowLeft, CreditCard, ChevronRight, Search } from "lucide-react";
+import { deleteDoc, doc, getDoc } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { ArrowLeft, CreditCard, ChevronRight, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthUser } from "@/app/auth-provider";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { TxRow } from "@/components/TxRow";
-import { db } from "@/lib/firebase";
+import { app, db } from "@/lib/firebase";
 import { useCardData, currentFatura, limitInfo, cardToneLine } from "@/lib/cards";
+import { detectBank } from "@/lib/banks";
 import { isCardsEnabled } from "@/lib/flags";
 import { colors, radius, typography } from "@/lib/design-system";
 import { formatCurrency, monthLabel } from "@/lib/money";
@@ -53,7 +55,11 @@ export default function CardsPage() {
 function CardsView({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
   const { cards, faturas, cardTx, loading } = useCardData(workspaceId);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // One-shot hint from the home grouped view: open on the tapped card.
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => (typeof window !== "undefined" ? localStorage.getItem("fincheck_card") : null)
+  );
+  useEffect(() => { localStorage.removeItem("fincheck_card"); }, []);
 
   // Default selection: the card with the most recent fatura.
   const ordered = useMemo(() => {
@@ -128,6 +134,7 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
 function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[] }) {
   const fatura = currentFatura(faturas, card.id);
   const lim = limitInfo(card);
+  const bank = detectBank(card.bank || card.name);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState<string>("all");
 
@@ -171,11 +178,24 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Diagnóstico do cartão (lente separada — cache Firestore, IA só quando muda) */}
+      {fatura && (
+        <CardDiagnosis
+          workspaceId={workspaceId}
+          card={card}
+          fatura={fatura}
+          prevFatura={historico[0] ?? null}
+          byCategory={byCategory}
+          totalCompras={totalCompras}
+          lim={lim}
+        />
+      )}
+
       {/* Hero: card + current fatura + limit */}
       <div style={{ ...cardBox(), background: `linear-gradient(135deg, ${colors.accentMuted}, rgba(184,245,90,0.02))`, border: `1px solid ${colors.borderAccent}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(184,245,90,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <CreditCard size={18} color={colors.accent} strokeWidth={2} />
+          <div style={{ width: 36, height: 36, borderRadius: 11, background: bank.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <CreditCard size={19} color={bank.glyph} strokeWidth={2} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800 }}>{card.name || card.bank}</div>
@@ -189,7 +209,7 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
         {fatura && (
           <div style={{ marginBottom: lim.pct != null ? 16 : 0 }}>
             <div style={typography.labelSmall}>Fatura {monthLabel(fatura.period)}</div>
-            <div style={{ fontFamily: typography.fontMono, fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em", marginTop: 2 }}>
+            <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em", marginTop: 2 }}>
               {formatCurrency(fatura.totalAPagar)}
             </div>
           </div>
@@ -228,7 +248,7 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
                   <CategoryAvatar categoria={cat} size={30} radius={9} />
                   <span style={{ flex: 1, fontSize: 13, color: colors.textPrimary, opacity: 0.82, fontWeight: 600 }}>{catLabel(cat)}</span>
                   <span style={{ fontSize: 11, color: colors.textMuted, minWidth: 30, textAlign: "right" }}>{pct}%</span>
-                  <span style={{ fontFamily: typography.fontMono, fontSize: 12.5, color: colors.textPrimary, opacity: 0.7, minWidth: 78, textAlign: "right" }}>{formatCurrency(total)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: colors.textPrimary, opacity: 0.82, minWidth: 78, textAlign: "right" }}>{formatCurrency(total)}</span>
                 </div>
               );
             })}
@@ -307,7 +327,6 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
                   isSelected={false}
                   onToggleSelect={() => {}}
                   parceladaMap={EMPTY_PARCELADA}
-                  monoAmount
                 />
               ))}
             </div>
@@ -329,7 +348,7 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
                     parcela {t.parcela!.atual}/{t.parcela!.total}
                   </div>
                 </div>
-                <span style={{ fontFamily: typography.fontMono, fontSize: 12.5, color: colors.textPrimary, opacity: 0.7 }}>{formatCurrency(t.amount)}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: "-0.02em", color: "#ff8080" }}>−{formatCurrency(t.amount)}</span>
               </div>
             ))}
           </div>
@@ -344,12 +363,126 @@ function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: strin
             {historico.map((f) => (
               <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${colors.border}` }}>
                 <span style={{ flex: 1, fontSize: 13, color: colors.textSecondary, fontWeight: 600 }}>{monthLabel(f.period)}</span>
-                <span style={{ fontFamily: typography.fontMono, fontSize: 13, color: colors.textPrimary, opacity: 0.8 }}>{formatCurrency(f.totalAPagar)}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: colors.textPrimary, opacity: 0.82 }}>{formatCurrency(f.totalAPagar)}</span>
                 <ChevronRight size={15} color={colors.textFaint} />
               </div>
             ))}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+type CardDiag = { headline: string | null; insights: string[] };
+
+function CardDiagnosis({
+  workspaceId, card, fatura, prevFatura, byCategory, totalCompras, lim,
+}: {
+  workspaceId: string;
+  card: Card;
+  fatura: Fatura;
+  prevFatura: Fatura | null;
+  byCategory: [string, number][];
+  totalCompras: number;
+  lim: ReturnType<typeof limitInfo>;
+}) {
+  const [diag, setDiag] = useState<CardDiag | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Inputs + fingerprint: changes only when a new fatura lands or a
+  // recategorization shifts the numbers → cache stays warm otherwise.
+  const { fingerprint, payload } = useMemo(() => {
+    const topCat = byCategory[0]
+      ? {
+          nome: catLabel(byCategory[0][0]),
+          valor: byCategory[0][1],
+          pct: totalCompras > 0 ? Math.round((byCategory[0][1] / totalCompras) * 100) : 0,
+        }
+      : null;
+    const totalAtual = fatura.totalAPagar;
+    const totalAnterior = prevFatura?.totalAPagar ?? null;
+    const fp = [
+      fatura.period,
+      totalAtual.toFixed(2),
+      totalAnterior?.toFixed(2) ?? "none",
+      topCat ? `${byCategory[0][0]}:${topCat.valor.toFixed(2)}` : "none",
+      lim.pct ?? "none",
+      byCategory.slice(0, 5).map(([c, v]) => `${c}:${v.toFixed(2)}`).join(","),
+    ].join("|");
+    return {
+      fingerprint: fp,
+      payload: {
+        cardLabel: card.name || card.bank,
+        monthLabel: monthLabel(fatura.period),
+        prevMonthLabel: prevFatura ? monthLabel(prevFatura.period) : null,
+        totalAtual,
+        totalAnterior,
+        topCat,
+        limitPct: lim.pct,
+        limitUsado: lim.usado,
+        limitTotal: lim.total,
+        byCategory: byCategory.slice(0, 5).map(([c, v]) => ({ nome: catLabel(c), valor: v })),
+      },
+    };
+  }, [card, fatura, prevFatura, byCategory, totalCompras, lim]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // 1. Read the Firestore cache. Warm + same fingerprint → no AI, no call.
+      try {
+        const snap = await getDoc(doc(db, "workspaces", workspaceId, "cardDiagnoses", `${card.id}_${fatura.period}`));
+        if (cancelled) return;
+        if (snap.exists() && snap.data().fingerprint === fingerprint) {
+          setDiag({ headline: snap.data().headline ?? null, insights: snap.data().insights ?? [] });
+          return;
+        }
+      } catch { /* fall through to generate */ }
+      // 2. Stale or missing → generate (the callable writes the cache).
+      setLoading(true);
+      try {
+        const fn = httpsCallable<unknown, CardDiag>(getFunctions(app, "us-central1"), "generateCardDiagnosis");
+        const res = await fn({ workspaceId, cardId: card.id, period: fatura.period, fingerprint, payload });
+        if (!cancelled) setDiag({ headline: res.data.headline ?? null, insights: res.data.insights ?? [] });
+      } catch (e) {
+        if (!cancelled) console.error("[card-diagnosis] failed:", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fingerprint, workspaceId, card.id, fatura.period, payload]);
+
+  // Nothing to show yet and nothing cached → render nothing (no empty state).
+  if (!diag?.headline && !loading) return null;
+
+  return (
+    <div style={{ ...cardBox(), background: `linear-gradient(135deg, ${colors.accentMuted}, rgba(184,245,90,0.02))`, border: `1px solid ${colors.borderAccent}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+        <Sparkles size={13} color={colors.accent} strokeWidth={2.2} />
+        <span style={typography.labelSmall}>Diagnóstico do cartão</span>
+      </div>
+      {loading && !diag?.headline ? (
+        <div style={{ fontSize: 13, color: colors.textMuted }}>Analisando a fatura…</div>
+      ) : (
+        <>
+          {diag?.headline && (
+            <div style={{ fontSize: 15, fontWeight: 800, color: colors.textPrimary, lineHeight: 1.35, letterSpacing: "-0.01em" }}>
+              {diag.headline}
+            </div>
+          )}
+          {diag?.insights && diag.insights.length > 0 && (
+            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+              {diag.insights.map((line, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: colors.accent, marginTop: 6, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.45 }}>{line}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

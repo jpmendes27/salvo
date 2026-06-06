@@ -36,7 +36,6 @@ export function TxRow({
   isSelected,
   onToggleSelect,
   parceladaMap,
-  monoAmount = false,
 }: {
   tx: Transaction;
   workspaceId: string;
@@ -45,8 +44,6 @@ export function TxRow({
   isSelected: boolean;
   onToggleSelect: () => void;
   parceladaMap: Map<string, RecurringItem>;
-  // /cards renders amounts in DM Mono; /transactions keeps its existing font.
-  monoAmount?: boolean;
 }) {
   const [hov, setHov] = useState(false);
   const [editingCat, setEditingCat] = useState(false);
@@ -165,7 +162,6 @@ export function TxRow({
         </div>
         <span style={{
           fontSize: 14, fontWeight: 800, letterSpacing: "-0.02em",
-          ...(monoAmount ? { fontFamily: "var(--font-dm-mono, ui-monospace, monospace)" } : {}),
           color: isIncome ? G : "#ff8080", whiteSpace: "nowrap"
         }}>
           {isIncome ? "+" : "−"}{formatCurrency(tx.amount)}

@@ -189,6 +189,12 @@ service cloud.firestore {
         allow read: if isMember(workspaceId);
         allow write: if false;
       }
+      // Card diagnosis cache — written ONLY by the generateCardDiagnosis
+      // callable (Admin SDK). Members read; clients never write.
+      match /cardDiagnoses/{diagId} {
+        allow read: if isMember(workspaceId);
+        allow write: if false;
+      }
     }
   }
 }
