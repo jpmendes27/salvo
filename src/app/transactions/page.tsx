@@ -8,31 +8,20 @@ import {
   onSnapshot,
   orderBy,
   query,
-  updateDoc,
   where,
   writeBatch,
 } from "firebase/firestore";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuthUser } from "@/app/auth-provider";
 import { db } from "@/lib/firebase";
 import { formatCurrency, monthLabel } from "@/lib/money";
-import { CATEGORY_COLORS, CATEGORY_LABELS } from "@/lib/parsers";
+import { TxRow } from "@/components/TxRow";
 import type { RecurringItem, Transaction } from "@/lib/types";
 
 const G = "#b8f55a";
-
-function monthDiff(a: string, b: string): number {
-  const [ay, am] = a.split("-").map(Number);
-  const [by, bm] = b.split("-").map(Number);
-  return (by - ay) * 12 + (bm - am);
-}
-
-function categoryColor(cat: string): string {
-  return (CATEGORY_COLORS as Record<string, string>)[cat] ?? "#888";
-}
 
 export default function TransactionsPage() {
   return (
@@ -114,10 +103,14 @@ function TransactionList({
     );
   }, [workspaceId]);
 
+  // Card purchases (source='card') are a SEPARATE lens (/cards): they never
+  // appear in the account transaction list nor in its totals.
+  const accountTx = useMemo(() => transactions.filter((t) => t.source !== "card"), [transactions]);
+
   const sources = useMemo(() => {
-    const labels = [...new Set(transactions.map((t) => t.sourceLabel).filter(Boolean))] as string[];
+    const labels = [...new Set(accountTx.map((t) => t.sourceLabel).filter(Boolean))] as string[];
     return labels.sort();
-  }, [transactions]);
+  }, [accountTx]);
 
   const parceladaMap = useMemo(() => {
     const map = new Map<string, RecurringItem>();
@@ -129,14 +122,14 @@ function TransactionList({
     return map;
   }, [recurringItems]);
 
-  const filtered = transactions.filter((t) => {
+  const filtered = accountTx.filter((t) => {
     const typeOk = txFilter === "all" || t.type === txFilter;
     const srcOk = sourceFilter === "all" || t.sourceLabel === sourceFilter;
     return typeOk && srcOk;
   });
 
-  const income = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const expense = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const income = accountTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expense = accountTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
   function toggleSelectMode() {
     setSelectMode((v) => !v);
@@ -340,165 +333,6 @@ function TransactionList({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-const ALL_CATEGORIES = Object.entries(CATEGORY_LABELS) as [string, string][];
-
-function TxRow({ tx, workspaceId, onDelete, selectMode, isSelected, onToggleSelect, parceladaMap }: {
-  tx: Transaction;
-  workspaceId: string;
-  onDelete: () => void;
-  selectMode: boolean;
-  isSelected: boolean;
-  onToggleSelect: () => void;
-  parceladaMap: Map<string, RecurringItem>;
-}) {
-  const [hov, setHov] = useState(false);
-  const [editingCat, setEditingCat] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isIncome = tx.type === "income";
-  const parts = tx.date.split("-");
-  const dateLabel = parts.length === 3 ? `${parts[2]}/${parts[1]}` : tx.date;
-
-  const parcelaSuffix = (() => {
-    const r = parceladaMap.get(tx.description.toLowerCase().trim());
-    if (!r?.recorrencia?.mesInicio || !r.recorrencia.totalMeses) return null;
-    const parcelaAtual = monthDiff(r.recorrencia.mesInicio, tx.monthKey) + 1;
-    if (parcelaAtual < 1 || parcelaAtual > r.recorrencia.totalMeses) return null;
-    return `(${parcelaAtual}/${r.recorrencia.totalMeses})`;
-  })();
-
-  useEffect(() => {
-    if (!editingCat) return;
-    function handleOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setEditingCat(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [editingCat]);
-
-  async function recategorize(newCat: string) {
-    if (newCat === tx.category) { setEditingCat(false); return; }
-    await updateDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id), { category: newCat });
-    setEditingCat(false);
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      onClick={selectMode ? onToggleSelect : undefined}
-      style={{
-        borderRadius: 10,
-        background: isSelected ? "rgba(184,245,90,0.06)" : hov || editingCat ? "rgba(255,255,255,0.04)" : "transparent",
-        transition: "background .15s",
-        cursor: selectMode ? "pointer" : "default",
-        outline: isSelected ? "1px solid rgba(184,245,90,0.18)" : "none",
-      }}
-    >
-      <div
-        onMouseEnter={() => setHov(true)}
-        onMouseLeave={() => setHov(false)}
-        style={{
-          display: "grid",
-          gridTemplateColumns: selectMode ? "20px 8px 1fr auto" : "8px 1fr auto auto",
-          gap: "0 14px",
-          alignItems: "center",
-          padding: "11px 12px",
-        }}
-      >
-        {selectMode && (
-          <div style={{
-            width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-            border: `2px solid ${isSelected ? G : "rgba(255,255,255,0.2)"}`,
-            background: isSelected ? G : "transparent",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "all .12s"
-          }}>
-            {isSelected && (
-              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                <path d="M1 4l3 3 5-6" stroke="#09090b" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            )}
-          </div>
-        )}
-        <div style={{
-          width: 8, height: 8, borderRadius: "50%",
-          background: categoryColor(tx.category),
-          boxShadow: `0 0 8px ${categoryColor(tx.category)}66`,
-          flexShrink: 0
-        }} />
-        <div style={{ minWidth: 0 }}>
-          <p style={{
-            fontSize: 13.5, fontWeight: 600, color: "#e8e9ec",
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-          }}>
-            {tx.description}{parcelaSuffix ? ` ${parcelaSuffix}` : ""}
-          </p>
-          <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
-            <button
-              onClick={(e) => { if (selectMode) return; e.stopPropagation(); setEditingCat((v) => !v); }}
-              style={{
-                background: "none", border: "none", padding: 0, cursor: "pointer",
-                fontSize: 11.5, fontWeight: editingCat ? 700 : 400,
-                color: editingCat ? G : "rgba(255,255,255,0.32)",
-                textDecoration: hov && !editingCat ? "underline" : "none",
-              }}
-            >
-              {CATEGORY_LABELS[tx.category as keyof typeof CATEGORY_LABELS] ?? tx.category}
-            </button>
-            {" · "}{dateLabel}{tx.sourceLabel ? ` · ${tx.sourceLabel}` : ""}
-          </p>
-        </div>
-        <span style={{
-          fontSize: 14, fontWeight: 800, letterSpacing: "-0.02em",
-          color: isIncome ? G : "#ff8080", whiteSpace: "nowrap"
-        }}>
-          {isIncome ? "+" : "−"}{formatCurrency(tx.amount)}
-        </span>
-        {!selectMode && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            style={{
-              opacity: hov || editingCat ? 1 : 0,
-              background: "transparent", border: "none", cursor: "pointer",
-              color: "rgba(255,80,80,0.65)", padding: 4, borderRadius: 6,
-              display: "flex", alignItems: "center",
-              transition: "opacity .15s"
-            }}
-          >
-            <Trash2 size={14} />
-          </button>
-        )}
-      </div>
-
-      {!selectMode && editingCat && (
-        <div style={{ padding: "0 12px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {ALL_CATEGORIES.map(([key, label]) => {
-            const active = key === tx.category;
-            return (
-              <button
-                key={key}
-                onClick={() => recategorize(key)}
-                style={{
-                  fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
-                  border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.09)"}`,
-                  background: active ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.03)",
-                  color: active ? "#fff" : "rgba(255,255,255,0.45)",
-                  cursor: active ? "default" : "pointer",
-                  display: "flex", alignItems: "center", gap: 5,
-                }}
-              >
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: categoryColor(key), flexShrink: 0 }} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

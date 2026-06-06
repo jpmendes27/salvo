@@ -5,17 +5,22 @@
 // previous faturas. A separate lens from cash flow: card data only, never mixed
 // into the account diagnosis. Follows the Salvô! design system.
 
-import { ArrowLeft, CreditCard, ChevronRight } from "lucide-react";
+import { deleteDoc, doc } from "firebase/firestore";
+import { ArrowLeft, CreditCard, ChevronRight, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthUser } from "@/app/auth-provider";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
+import { TxRow } from "@/components/TxRow";
+import { db } from "@/lib/firebase";
 import { useCardData, currentFatura, limitInfo, cardToneLine } from "@/lib/cards";
 import { isCardsEnabled } from "@/lib/flags";
 import { colors, radius, typography } from "@/lib/design-system";
 import { formatCurrency, monthLabel } from "@/lib/money";
 import { CATEGORY_LABELS } from "@/lib/parsers";
-import type { Card, Fatura, Transaction } from "@/lib/types";
+import type { Card, Fatura, RecurringItem, Transaction } from "@/lib/types";
+
+const EMPTY_PARCELADA = new Map<string, RecurringItem>();
 
 function Shell({ text }: { text: string }) {
   return (
@@ -112,7 +117,7 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
               </div>
             )}
 
-            {card && <CardDetail card={card} faturas={faturas} cardTx={cardTx} />}
+            {card && <CardDetail workspaceId={workspaceId} card={card} faturas={faturas} cardTx={cardTx} />}
           </>
         )}
       </div>
@@ -120,13 +125,17 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function CardDetail({ card, faturas, cardTx }: { card: Card; faturas: Fatura[]; cardTx: Transaction[] }) {
+function CardDetail({ workspaceId, card, faturas, cardTx }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[] }) {
   const fatura = currentFatura(faturas, card.id);
   const lim = limitInfo(card);
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState<string>("all");
 
   // Purchases of the current fatura period for this card.
   const periodTx = useMemo(
-    () => cardTx.filter((t) => t.cardId === card.id && (!fatura || t.faturaPeriod === fatura.period)),
+    () => cardTx
+      .filter((t) => t.cardId === card.id && (!fatura || t.faturaPeriod === fatura.period))
+      .sort((a, b) => b.date.localeCompare(a.date)),
     [cardTx, card.id, fatura]
   );
 
@@ -136,6 +145,16 @@ function CardDetail({ card, faturas, cardTx }: { card: Card; faturas: Fatura[]; 
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   }, [periodTx]);
   const totalCompras = byCategory.reduce((s, [, v]) => s + v, 0);
+
+  // Transactions list filtered by search + category (same UX as /transactions).
+  const listTx = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return periodTx.filter((t) => {
+      const catOk = catFilter === "all" || t.category === catFilter;
+      const qOk = !q || t.description.toLowerCase().includes(q);
+      return catOk && qOk;
+    });
+  }, [periodTx, search, catFilter]);
 
   // Parcelamentos: purchases carrying installment info.
   const parcelamentos = useMemo(
@@ -214,6 +233,85 @@ function CardDetail({ card, faturas, cardTx }: { card: Card; faturas: Fatura[]; 
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Transações (mesmas capacidades de /transactions: ver, recategorizar,
+          buscar, filtrar) — só source='card', do cartão/period exibido. */}
+      {periodTx.length > 0 && (
+        <div style={cardBox()}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={typography.labelSmall}>Transações</div>
+            <div style={{ fontSize: 11, color: colors.textMuted }}>{listTx.length} de {periodTx.length}</div>
+          </div>
+
+          {/* Search */}
+          <div style={{ position: "relative", marginBottom: 12 }}>
+            <Search size={14} color={colors.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar compra..."
+              style={{
+                width: "100%",
+                background: "rgba(255,255,255,0.04)",
+                border: `1px solid ${colors.border}`,
+                borderRadius: 10,
+                outline: "none",
+                color: colors.textPrimary,
+                fontSize: 13,
+                fontFamily: typography.fontUI,
+                padding: "9px 12px 9px 34px",
+              }}
+            />
+          </div>
+
+          {/* Category filter (chips) */}
+          {byCategory.length > 1 && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+              {["all", ...byCategory.map(([c]) => c)].map((c) => {
+                const active = catFilter === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setCatFilter(c)}
+                    style={{
+                      fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
+                      border: `1px solid ${active ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
+                      background: active ? "rgba(255,255,255,0.10)" : "transparent",
+                      color: active ? colors.textPrimary : colors.textMuted,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {c === "all" ? "Todas" : catLabel(c)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* List — reuses the same TxRow as /transactions (recategorize, etc.) */}
+          {listTx.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "28px 0", color: colors.textFaint, fontSize: 13 }}>
+              Nenhuma compra encontrada.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 2 }}>
+              {listTx.map((tx) => (
+                <TxRow
+                  key={tx.id}
+                  tx={tx}
+                  workspaceId={workspaceId}
+                  onDelete={() => deleteDoc(doc(db, "workspaces", workspaceId, "transactions", tx.id))}
+                  selectMode={false}
+                  isSelected={false}
+                  onToggleSelect={() => {}}
+                  parceladaMap={EMPTY_PARCELADA}
+                  monoAmount
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 

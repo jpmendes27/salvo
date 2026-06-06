@@ -1520,6 +1520,9 @@ function WorkspaceApp({
               onAddManual={() => setAddOpen(true)}
             />
 
+            {/* Cartões (atrás da flag, lente separada) */}
+            {cardsEnabled && <CardHomeSummary workspaceId={workspace.id} />}
+
             {/* View tabs */}
             <WsCard>
               {/* Aba switcher */}
