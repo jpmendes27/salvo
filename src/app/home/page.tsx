@@ -1946,10 +1946,7 @@ function WorkspaceApp({
                     arrowColor: mobExpenseChange <= 0 ? G : "#ff8080",
                     pct: `${Math.abs(mobExpenseChange).toFixed(1)}%`,
                     ctx: `vs ${formatCurrency(mobPrevExpense)} ${prevMonthShort}`
-                  } : null,
-                  plain: summary.accountExpense > 0 && summary.cardExpense > 0
-                    ? `🏦 ${formatCurrency(summary.accountExpense)} · 💳 ${formatCurrency(summary.cardExpense)}`
-                    : undefined
+                  } : null
                 },
                 {
                   label: "Economia", value: summary.savingsRate !== null ? `${summary.savingsRate.toFixed(0)}%` : "—", color: G,
@@ -2897,11 +2894,6 @@ function BalanceHeader({
               -{formatCurrency(summary.expense)}
             </p>
             <MoMBadge current={summary.expense} prev={prevExpense} prevMonthKey={prevMonthKey} positiveWhenUp={false} hasData={prevExpense > 0} />
-            {summary.accountExpense > 0 && summary.cardExpense > 0 && (
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", marginTop: 4 }}>
-                🏦 {formatCurrency(summary.accountExpense)} · 💳 {formatCurrency(summary.cardExpense)}
-              </p>
-            )}
           </div>
           {summary.savingsRate !== null && summary.savingsRate > 0 && (
             <div>
