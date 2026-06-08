@@ -130,29 +130,8 @@ curto/pessoal; painel mais detalhado.
 - Não usar vocativos de gênero nem termo técnico no tom de voz.
 - O breakdown "conta · cartão" na home foi **removido** — não reintroduzir.
 
-## Modelo de negócio
-B2C principal; primeiro pagamento via Pix manual (R$19,90) pra validar disposição a pagar,
-depois Stripe (webhook → `pro: true`). B2B (RH) e Open Finance (Pluggy à frente) como
-evolução.
-
-## Known issues — status conferido no código
-- **Bug 1 — score sem renda:** PARCIALMENTE RESOLVIDO / AINDA ABERTO. O sintoma original
-  (nota 10 com saldo negativo) sumiu: `rendaRef = renda > 0 ? renda : (totalEntradas > 0 ?
-  totalEntradas : 1)` usa fallback **1**, então sem renda + com gasto o `ratio` dispara e a
-  nota despenca (não sobe pra 10). MAS o score **não** degrada pra "sem dados suficientes"
-  quando não há renda real — ele pontua contra uma base fabricada (rendaRef = 1). A única
-  degradação pra "—" é quando **não há despesas** (`expenses.length === 0`). Falta o caminho
-  honesto: rendaRef ≤ 0/ausente → "sem dados suficientes" em vez de nota contra base
-  fabricada. (`src/app/home/page.tsx` — `mobScore` ~L1260 e `InsightsView` score ~L3096.)
-- **Bug 2 — entradas do PDF Nubank ("PIX recebido", "Transferência recebida", "Pagamento
-  recebido"):** RESOLVIDO. Nubank não tem adapter determinístico (só Mercado Pago tem); o
-  PDF passa por extração via Claude + gate de reconciliação. A direção entrada/saída é
-  decidida pelo **sinal do valor** + tipo do Claude: `classifyServer` retorna ENTRADA quando
-  `signedCents > 0`, então créditos/recebimentos viram income independentemente do texto.
-  `directionRule` ainda mapeia "pix recebido", "transferência recebida", "depósito recebido",
-  "ted/doc recebido" e "salário" → Recebimentos. Nuance: "Pagamento recebido" não está no
-  seed determinístico (a categoria vai pro Claude), mas a direção (income) continua correta
-  pelo sinal. (`functions/src/pdf-core.ts` — `classifyServer` ~L318, `directionRule` ~L407.)
-- **Bug 3 — pagamento de fatura duplicado como saída:** RESOLVIDO pela separação de lentes
-  (só o pagamento conta como saída de conta; compras de cartão ficam fora). O breakdown
-  "conta · cartão" na home foi removido.
+## Modelo de negócio · Known issues
+Estratégia comercial (pricing, B2B, Open Finance) e o status detalhado dos bugs em aberto
+vivem em `SALVO_CONTEXT.local.md` — fora do repositório (gitignorado), carregado só
+localmente pelo `CLAUDE.md`. Mantém este doc público focado em arquitetura, decisões
+técnicas e voz.

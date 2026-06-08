@@ -8,3 +8,6 @@ firebase-debug.log
 firestore-debug.log
 *.tsbuildinfo
 .claude/settings.local.json
+
+# Contexto local sensível (estratégia, bugs em aberto) — não publicar
+SALVO_CONTEXT.local.md

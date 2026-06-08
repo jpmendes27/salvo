@@ -7,14 +7,16 @@ nunca número fabricado, sempre degradar honesto.
 ## Contexto carregado automaticamente
 
 @./SALVO_CONTEXT.md
+@./SALVO_CONTEXT.local.md
 @./src/lib/design-system.ts
 @./src/lib/categories.ts
 @./src/lib/flags.ts
 @./src/lib/banks.ts
 
-SALVO_CONTEXT.md = decisões, arquitetura e voz (camada estável). Os arquivos de
+SALVO_CONTEXT.md = decisões, arquitetura e voz (camada estável, pública). Os arquivos de
 código = fonte da verdade dos valores (tokens, categorias, flags, cores de banco).
-Arquivo que ainda não existe é ignorado em silêncio.
+SALVO_CONTEXT.local.md = camada sensível (estratégia comercial, bugs em aberto),
+gitignorada — não vai pro repo público. Arquivo que não existe é ignorado em silêncio.
 
 ## Manutenção deste contexto (retroalimentação)
 
