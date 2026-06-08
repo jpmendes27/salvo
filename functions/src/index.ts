@@ -9,8 +9,8 @@ import {
   type ParsedFatura,
   extractPdfTextServer,
   tryMercadoPagoGeometric,
-  reconcileServer,
   reconcileParsed,
+  reconcileLedger,
   classifyServer,
   IMPORT_CATEGORIES,
   buildCategorySystemPrompt,
@@ -71,6 +71,9 @@ Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras 
       "classification": "ENTRADA" | "SAIDA" | "IGNORAR",
       "balance": number | null
     }
+  ],
+  "balanceCheckpoints": [
+    { "date": "YYYY-MM-DD", "balance": number }
   ]
 }
 
@@ -100,10 +103,25 @@ Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras 
   • "Estorno" — cancelamento de operação anterior (compensa operação prévia)
   • Qualquer linha com amount = 0
 
-=== REGRAS PARA balance ===
-- "balance": o saldo APÓS esta transação, conforme a coluna Saldo do documento
-- Use o valor numérico exato (ex: 25.05), sem símbolo de moeda
-- null se a coluna Saldo não estiver disponível
+=== REGRAS PARA balance (saldo na LINHA da transação) ===
+- "balance": o saldo APÓS esta transação, SÓ quando o documento imprime um saldo
+  corrente em CADA linha de transação (ex: Mercado Pago tem coluna Saldo por linha).
+- Use o valor numérico exato (ex: 25.05), sem símbolo de moeda.
+- null se a transação não tem saldo próprio na linha (caso da maioria dos bancos,
+  ex: Itaú, que só mostra "SALDO DO DIA" em linhas separadas — NÃO repita esse saldo
+  do dia em cada transação; deixe "balance": null e use balanceCheckpoints).
+
+=== REGRAS PARA balanceCheckpoints (saldo por DIA/período, NÃO por linha) ===
+Alguns extratos (ex: Itaú) não trazem saldo por transação — trazem linhas-resumo de
+saldo, tipo "SALDO DO DIA", "saldo do dia", "saldo anterior", "saldo em conta",
+"saldo final". Essas linhas declaram um saldo mas NÃO são movimentações.
+- Cada linha-resumo dessas vira UM item em "balanceCheckpoints": { date, balance }.
+  "date" = o dia a que o saldo se refere (use a data da linha; "saldo anterior" usa a
+  data de abertura do período). "balance" = o saldo numérico exato, sem "R$".
+- Essas linhas NUNCA entram em "transactions". NUNCA têm amount. NUNCA são categorizadas.
+- CRÍTICO: jamais capture o número da coluna de saldo como se fosse o valor de uma
+  transação (não invente lançamentos-fantasma tipo "+100,00").
+- Se o banco já traz saldo por linha (MP), "balanceCheckpoints" pode ser [] (vazio).
 
 === REGRAS ESPECÍFICAS: MERCADO PAGO ===
 O extrato do Mercado Pago tem 5 colunas: Data | Descrição | ID da operação | Valor | Saldo
@@ -551,11 +569,25 @@ function assembleMerged(
 ): ParsedClaudeResponse {
   const transactions: NonNullable<ParsedClaudeResponse["transactions"]> = [];
   for (const txs of perChunk) for (const t of txs) transactions.push(t);
+  // Balance checkpoints (e.g. "SALDO DO DIA") can appear in any chunk — collect
+  // all and dedup by date+balance so the day-chain sees every day.
+  const seen = new Set<string>();
+  const balanceCheckpoints: NonNullable<ParsedClaudeResponse["balanceCheckpoints"]> = [];
+  for (const r of headers) {
+    for (const cp of r.balanceCheckpoints ?? []) {
+      if (!cp || !cp.date || cp.balance == null) continue;
+      const k = `${cp.date}|${cp.balance}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      balanceCheckpoints.push(cp);
+    }
+  }
   return {
     sourceLabel: headers.find((r) => r.sourceLabel)?.sourceLabel,
     initialBalance: headers.find((r) => r.initialBalance != null)?.initialBalance,
     finalBalance: [...headers].reverse().find((r) => r.finalBalance != null)?.finalBalance,
     transactions,
+    balanceCheckpoints,
   };
 }
 
@@ -2107,39 +2139,25 @@ export const processImportJob = onObjectFinalized(
         ? Math.round(parsed.finalBalance * 100)
         : undefined;
 
-    const reconciliation = reconcileServer(internalTxs, initialCents, finalCents);
+    // ── Reconciliation CASCADE (line | day | totals) ──────────────────────
+    // Reconcile against the granularity the document itself declares. It NEVER
+    // blocks: a result that doesn't close is still imported, marked
+    // "nao_conferido" with the delta — never discarded. Internal log of which
+    // mode passed; never surfaced to the user.
+    const checkpoints = (parsed.balanceCheckpoints ?? [])
+      .filter((c): c is { date: string; balance: number } => !!c && !!c.date && c.balance != null)
+      .map((c) => ({ date: c.date, balanceCents: Math.round(c.balance * 100) }));
+    const ledger = reconcileLedger(internalTxs, checkpoints, initialCents, finalCents);
+    const verification = ledger.ok ? "verificado" : "nao_conferido";
+    console.log(
+      `[import-job] reconcile mode=${ledger.mode} ok=${ledger.ok} ` +
+      `(${allRawTxs.length} txs, ${checkpoints.length} checkpoints)`
+    );
 
     // ── Classification (ENTRADA / SAIDA / IGNORAR) ────────────────────────
     const classified = internalTxs.map((t) =>
       classifyServer(t.description, t.signedCents, bankSlug, t.classification)
     );
-
-    // ── THE GATE ──────────────────────────────────────────────────────────
-    // Reconciliation is non-negotiable: extracted data is shown to the user
-    // ONLY if the balance chain validated completeness. If it didn't (dropped
-    // transaction, Saldo-as-Valor swap, missing balances, partial Claude
-    // output), the result is BLOCKED — never surfaced as "X de X / importar".
-    // Checked BEFORE building/categorizing, so a blocked import wastes no work.
-    if (!reconciliation.ok) {
-      console.error(
-        `[import-job] BLOCKED by reconciliation: ${reconciliation.reason} ` +
-        `(${allRawTxs.length} txs, ${reconciliation.suspectIndices.length} suspect)`
-      );
-      await jobRef.update({
-        status: "failed",
-        error: "Não consegui validar todos os lançamentos desse extrato. Pra não importar nada errado, parei aqui — tenta de novo ou fala com a gente.",
-        failedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }).catch(() => {});
-      if (resendKey) {
-        await alertJobFailure(
-          resendKey,
-          `Reconciliation blocked: ${reconciliation.reason}. txs=${allRawTxs.length}, suspect=${reconciliation.suspectIndices.length}, source=${sourceLabel}`,
-          jobId,
-          workspaceId
-        );
-      }
-      return;
-    }
 
     // ── Build saved transactions (exclude IGNORAR) ────────────────────────
     const VALID_CATS = new Set<string>(IMPORT_CATEGORIES);
@@ -2178,10 +2196,21 @@ export const processImportJob = onObjectFinalized(
     }
 
     const ignoredCount = classified.filter((c) => c === "IGNORAR").length;
+    // Verification + reconciliation audit on the job doc (the client reads it to
+    // stamp transactions and show the honest "confira" warning). Kept as a record
+    // even after the user attests — never deleted.
+    const reconcileAudit = {
+      verification, // "verificado" | "nao_conferido"
+      reconcileMode: ledger.mode, // line | day | totals | none (internal)
+      readBalance: ledger.readBalanceCents != null ? ledger.readBalanceCents / 100 : null,
+      declaredBalance: ledger.declaredBalanceCents != null ? ledger.declaredBalanceCents / 100 : null,
+      delta: ledger.deltaCents != null ? ledger.deltaCents / 100 : null,
+    };
     await jobRef.update({
       transactions,
       sourceLabel,
       ignoredCount,
+      ...reconcileAudit,
       processedAt: admin.firestore.FieldValue.serverTimestamp(),
       status: "done",
     });

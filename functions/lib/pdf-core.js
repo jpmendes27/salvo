@@ -14,6 +14,7 @@ exports.parseBRDateSrv = parseBRDateSrv;
 exports.tryMercadoPagoGeometric = tryMercadoPagoGeometric;
 exports.reconcileServer = reconcileServer;
 exports.reconcileParsed = reconcileParsed;
+exports.reconcileLedger = reconcileLedger;
 exports.classifyServer = classifyServer;
 exports.buildCategorySystemPrompt = buildCategorySystemPrompt;
 exports.buildCategoryUserMessage = buildCategoryUserMessage;
@@ -248,6 +249,69 @@ function reconcileParsed(parsed) {
     const initC = parsed.initialBalance != null ? Math.round(parsed.initialBalance * 100) : undefined;
     const finC = parsed.finalBalance != null ? Math.round(parsed.finalBalance * 100) : undefined;
     return reconcileServer(txs, initC, finC);
+}
+function reconcileLedger(txs, checkpoints, initialBalanceCents, finalBalanceCents) {
+    const EXACT = 0; // checkpoint sums are computed — devem bater ao centavo
+    const readTotal = txs.reduce((s, t) => s + t.signedCents, 0);
+    const readBalanceCents = initialBalanceCents !== undefined ? initialBalanceCents + readTotal : undefined;
+    const declaredBalanceCents = finalBalanceCents !== undefined
+        ? finalBalanceCents
+        : checkpoints.length
+            ? [...checkpoints].sort((a, b) => a.date.localeCompare(b.date))[checkpoints.length - 1].balanceCents
+            : undefined;
+    const deltaCents = declaredBalanceCents !== undefined && readBalanceCents !== undefined
+        ? declaredBalanceCents - readBalanceCents
+        : undefined;
+    const base = { readBalanceCents, declaredBalanceCents, deltaCents };
+    // 1 — LINE chain (MP). Reuse the strict per-line reconciler (unchanged).
+    const withBalance = txs.filter((t) => t.balanceCents !== undefined).length;
+    if (txs.length > 0 && withBalance >= Math.ceil(txs.length * 0.8)) {
+        const r = reconcileServer(txs.map((t) => ({ signedCents: t.signedCents, balanceCents: t.balanceCents })), initialBalanceCents, finalBalanceCents);
+        if (r.ok)
+            return { mode: "line", ok: true, ...base };
+    }
+    // 2 — DAY chain. Walk checkpoints chronologically; running balance after each
+    // day's transactions must equal that day's declared balance.
+    if (checkpoints.length > 0) {
+        const cps = [...checkpoints].sort((a, b) => a.date.localeCompare(b.date));
+        const sortedTx = [...txs].sort((a, b) => a.date.localeCompare(b.date));
+        let start = initialBalanceCents;
+        if (start === undefined) {
+            // No header anchor: infer the opening from the first checkpoint minus its
+            // day's transactions (the first checkpoint then sets the baseline).
+            const firstDaySum = sortedTx.filter((t) => t.date <= cps[0].date).reduce((s, t) => s + t.signedCents, 0);
+            start = cps[0].balanceCents - firstDaySum;
+        }
+        let running = start;
+        let ti = 0;
+        let dayOk = true;
+        for (const cp of cps) {
+            while (ti < sortedTx.length && sortedTx[ti].date <= cp.date) {
+                running += sortedTx[ti].signedCents;
+                ti++;
+            }
+            if (Math.abs(running - cp.balanceCents) > EXACT) {
+                dayOk = false;
+                break;
+            }
+        }
+        if (dayOk) {
+            while (ti < sortedTx.length) {
+                running += sortedTx[ti].signedCents;
+                ti++;
+            }
+            const finalOk = finalBalanceCents === undefined || Math.abs(running - finalBalanceCents) <= EXACT;
+            if (finalOk)
+                return { mode: "day", ok: true, ...base };
+        }
+    }
+    // 3 — TOTALS (header only): initial + Σ == final.
+    if (initialBalanceCents !== undefined && finalBalanceCents !== undefined) {
+        if (Math.abs(initialBalanceCents + readTotal - finalBalanceCents) <= EXACT) {
+            return { mode: "totals", ok: true, ...base };
+        }
+    }
+    return { mode: "none", ok: false, ...base };
 }
 // ─── Server-side classification ───────────────────────────────────────────────
 // KEEP IN SYNC with src/lib/import/classify.ts

@@ -49,6 +49,12 @@ export type Transaction = {
   cardId?: string;
   faturaPeriod?: string; // YYYY-MM of the statement
   parcela?: Parcela;
+  // Reconciliation status of an imported transaction. ABSENT = verified by the
+  // system (the common case — no extra write). Only stamped when the import did
+  // not reconcile ("nao_conferido"), and flipped to "atestado_usuario" when the
+  // user confirms it's right. importId groups the transactions of one import.
+  verification?: "nao_conferido" | "atestado_usuario";
+  importId?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 };

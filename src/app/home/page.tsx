@@ -476,7 +476,18 @@ const GENERATE_DIAGNOSIS_URL =
   process.env.NEXT_PUBLIC_GENERATE_DIAGNOSIS_URL ||
   "https://generatediagnosis-ihalwtxjpq-uc.a.run.app";
 
-type ParsedWithMeta = ParsedTransaction & { _id: string; selected: boolean };
+type ParsedWithMeta = ParsedTransaction & {
+  _id: string;
+  selected: boolean;
+  // Stamped when the import didn't reconcile — carried into the committed tx.
+  verification?: "nao_conferido";
+  importId?: string;
+};
+
+// Honest reconciliation warning for an import that didn't close (Salvô voice).
+type ReconWarn =
+  | { kind: "delta"; readBRL: string; declaredBRL: string; deltaBRL: string }
+  | { kind: "no-total" };
 
 // One file in a multi-file import batch (each file = one async job).
 type BatchItem = {
@@ -494,7 +505,7 @@ type ImportState =
   | { phase: "parsing" }
   | { phase: "background"; jobId: string; filename: string }
   | { phase: "batch"; items: BatchItem[]; accountRows: ParsedWithMeta[] }
-  | { phase: "preview"; rows: ParsedWithMeta[]; error?: string }
+  | { phase: "preview"; rows: ParsedWithMeta[]; error?: string; recon?: ReconWarn }
   | { phase: "saving"; rows: ParsedWithMeta[] };
 
 function inferSource(sourceLabel?: string): "account" | "card" | undefined {
@@ -564,8 +575,12 @@ async function parseClientFile(file: File): Promise<ParsedWithMeta[]> {
   return out;
 }
 
-// Map an account-extrato job's staged transactions into preview rows.
-function jobTxToRows(txs: ParsedTransaction[]): ParsedWithMeta[] {
+// Map an account-extrato job's staged transactions into preview rows. When the
+// import didn't reconcile, stamp each row so the committed tx carries the status.
+function jobTxToRows(
+  txs: ParsedTransaction[],
+  recon?: { verification: "nao_conferido"; importId: string }
+): ParsedWithMeta[] {
   return (txs ?? []).map((t) => ({
     ...t,
     category: (t.category && (CATEGORIES as readonly string[]).includes(t.category))
@@ -574,6 +589,7 @@ function jobTxToRows(txs: ParsedTransaction[]): ParsedWithMeta[] {
     source: inferSource(t.sourceLabel),
     _id: crypto.randomUUID(),
     selected: true,
+    ...(recon ? { verification: recon.verification, importId: recon.importId } : {}),
   }));
 }
 
@@ -661,6 +677,23 @@ function WorkspaceApp({
 
   const showDemo = false;
   const visibleTx = showDemo ? demoTransactions : transactions;
+
+  // Imports that didn't reconcile carry verification="nao_conferido" until the
+  // user attests. The badge persists while the month has any; attesting flips
+  // them all in ONE writeBatch → "atestado_usuario".
+  const unverifiedTx = useMemo(() => transactions.filter((t) => t.verification === "nao_conferido"), [transactions]);
+  async function attestImports() {
+    if (unverifiedTx.length === 0) return;
+    const batch = writeBatch(db);
+    for (const t of unverifiedTx) {
+      batch.update(doc(db, "workspaces", workspace.id, "transactions", t.id), {
+        verification: "atestado_usuario",
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+
   const sources = useMemo(() => {
     const labels = [...new Set(
       transactions.filter((t) => t.source !== "card").map((t) => t.sourceLabel).filter(Boolean)
@@ -904,6 +937,10 @@ function WorkspaceApp({
           error?: string;
           cardLabel?: string;
           comprasCount?: number;
+          verification?: "verificado" | "nao_conferido";
+          readBalance?: number | null;
+          declaredBalance?: number | null;
+          delta?: number | null;
         };
 
         // Fatura (card statement): a SEPARATE lens. It persists server-side and
@@ -920,10 +957,9 @@ function WorkspaceApp({
           return;
         }
 
-        // Only "done" is shown — it means the server's reconciliation gate
-        // passed (count complete + balance chain closed). "partial" no longer
-        // exists: anything that didn't fully reconcile comes back as "failed"
-        // and is blocked, never surfaced as importable.
+        // "done" — the extrato is ALWAYS imported now. If it reconciled →
+        // verified, no badge. If not ("nao_conferido") → still imported, with an
+        // honest warning + the delta; the rows are stamped so the badge persists.
         if (data.status === "done") {
           const existingKeys = new Set(
             transactions.map((t) => {
@@ -931,12 +967,10 @@ function WorkspaceApp({
               return raw ?? `${t.date}|${t.description.toLowerCase().trim()}|${t.amount.toFixed(2)}`;
             })
           );
+          const unverified = data.verification === "nao_conferido";
           const rows: ParsedWithMeta[] = (data.transactions ?? []).map(
             (t: ParsedTransaction) => ({
               ...t,
-              // Categorize client-side: the deterministic server path doesn't
-              // categorize (avoids duplicating the keyword engine in functions);
-              // the Claude path may include a category, which we keep if valid.
               category: (t.category && (CATEGORIES as readonly string[]).includes(t.category))
                 ? t.category
                 : categorizeTransaction(t.description ?? "", t.type),
@@ -945,9 +979,16 @@ function WorkspaceApp({
               selected: !existingKeys.has(
                 `${t.date}|${(t.description ?? "").toLowerCase().trim()}|${Math.abs(t.amount ?? 0).toFixed(2)}`
               ),
+              ...(unverified ? { verification: "nao_conferido" as const, importId: bgJobId } : {}),
             })
           );
-          setImportState({ phase: "preview", rows });
+          let recon: ReconWarn | undefined;
+          if (unverified) {
+            recon = (data.delta != null && data.readBalance != null && data.declaredBalance != null)
+              ? { kind: "delta", readBRL: formatCurrency(data.readBalance), declaredBRL: formatCurrency(data.declaredBalance), deltaBRL: formatCurrency(Math.abs(data.delta)) }
+              : { kind: "no-total" };
+          }
+          setImportState({ phase: "preview", rows, recon });
           unsub();
         } else if (data.status === "failed") {
           // A failed fatura shows its honest error in the card lens, never the
@@ -994,12 +1035,14 @@ function WorkspaceApp({
         const d = snap.data() as {
           status: string; type?: string; transactions?: ParsedTransaction[];
           error?: string; cardLabel?: string; comprasCount?: number;
+          verification?: "verificado" | "nao_conferido";
         };
         if (d.status === "done") {
           if (d.type === "fatura") {
             settleBatchItem(id, { status: "done", kind: "fatura", cardLabel: d.cardLabel ?? "cartão", comprasCount: d.comprasCount ?? 0 }, []);
           } else {
-            const rows = jobTxToRows(d.transactions ?? []);
+            const recon = d.verification === "nao_conferido" ? { verification: "nao_conferido" as const, importId: id } : undefined;
+            const rows = jobTxToRows(d.transactions ?? [], recon);
             autoDeselectDuplicates(rows);
             settleBatchItem(id, { status: "done", kind: "account", accountCount: rows.length }, rows);
           }
@@ -1170,6 +1213,9 @@ function WorkspaceApp({
           sourceLabel: tx.sourceLabel ?? null,
           dedupKey: tx.dedupKey || `${tx.date}|${tx.description.toLowerCase().trim()}|${tx.amount.toFixed(2)}`,
           source: tx.source ?? null,
+          // Stamp ONLY when the import didn't reconcile — absence = verified by
+          // the system. Drives the persistent "confira" badge until attested.
+          ...(tx.verification === "nao_conferido" ? { verification: "nao_conferido", importId: tx.importId ?? null } : {}),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -1662,6 +1708,13 @@ function WorkspaceApp({
           prevIncome={prevTransactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0)}
         />
 
+        {/* Imports não conferidos — banner persistente */}
+        {!showDemo && unverifiedTx.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <UnverifiedBanner count={unverifiedTx.length} onAttest={attestImports} />
+          </div>
+        )}
+
         {/* Main grid */}
         <div className="ws-grid">
           {/* Left column */}
@@ -1924,6 +1977,11 @@ function WorkspaceApp({
             }} />
             Em breve!
           </div>
+        )}
+
+        {/* Imports não conferidos — banner persistente */}
+        {!showDemo && unverifiedTx.length > 0 && (
+          <UnverifiedBanner count={unverifiedTx.length} onAttest={attestImports} />
         )}
 
         {/* 1. Saldo do mês */}
@@ -2276,7 +2334,13 @@ function WorkspaceApp({
         <BatchModal
           items={importState.items}
           accountRows={importState.accountRows}
-          onReview={() => setImportState({ phase: "preview", rows: importState.accountRows })}
+          onReview={() => setImportState({
+            phase: "preview",
+            rows: importState.accountRows,
+            // Merged review: a generic warning if any row didn't reconcile (the
+            // per-import delta lives on each job; not aggregated here).
+            recon: importState.accountRows.some((r) => r.verification === "nao_conferido") ? { kind: "no-total" } : undefined,
+          })}
           onOpenCards={() => { localStorage.setItem("fincheck_workspace", workspace.id); setImportState(null); router.push("/cards"); }}
           onClose={() => setImportState(null)}
         />
@@ -3763,6 +3827,40 @@ const btnSecondary: React.CSSProperties = {
   borderRadius: 10, color: "rgba(255,255,255,0.6)", fontSize: 13.5, fontWeight: 600, padding: "11px 0", cursor: "pointer",
 };
 
+// ─── Persistent "confira" banner (imports that didn't reconcile) ──────────────
+// Shows while the month has any tx with verification="nao_conferido". "Está tudo
+// certo" attests them all (one writeBatch). Account lens only; honest, never blocks.
+function UnverifiedBanner({ count, onAttest }: { count: number; onAttest: () => Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+        background: "rgba(184,245,90,0.06)", border: "1px solid rgba(184,245,90,0.25)",
+        borderRadius: 14, padding: "13px 16px",
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 180 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", letterSpacing: "-0.01em" }}>Confira estes lançamentos</div>
+        <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>
+          {count === 1 ? "1 lançamento importado" : `${count} lançamentos importados`} que não consegui conferir com o total do banco.
+        </div>
+      </div>
+      <button
+        onClick={async () => { setSaving(true); try { await onAttest(); } finally { setSaving(false); } }}
+        disabled={saving}
+        style={{
+          background: G, border: "none", borderRadius: 10, color: "#0a0a0a",
+          fontSize: 12.5, fontWeight: 700, padding: "9px 14px", cursor: saving ? "default" : "pointer",
+          opacity: saving ? 0.6 : 1, whiteSpace: "nowrap",
+        }}
+      >
+        Está tudo certo
+      </button>
+    </div>
+  );
+}
+
 // ─── Fatura completion modal (card lens) ──────────────────────────────────────
 // Shown when a fatura import finishes. Data is already persisted server-side;
 // this only confirms and (when the cards flag is on) routes to /cards. Never the
@@ -3917,6 +4015,7 @@ function ImportModal({
   const rows = state.phase === "preview" || state.phase === "saving" ? state.rows : [];
   const selectedCount = rows.filter((r) => r.selected).length;
   const error = state.phase === "preview" ? state.error : undefined;
+  const recon = state.phase === "preview" ? state.recon : undefined;
 
   const categoriesFor = (type: "income" | "expense") => {
     if (type === "income") return [...CATEGORIES].sort();
@@ -4048,6 +4147,29 @@ function ImportModal({
                   }}
                 >
                   {error}
+                </div>
+              )}
+              {recon && (
+                <div style={{ marginBottom: 14 }}>
+                  <div
+                    style={{
+                      background: "rgba(184,245,90,0.07)",
+                      border: "1px solid rgba(184,245,90,0.25)",
+                      borderRadius: 12,
+                      padding: "12px 14px",
+                      fontSize: 12.5,
+                      color: "rgba(255,255,255,0.72)",
+                      lineHeight: 1.5,
+                      marginBottom: 10,
+                    }}
+                  >
+                    {recon.kind === "delta"
+                      ? `Importei teus lançamentos. Só não bateu o total: li ${recon.readBRL}, teu banco diz ${recon.declaredBRL} — faltou ${recon.deltaBRL}. Confere a lista e, se estiver tudo certo, confirma.`
+                      : "Importei teus lançamentos, mas não achei o total pra conferir. Dá uma olhada na lista e confirma se está tudo aí."}
+                  </div>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(184,245,90,0.1)", border: "1px solid rgba(184,245,90,0.3)", borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: G }}>
+                    Confira estes lançamentos
+                  </span>
                 </div>
               )}
               {rows.length === 0 ? (

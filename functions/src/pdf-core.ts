@@ -19,6 +19,10 @@ export type ParsedClaudeResponse = {
     classification?: "ENTRADA" | "SAIDA" | "IGNORAR";
     balance?: number;         // running balance after this tx (from Saldo column)
   }>;
+  // Balance checkpoints declared by the document at a coarser granularity than
+  // per-line (e.g. Itaú "SALDO DO DIA"). NEVER transactions — used only to
+  // reconcile by day. Empty/absent when the bank shows per-line balance (MP).
+  balanceCheckpoints?: Array<{ date: string; balance: number }>;
 };
 
 // ─── Credit-card statement (fatura) types ────────────────────────────────────
@@ -304,6 +308,91 @@ export function reconcileParsed(parsed: ParsedClaudeResponse): { ok: boolean; va
   const initC = parsed.initialBalance != null ? Math.round(parsed.initialBalance * 100) : undefined;
   const finC = parsed.finalBalance != null ? Math.round(parsed.finalBalance * 100) : undefined;
   return reconcileServer(txs, initC, finC);
+}
+
+// ─── Reconciliation CASCADE (by checkpoint granularity) ───────────────────────
+// Reconcile against whatever granularity the document itself declares, in
+// integer cents. Passes if ANY applicable granularity closes:
+//   1. line   — balance on (almost) every tx line (Mercado Pago). Strict.
+//   2. day    — balance only on day checkpoints (e.g. Itaú "SALDO DO DIA").
+//   3. totals — balance only in the header (initial + Σ = final).
+// "none" only when nothing applicable closes (or there's no balance to anchor).
+// Never blocks — the caller decides verificado vs nao_conferido from `ok`.
+export type LedgerVerification = {
+  mode: "line" | "day" | "totals" | "none";
+  ok: boolean;
+  readBalanceCents?: number;     // initial + Σ movimentos
+  declaredBalanceCents?: number; // saldo final declarado (header ou último checkpoint)
+  deltaCents?: number;           // declared - read (o que faltou), quando ambos conhecidos
+};
+
+export function reconcileLedger(
+  txs: Array<{ date: string; signedCents: number; balanceCents?: number }>,
+  checkpoints: Array<{ date: string; balanceCents: number }>,
+  initialBalanceCents?: number,
+  finalBalanceCents?: number
+): LedgerVerification {
+  const EXACT = 0; // checkpoint sums are computed — devem bater ao centavo
+  const readTotal = txs.reduce((s, t) => s + t.signedCents, 0);
+
+  const readBalanceCents = initialBalanceCents !== undefined ? initialBalanceCents + readTotal : undefined;
+  const declaredBalanceCents =
+    finalBalanceCents !== undefined
+      ? finalBalanceCents
+      : checkpoints.length
+      ? [...checkpoints].sort((a, b) => a.date.localeCompare(b.date))[checkpoints.length - 1].balanceCents
+      : undefined;
+  const deltaCents =
+    declaredBalanceCents !== undefined && readBalanceCents !== undefined
+      ? declaredBalanceCents - readBalanceCents
+      : undefined;
+  const base = { readBalanceCents, declaredBalanceCents, deltaCents };
+
+  // 1 — LINE chain (MP). Reuse the strict per-line reconciler (unchanged).
+  const withBalance = txs.filter((t) => t.balanceCents !== undefined).length;
+  if (txs.length > 0 && withBalance >= Math.ceil(txs.length * 0.8)) {
+    const r = reconcileServer(
+      txs.map((t) => ({ signedCents: t.signedCents, balanceCents: t.balanceCents })),
+      initialBalanceCents,
+      finalBalanceCents
+    );
+    if (r.ok) return { mode: "line", ok: true, ...base };
+  }
+
+  // 2 — DAY chain. Walk checkpoints chronologically; running balance after each
+  // day's transactions must equal that day's declared balance.
+  if (checkpoints.length > 0) {
+    const cps = [...checkpoints].sort((a, b) => a.date.localeCompare(b.date));
+    const sortedTx = [...txs].sort((a, b) => a.date.localeCompare(b.date));
+    let start = initialBalanceCents;
+    if (start === undefined) {
+      // No header anchor: infer the opening from the first checkpoint minus its
+      // day's transactions (the first checkpoint then sets the baseline).
+      const firstDaySum = sortedTx.filter((t) => t.date <= cps[0].date).reduce((s, t) => s + t.signedCents, 0);
+      start = cps[0].balanceCents - firstDaySum;
+    }
+    let running = start;
+    let ti = 0;
+    let dayOk = true;
+    for (const cp of cps) {
+      while (ti < sortedTx.length && sortedTx[ti].date <= cp.date) { running += sortedTx[ti].signedCents; ti++; }
+      if (Math.abs(running - cp.balanceCents) > EXACT) { dayOk = false; break; }
+    }
+    if (dayOk) {
+      while (ti < sortedTx.length) { running += sortedTx[ti].signedCents; ti++; }
+      const finalOk = finalBalanceCents === undefined || Math.abs(running - finalBalanceCents) <= EXACT;
+      if (finalOk) return { mode: "day", ok: true, ...base };
+    }
+  }
+
+  // 3 — TOTALS (header only): initial + Σ == final.
+  if (initialBalanceCents !== undefined && finalBalanceCents !== undefined) {
+    if (Math.abs(initialBalanceCents + readTotal - finalBalanceCents) <= EXACT) {
+      return { mode: "totals", ok: true, ...base };
+    }
+  }
+
+  return { mode: "none", ok: false, ...base };
 }
 
 // ─── Server-side classification ───────────────────────────────────────────────
