@@ -1038,18 +1038,12 @@ function WorkspaceApp({
     const pdfs = files.filter(isPdfFile);
     const others = files.filter((f) => !isPdfFile(f));
 
-    // Multi-file (or any mix with a PDF) → async batch: one job per PDF, the
-    // server autodetects fatura vs extrato and routes each. Non-PDFs are
-    // client-parsed (account) and merged into the eventual review.
+    // Multi-file with ≥1 PDF (any mix of formats) → async batch. EVERY file is a
+    // tracked item routed to its parser: PDF → server job (autodetecta fatura vs
+    // extrato); CSV/OFX/imagem → parser client-side. Cada um falha isolado.
     if (pdfs.length >= 1 && files.length >= 2) {
       setImportState({ phase: "parsing" });
-      let clientRows: ParsedWithMeta[] = [];
-      for (const f of others) {
-        try { clientRows = clientRows.concat(await parseClientFile(f)); }
-        catch (err) { console.error("[import] client file failed:", err); }
-      }
-      autoDeselectDuplicates(clientRows);
-      startImportBatch(pdfs, clientRows);
+      startImportBatch(files);
       return;
     }
 
@@ -1077,15 +1071,16 @@ function WorkspaceApp({
   }
 
   // ── Multi-file batch ───────────────────────────────────────────────────────
-  // One async job per PDF, uploaded with a concurrency cap so N files don't
-  // burst the Anthropic Tier-1 rate limit. Faturas persist server-side; account
-  // extratos stage rows that are merged into one review at the end.
-  function startImportBatch(pdfs: File[], clientRows: ParsedWithMeta[]) {
-    const ids = pdfs.map(() => crypto.randomUUID());
-    const items: BatchItem[] = pdfs.map((f, i) => ({ id: ids[i], filename: f.name, status: "queued" }));
+  // EVERY file becomes a tracked item, processed with a concurrency cap (so N
+  // files don't burst the Anthropic Tier-1 rate limit). PDFs → server job
+  // (autodetecta fatura/extrato); CSV/OFX/imagem → parser client-side. Faturas
+  // persistem no servidor; extratos viram linhas que vão pra uma revisão única.
+  function startImportBatch(files: File[]) {
+    const ids = files.map(() => crypto.randomUUID());
+    const items: BatchItem[] = files.map((f, i) => ({ id: ids[i], filename: f.name, status: "queued" }));
     settledRef.current = new Set();
-    batchPoolRef.current = { files: pdfs, ids, next: 0, active: 0 };
-    setImportState({ phase: "batch", items, accountRows: clientRows });
+    batchPoolRef.current = { files, ids, next: 0, active: 0 };
+    setImportState({ phase: "batch", items, accountRows: [] });
     pumpBatch();
   }
 
@@ -1098,23 +1093,40 @@ function WorkspaceApp({
       pool.active++;
       const file = pool.files[i];
       const jobId = pool.ids[i];
-      void (async () => {
-        try {
-          await setDoc(doc(db, "workspaces", workspace.id, "importJobs", jobId), {
-            status: "processing",
-            filename: file.name,
-            createdAt: serverTimestamp(),
-            uid: user.uid,
-            createdByName: profile.displayName || user.displayName || user.email?.split("@")[0] || "Alguém",
-          });
+
+      if (isPdfFile(file)) {
+        // PDF → async server job (settled later by the batch snapshot effect).
+        void (async () => {
+          try {
+            await setDoc(doc(db, "workspaces", workspace.id, "importJobs", jobId), {
+              status: "processing",
+              filename: file.name,
+              createdAt: serverTimestamp(),
+              uid: user.uid,
+              createdByName: profile.displayName || user.displayName || user.email?.split("@")[0] || "Alguém",
+            });
+            updateBatchItem(jobId, { status: "processing" });
+            const ref = storageRef(storage, `imports/${workspace.id}/${jobId}/raw.pdf`);
+            await uploadBytes(ref, file, { contentType: "application/pdf", customMetadata: { originalFilename: file.name } });
+          } catch (err) {
+            console.error("[import-batch] upload failed:", err);
+            settleBatchItem(jobId, { status: "failed", error: "Falha no upload do arquivo." }, []);
+          }
+        })();
+      } else {
+        // CSV/OFX/imagem → client parser (conta). Falha isolada, não derruba os outros.
+        void (async () => {
           updateBatchItem(jobId, { status: "processing" });
-          const ref = storageRef(storage, `imports/${workspace.id}/${jobId}/raw.pdf`);
-          await uploadBytes(ref, file, { contentType: "application/pdf", customMetadata: { originalFilename: file.name } });
-        } catch (err) {
-          console.error("[import-batch] upload failed:", err);
-          settleBatchItem(jobId, { status: "failed", error: "Falha no upload do arquivo." }, []);
-        }
-      })();
+          try {
+            const rows = await parseClientFile(file);
+            autoDeselectDuplicates(rows);
+            settleBatchItem(jobId, { status: "done", kind: "account", accountCount: rows.length }, rows);
+          } catch (err) {
+            console.error("[import-batch] client parse failed:", err);
+            settleBatchItem(jobId, { status: "failed", error: getUserFacingError(err, "import") }, []);
+          }
+        })();
+      }
     }
   }
 
@@ -3664,12 +3676,12 @@ function BatchModal({
   const contasOk = items.filter((i) => i.status === "done" && i.kind === "account");
   const failed = items.filter((i) => i.status === "failed");
 
-  const summaryParts: string[] = [];
-  if (faturasOk.length) summaryParts.push(`${faturasOk.length} ${faturasOk.length === 1 ? "cartão" : "cartões"}`);
-  if (contasOk.length) summaryParts.push(`${contasOk.length} ${contasOk.length === 1 ? "conta" : "contas"}`);
-  const summaryLine = summaryParts.length
-    ? `${summaryParts.join(" + ")} ${faturasOk.length + contasOk.length === 1 ? "importado" : "importados"}`
-    : "Nada importado";
+  // Copy honesta: "lido" (não "importado") — extratos ainda vão pra revisão.
+  const total = items.length;
+  const okCount = faturasOk.length + contasOk.length;
+  const summaryLine =
+    `${total} arquivo${total !== 1 ? "s" : ""} · ${okCount} lido${okCount !== 1 ? "s" : ""}` +
+    (failed.length ? ` · ${failed.length} ${failed.length === 1 ? "falhou" : "falharam"}` : "");
 
   return (
     <div
@@ -3691,7 +3703,7 @@ function BatchModal({
           {allSettled ? summaryLine : `${settled.length} de ${items.length} prontos`}
         </p>
 
-        <div style={{ display: "grid", gap: 8, maxHeight: "46vh", overflow: "auto", marginBottom: failed.length || allSettled ? 18 : 0 }}>
+        <div className="batch-list" style={{ display: "grid", gap: 10, maxHeight: "46vh", overflowY: "auto", overflowX: "hidden", scrollbarWidth: "none", marginBottom: failed.length || allSettled ? 18 : 0 }}>
           {items.map((it) => {
             const done = it.status === "done";
             const fail = it.status === "failed";
@@ -3703,19 +3715,21 @@ function BatchModal({
               ? `Extrato · ${it.accountCount ?? 0} lançamentos`
               : it.status === "processing" ? "Lendo…" : "Na fila";
             return (
-              <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: fail ? "rgba(255,92,92,0.12)" : done ? "rgba(184,245,90,0.12)" : "rgba(255,255,255,0.05)" }}>
+              <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0 }}>
+                <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, marginTop: 1, display: "flex", alignItems: "center", justifyContent: "center", background: fail ? "rgba(255,92,92,0.12)" : done ? "rgba(184,245,90,0.12)" : "rgba(255,255,255,0.05)" }}>
                   {done ? <Check size={13} color={G} /> : fail ? <X size={13} color="#ff5c5c" /> : (
                     <div style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.18)", borderTopColor: G, borderRadius: "50%", animation: "spin .8s linear infinite" }} />
                   )}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Nome trunca; status/erro quebra linha e aparece inteiro */}
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: "#e8e9ec", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.filename}</div>
-                  <div style={{ fontSize: 11, color: fail ? "#ff8080" : "rgba(255,255,255,0.4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detail}</div>
+                  <div style={{ fontSize: 11, color: fail ? "#ff8080" : "rgba(255,255,255,0.4)", overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.4, marginTop: 1 }}>{detail}</div>
                 </div>
               </div>
             );
           })}
+          <style>{`.batch-list::-webkit-scrollbar{display:none}`}</style>
         </div>
 
         {allSettled && (
