@@ -1,6 +1,6 @@
 "use client";
 
-// ─── Home card summary (behind the cardsEnabled flag) ────────────────────────
+// ─── Home card summary (GA — renders only when there's ≥1 card) ──────────────
 // One component covering 1..N cards:
 //   • 1 fatura  → compact per-card row (icon, current fatura, limit read).
 //   • N faturas → grouped "a pagar" view: what's due THIS month + total open,

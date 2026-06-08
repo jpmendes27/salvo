@@ -70,7 +70,6 @@ import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fi
 import { isStopDescription } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { CardHomeSummary } from "@/components/CardHomeSummary";
-import { isCardsEnabled } from "@/lib/flags";
 import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
 import { getUserFacingError } from "@/lib/errors";
@@ -648,7 +647,6 @@ function WorkspaceApp({
   const workspace = activeEntry.workspace;
   const member = activeEntry.member;
   const isOwner = member.role === "owner";
-  const cardsEnabled = isCardsEnabled(user);
 
   const [monthlyIncome, setMonthlyIncome] = useState<number>(workspace.monthlyIncome ?? 0);
 
@@ -1662,8 +1660,8 @@ function WorkspaceApp({
               onAddManual={() => setAddOpen(true)}
             />
 
-            {/* Cartões (atrás da flag, lente separada) */}
-            {cardsEnabled && <CardHomeSummary workspaceId={workspace.id} />}
+            {/* Cartões (lente separada — aparece quando há ≥1 cartão) */}
+            <CardHomeSummary workspaceId={workspace.id} />
 
             {/* View tabs */}
             <WsCard>
@@ -2066,8 +2064,8 @@ function WorkspaceApp({
         {/* 4. Importar extrato */}
         <UploadZone onFiles={handleFiles} onAddManual={() => setAddOpen(true)} />
 
-        {/* 4b. Cartão de crédito (atrás da flag, lente separada) */}
-        {cardsEnabled && <CardHomeSummary workspaceId={workspace.id} />}
+        {/* 4b. Cartão de crédito (lente separada — aparece quando há ≥1 cartão) */}
+        <CardHomeSummary workspaceId={workspace.id} />
 
         {/* 5. Plano do mês */}
         <PlanCard
@@ -2304,7 +2302,6 @@ function WorkspaceApp({
           cardLabel={faturaResult.cardLabel}
           comprasCount={faturaResult.comprasCount}
           error={faturaResult.error}
-          cardsEnabled={cardsEnabled}
           onClose={() => setFaturaResult(null)}
           onOpenCards={() => {
             localStorage.setItem("fincheck_workspace", workspace.id);
@@ -3761,14 +3758,12 @@ function FaturaDoneModal({
   cardLabel,
   comprasCount,
   error,
-  cardsEnabled,
   onClose,
   onOpenCards,
 }: {
   cardLabel: string;
   comprasCount: number;
   error?: string;
-  cardsEnabled: boolean;
   onClose: () => void;
   onOpenCards: () => void;
 }) {
@@ -3820,15 +3815,11 @@ function FaturaDoneModal({
           {isError ? "Não importei essa fatura" : `Li tua fatura do ${cardLabel}`}
         </h2>
         <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginTop: 6, lineHeight: 1.5 }}>
-          {isError
-            ? error
-            : cardsEnabled
-            ? `${comprasLabel} organizadas no teu cartão.`
-            : "Visão de cartão chegando em breve."}
+          {isError ? error : `${comprasLabel} organizadas no teu cartão.`}
         </p>
 
         <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
-          {cardsEnabled && !isError ? (
+          {!isError ? (
             <>
               <button
                 onClick={onClose}

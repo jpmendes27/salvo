@@ -1,6 +1,6 @@
 "use client";
 
-// ─── /cards — credit-card lens (behind the cardsEnabled flag) ────────────────
+// ─── /cards — credit-card lens (GA — available to all users) ─────────────────
 // Cards, current fatura, limit bar, purchases by category, parcelamentos, and
 // previous faturas. A separate lens from cash flow: card data only, never mixed
 // into the account diagnosis. Follows the Salvô! design system.
@@ -16,7 +16,6 @@ import { TxRow } from "@/components/TxRow";
 import { app, db } from "@/lib/firebase";
 import { useCardData, currentFatura, limitInfo, cardToneLine } from "@/lib/cards";
 import { detectBank } from "@/lib/banks";
-import { isCardsEnabled } from "@/lib/flags";
 import { colors, radius, typography } from "@/lib/design-system";
 import { currentMonthKey, formatCurrency, monthLabel } from "@/lib/money";
 import { CATEGORY_LABELS } from "@/lib/parsers";
@@ -116,7 +115,6 @@ function CardsFlow() {
 
   if (authLoading) return <Shell text="Carregando..." />;
   if (!user) return null;
-  if (!isCardsEnabled(user)) { router.replace("/home"); return null; }
 
   const workspaceId = typeof window !== "undefined" ? localStorage.getItem("fincheck_workspace") ?? "" : "";
   if (!workspaceId) { router.replace("/home"); return null; }

@@ -33,8 +33,8 @@ de lista em /transactions e /cards usam Plus Jakarta).
 
 ## Telas
 `/login` · `/onboarding` · `/home` · `/transactions` · `/top-categories` · `/projecao` ·
-`/metas` · `/members` · `/cards` (feature de cartão, atrás da flag `isCardsEnabled` em
-`src/lib/flags.ts`).
+`/metas` · `/members` · `/cards` (feature de cartão — **GA, disponível pra toda a base**;
+a tela/resumo aparecem quando há ≥1 cartão, descobertos ao importar uma fatura).
 
 ## Arquitetura — Pipeline de importação
 Caminho **único server-side** pra todo arquivo (cliente sobe o arquivo cru; sem pdfjs no
