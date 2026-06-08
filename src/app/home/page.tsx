@@ -1257,10 +1257,12 @@ function WorkspaceApp({
   const mobTotalEntradas = useMemo(() => mobAccountTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [mobAccountTx]);
   const mobDaysWithExpenses = useMemo(() => new Set(mobExpenses.map(t => t.date)).size, [mobExpenses]);
   const mobMediaDia = mobDaysWithExpenses > 0 ? mobTotalGasto / mobDaysWithExpenses : 0;
-  const mobRendaRef = monthlyIncome > 0 ? monthlyIncome : (mobTotalEntradas > 0 ? mobTotalEntradas : 1);
-  const mobComprometimento = mobTotalGasto > 0 ? Math.min(100, Math.round((mobTotalGasto / mobRendaRef) * 100)) : 0;
-  const mobRatio = mobTotalGasto / mobRendaRef;
-  const mobScore: number | null = mobExpenses.length === 0 ? null : (() => {
+  // Sem promessa furada: sem base de renda real (renda <= 0 E sem entradas), NÃO
+  // pontuar contra base fabricada — rendaRef null → score null → "Sem dados suficientes".
+  const mobRendaRef = monthlyIncome > 0 ? monthlyIncome : (mobTotalEntradas > 0 ? mobTotalEntradas : null);
+  const mobComprometimento = (mobRendaRef && mobTotalGasto > 0) ? Math.min(100, Math.round((mobTotalGasto / mobRendaRef) * 100)) : 0;
+  const mobRatio = mobRendaRef ? mobTotalGasto / mobRendaRef : 0;
+  const mobScore: number | null = (mobExpenses.length === 0 || mobRendaRef === null) ? null : (() => {
     if (mobRatio >= 2.0) return 0;
     if (mobRatio >= 1.5) return 1;
     if (mobRatio >= 1.0) return 2.5;
@@ -1309,7 +1311,7 @@ function WorkspaceApp({
   const [sharedDiagError, setSharedDiagError] = useState(false);
   const mobScoreColor = mobScore === null ? G : mobScore >= 8 ? G : mobScore >= 6 ? "#facc15" : "#ff8080";
   const mobScoreRgb = mobScoreColor === G ? "184,245,90" : mobScoreColor === "#facc15" ? "250,204,21" : "255,128,128";
-  const mobScoreLabel = mobScore === null ? "—" : mobScore >= 8 ? "Arrasando 💪" : mobScore >= 6 ? "Dá pra melhorar" : "Tá pesado.";
+  const mobScoreLabel = mobScore === null ? "Sem dados suficientes" : mobScore >= 8 ? "Arrasando 💪" : mobScore >= 6 ? "Dá pra melhorar" : "Tá pesado.";
   const mobNet = mobTotalEntradas - mobTotalGasto;
   const mobTopCat = mobByCategory[0] ?? null;
   const mobExpenseChange = mobPrevExpense > 0 && summary.expense > 0 ? Math.round(((summary.expense - mobPrevExpense) / mobPrevExpense) * 100) : null;
@@ -3093,13 +3095,15 @@ function InsightsView({
   const daysWithExpenses = useMemo(() => new Set(expenses.map((t) => t.date)).size, [expenses]);
   const mediaGastoPorDia = daysWithExpenses > 0 ? totalGasto / daysWithExpenses : 0;
 
-  const rendaRef = renda > 0 ? renda : (totalEntradas > 0 ? totalEntradas : 1);
-  const comprometimento = totalGasto > 0 ? Math.min(100, Math.round((totalGasto / rendaRef) * 100)) : 0;
+  // Sem promessa furada: sem base de renda real (renda <= 0 E sem entradas), NÃO
+  // pontuar contra base fabricada — rendaRef null → score null → "Sem dados suficientes".
+  const rendaRef = renda > 0 ? renda : (totalEntradas > 0 ? totalEntradas : null);
+  const comprometimento = (rendaRef && totalGasto > 0) ? Math.min(100, Math.round((totalGasto / rendaRef) * 100)) : 0;
 
   // ratio sem cap — score e comprometimento usam a mesma base para serem consistentes
-  const ratio = totalGasto / rendaRef;
+  const ratio = rendaRef ? totalGasto / rendaRef : 0;
 
-  const score = expenses.length === 0 ? null : (() => {
+  const score = (expenses.length === 0 || rendaRef === null) ? null : (() => {
     if (ratio >= 2.0)  return 0;
     if (ratio >= 1.5)  return 1;
     if (ratio >= 1.0)  return 2.5;
@@ -3109,7 +3113,7 @@ function InsightsView({
     return 10;
   })();
   const scoreColor = score === null ? G : score >= 8 ? G : score >= 6 ? "#facc15" : "#ff8080";
-  const scoreLabel = score === null ? "—" : score >= 8 ? "Arrasando 💪" : score >= 6 ? "Dá pra melhorar" : "Tá pesado.";
+  const scoreLabel = score === null ? "Sem dados suficientes" : score >= 8 ? "Arrasando 💪" : score >= 6 ? "Dá pra melhorar" : "Tá pesado.";
 
   const byDay = useMemo(() => {
     const m: Record<string, number> = {};
