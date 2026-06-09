@@ -28,6 +28,24 @@ export function categoryColor(cat: string): string {
 
 export const ALL_CATEGORIES = Object.entries(CATEGORY_LABELS) as [string, string][];
 
+// Discreet, neutral tag for internal investment moves (cofrinho/CDB) — in the
+// ledger but neutral in the score. No alarm color; just signals "own money".
+export function InternoChip() {
+  return (
+    <span
+      title="Movimento entre suas contas — não entra como gasto nem receita"
+      style={{
+        flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: "0.05em",
+        textTransform: "uppercase", color: "rgba(255,255,255,0.4)",
+        background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 4, padding: "1px 5px", lineHeight: 1.6,
+      }}
+    >
+      interno
+    </span>
+  );
+}
+
 export function TxRow({
   tx,
   workspaceId,
@@ -139,12 +157,15 @@ export function TxRow({
           flexShrink: 0
         }} />
         <div style={{ minWidth: 0 }}>
-          <p style={{
-            fontSize: 13.5, fontWeight: 600, color: "#e8e9ec",
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-          }}>
-            {tx.description}{parcelaSuffix ? ` ${parcelaSuffix}` : ""}
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            <p style={{
+              margin: 0, fontSize: 13.5, fontWeight: 600, color: "#e8e9ec",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+            }}>
+              {tx.description}{parcelaSuffix ? ` ${parcelaSuffix}` : ""}
+            </p>
+            {tx.internal && <InternoChip />}
+          </div>
           <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
             <button
               onClick={(e) => { if (selectMode) return; e.stopPropagation(); setEditingCat((v) => !v); }}

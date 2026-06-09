@@ -70,6 +70,7 @@ import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fi
 import { isStopDescription } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { CardHomeSummary } from "@/components/CardHomeSummary";
+import { InternoChip } from "@/components/TxRow";
 import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
 import { getUserFacingError } from "@/lib/errors";
@@ -2209,7 +2210,10 @@ function WorkspaceApp({
                       <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}66` }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, fontWeight: 600, color: "rgba(232,233,236,0.9)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tx.description}</p>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "rgba(232,233,236,0.9)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tx.description}</p>
+                        {tx.internal && <InternoChip />}
+                      </div>
                       <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.32)", marginTop: 2 }}>{tx.category} · {dateLabel}</p>
                     </div>
                     <span style={{ fontSize: 13, fontWeight: 800, color: isIncome ? G : "#ff8080", letterSpacing: "-0.02em", flexShrink: 0 }}>
@@ -3674,18 +3678,22 @@ function TxRow({
         }}
       />
       <div style={{ minWidth: 0 }}>
-        <p
-          style={{
-            fontSize: 13.5,
-            fontWeight: 600,
-            color: "#e8e9ec",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis"
-          }}
-        >
-          {tx.description}
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 13.5,
+              fontWeight: 600,
+              color: "#e8e9ec",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis"
+            }}
+          >
+            {tx.description}
+          </p>
+          {tx.internal && <InternoChip />}
+        </div>
         <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.32)", marginTop: 1 }}>
           {CATEGORY_LABELS[tx.category as keyof typeof CATEGORY_LABELS] ?? tx.category} · {dateLabel}
         </p>
@@ -4246,18 +4254,22 @@ function ImportModal({
                         {row.selected && <Check size={11} color="#000" strokeWidth={3} />}
                       </div>
                       <div style={{ minWidth: 0 }}>
-                        <p
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: "#e8e9ec",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis"
-                          }}
-                        >
-                          {row.description}
-                        </p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: "#e8e9ec",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis"
+                            }}
+                          >
+                            {row.description}
+                          </p>
+                          {row.internal && <InternoChip />}
+                        </div>
                         <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
                           {row.date}
                         </p>
