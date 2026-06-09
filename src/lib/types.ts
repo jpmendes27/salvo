@@ -55,6 +55,10 @@ export type Transaction = {
   // user confirms it's right. importId groups the transactions of one import.
   verification?: "nao_conferido" | "atestado_usuario";
   importId?: string;
+  // Internal investment move (aplicação/resgate de cofrinho/CDB/poupança). Real
+  // transaction in the ledger, but NEUTRAL in the cash-flow score (out of both
+  // income and expense totals). Absent = normal movement.
+  internal?: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
 };

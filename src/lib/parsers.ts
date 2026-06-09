@@ -8,6 +8,7 @@ export type ParsedTransaction = {
   dedupKey: string;
   sourceLabel?: string;
   source?: "account" | "card";
+  internal?: boolean;
 };
 
 // ─── 19 categorias fixas ─────────────────────────────────────────────────────

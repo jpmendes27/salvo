@@ -1216,6 +1216,8 @@ function WorkspaceApp({
           // Stamp ONLY when the import didn't reconcile — absence = verified by
           // the system. Drives the persistent "confira" badge until attested.
           ...(tx.verification === "nao_conferido" ? { verification: "nao_conferido", importId: tx.importId ?? null } : {}),
+          // Internal investment move (cofrinho/CDB): in the ledger, neutral in the score.
+          ...(tx.internal ? { internal: true } : {}),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -1308,9 +1310,11 @@ function WorkspaceApp({
   // source='account'. Card purchases (source='card') never enter these totals,
   // because the statement already pays the card off as an account outflow.
   const mobAccountTx = useMemo(() => visibleTx.filter(t => t.source !== "card"), [visibleTx]);
-  const mobExpenses = useMemo(() => mobAccountTx.filter(t => t.type === "expense"), [mobAccountTx]);
+  // Score/diagnóstico ignora movimentos internos (cofrinho/CDB); a lista os mantém.
+  const mobScorable = useMemo(() => mobAccountTx.filter(t => !t.internal), [mobAccountTx]);
+  const mobExpenses = useMemo(() => mobScorable.filter(t => t.type === "expense"), [mobScorable]);
   const mobTotalGasto = useMemo(() => mobExpenses.reduce((s, t) => s + t.amount, 0), [mobExpenses]);
-  const mobTotalEntradas = useMemo(() => mobAccountTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [mobAccountTx]);
+  const mobTotalEntradas = useMemo(() => mobScorable.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [mobScorable]);
   const mobDaysWithExpenses = useMemo(() => new Set(mobExpenses.map(t => t.date)).size, [mobExpenses]);
   const mobMediaDia = mobDaysWithExpenses > 0 ? mobTotalGasto / mobDaysWithExpenses : 0;
   // Sem promessa furada: sem base de renda real (renda <= 0 E sem entradas), NÃO
@@ -3151,7 +3155,8 @@ function InsightsView({
 
   // Bug 3: the cash-flow diagnosis uses ONLY account transactions. Card
   // purchases (source='card') are a separate lens and never counted here.
-  const accountTx = transactions.filter((t) => t.source !== "card");
+  // Internal investment moves (cofrinho/CDB) stay in the ledger but are neutral here.
+  const accountTx = transactions.filter((t) => t.source !== "card" && !t.internal);
   const expenses = accountTx.filter((t) => t.type === "expense");
   const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
   const totalEntradas = accountTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);

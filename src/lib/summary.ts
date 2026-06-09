@@ -19,8 +19,12 @@ export function buildMonthlySummary(
   const accountTxs = enriched.filter((t) => t.source !== "card");
   const cardTxs    = enriched.filter((t) => t.source === "card");
 
-  const accountIncome  = accountTxs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const accountExpense = accountTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  // Internal investment moves (cofrinho/CDB/poupança) stay in the ledger but are
+  // NEUTRAL in the cash-flow figures — own money changing pockets, not income/spend.
+  const scorableTxs = accountTxs.filter((t) => !t.internal);
+
+  const accountIncome  = scorableTxs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const accountExpense = scorableTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const cardExpense    = cardTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
   // Bug 3: income/expense are the CASH-FLOW figures — account only. Card
@@ -31,7 +35,7 @@ export function buildMonthlySummary(
   const balance     = accountIncome - accountExpense;
   const savingsRate = accountIncome > 0 ? Math.round((balance / accountIncome) * 100) : null;
 
-  const categoryTotals = accountTxs
+  const categoryTotals = scorableTxs
     .filter((t) => t.type === "expense")
     .reduce<Record<string, number>>((acc, t) => {
       acc[t.category] = (acc[t.category] || 0) + t.amount;

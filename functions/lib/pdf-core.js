@@ -15,6 +15,7 @@ exports.tryMercadoPagoGeometric = tryMercadoPagoGeometric;
 exports.reconcileServer = reconcileServer;
 exports.reconcileParsed = reconcileParsed;
 exports.reconcileLedger = reconcileLedger;
+exports.isInternalTransfer = isInternalTransfer;
 exports.classifyServer = classifyServer;
 exports.buildCategorySystemPrompt = buildCategorySystemPrompt;
 exports.buildCategoryUserMessage = buildCategoryUserMessage;
@@ -321,10 +322,31 @@ const MP_IGNORE_PATTERNS = [
     /^reembolso\b/i,
     /^estorno\b/i,
 ];
+// Internal investment moves — aplicação/resgate de cofrinho/CDB/RDB/poupança/
+// tesouro. São TRANSAÇÕES REAIS (mexem no saldo, entram no ledger e na
+// reconciliação), mas NEUTRAS no diagnóstico (dinheiro do próprio dono mudando
+// de bolso — nem gasto nem receita). NÃO confundir com PIX/transferência a
+// terceiro (essas continuam entrada/saída normal).
+const INTERNAL_TRANSFER_PATTERNS = [
+    /cofrinho/,
+    /\bcdb\b/,
+    /\brdb\b/,
+    /(aplicac\w*|resgate)\s*(de\s+)?(cofrinho|cdb|rdb|poupan|tesouro|investiment|fundo|reserva)/,
+    /(aplicac\w*|resgate)\s+(automat\w*|program\w*)/,
+    /poupan\w*\s+(aplicac|resgate)/,
+];
+function isInternalTransfer(description) {
+    const n = description.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    return INTERNAL_TRANSFER_PATTERNS.some((p) => p.test(n));
+}
 function classifyServer(description, signedCents, bankSlug, claudeClassification) {
     if (signedCents === 0)
         return "IGNORAR";
     const norm = description.normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+    // Investment moves are REAL transactions — never dropped from the ledger.
+    // Direction comes from the sign; neutrality in the score is a separate flag.
+    if (isInternalTransfer(norm))
+        return signedCents > 0 ? "ENTRADA" : "SAIDA";
     if (bankSlug === "mercado-pago" && MP_IGNORE_PATTERNS.some((p) => p.test(norm))) {
         return "IGNORAR";
     }

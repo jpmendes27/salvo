@@ -120,6 +120,9 @@ Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras 
   • "Reembolso" sem contexto de terceiro — estorno interno do banco
   • "Estorno" — cancelamento de operação anterior (compensa operação prévia)
   • Qualquer linha com amount = 0
+- NÃO é IGNORAR (são transações REAIS, classifique pelo sinal): aplicação/resgate de
+  cofrinho, CDB, RDB, poupança, tesouro ou fundo. Mexem no saldo e entram normalmente
+  (resgate = ENTRADA, aplicação = SAIDA). NÃO descarte essas linhas.
 
 === REGRAS PARA balance (saldo na LINHA da transação) ===
 - "balance": o saldo APÓS esta transação, SÓ quando o documento imprime um saldo
@@ -1886,6 +1889,9 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
         .map((t) => {
         const amount = Math.abs(t.amount);
         const desc = t.description.trim();
+        // Internal investment move (cofrinho/CDB/poupança): stays in the ledger,
+        // but neutral in the diagnosis (set only when true — absence = normal).
+        const internal = (0, pdf_core_1.isInternalTransfer)(desc);
         return {
             date: t.date,
             description: desc,
@@ -1898,6 +1904,7 @@ exports.processImportJob = (0, storage_1.onObjectFinalized)({
             source: /cartão|fatura|card/i.test(sourceLabel) ? "card" : "account",
             monthKey: (t.date ?? "").slice(0, 7),
             dedupKey: `${t.date}|${desc.toLowerCase()}|${amount.toFixed(2)}`,
+            ...(internal ? { internal: true } : {}),
         };
     });
     // ── Category enrichment — deterministic-first cascade, NON-BLOCKING ────
