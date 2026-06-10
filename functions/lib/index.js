@@ -679,12 +679,11 @@ exports.parseBankStatement = (0, https_1.onRequest)({
         res.status(500).json({ error: msg });
     }
 });
-// Evolution API (WhatsApp gateway) endpoint as CONFIG, not a hardcoded host — so
-// the address can change (recreated VPS, or moving to an HTTPS domain) WITHOUT a
-// code edit: set EVOLUTION_URL in functions/.env and redeploy. The default keeps
-// today's value working (and is just a public endpoint, not a credential).
-// HTTPS migration = set EVOLUTION_URL=https://<seu-domínio> em functions/.env.
-const EVOLUTION_URL = process.env.EVOLUTION_URL || "http://136.248.106.93:8080";
+// Evolution API (WhatsApp gateway) endpoint as CONFIG, not a hardcoded host —
+// EVOLUTION_URL em functions/.env é a fonte da verdade e sobrescreve. O default
+// abaixo é só o fallback se o env faltar num deploy: HTTPS, nunca o IP em texto
+// puro. Não é credencial (a EVOLUTION_API_KEY vive no Secret Manager).
+const EVOLUTION_URL = process.env.EVOLUTION_URL || "https://wa.jpmendes.com";
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || "fincheck-pro";
 exports.sendInviteWhatsApp = (0, https_1.onRequest)({
     cors: true,
