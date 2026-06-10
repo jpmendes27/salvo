@@ -31,11 +31,11 @@ export const metadata: Metadata = {
     description: "Um app que olha sua vida financeira do jeito que ela é, te fala a verdade na cara e te mostra um caminho real pra sair do sufoco. Sem planilha. Sem palavra difícil. Sem promessa furada.",
     url: "https://jpmendes.com/salvo",
     type: "website",
-    images: [{ url: "https://jpmendes.com/salvo/og-v2.png" }]
+    images: [{ url: "https://jpmendes.com/salvo/og-v3.png" }]
   },
   twitter: {
     card: "summary_large_image",
-    images: ["https://jpmendes.com/salvo/og-v2.png"]
+    images: ["https://jpmendes.com/salvo/og-v3.png"]
   }
 };
 
