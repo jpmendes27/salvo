@@ -486,9 +486,11 @@ type ParsedWithMeta = ParsedTransaction & {
 };
 
 // Honest reconciliation warning for an import that didn't close (Salvô voice).
+// `label` is an optional per-file tag ("Extrato 2") used in the merged batch
+// review; absent on the single-file route (one warning, no label).
 type ReconWarn =
-  | { kind: "delta"; readBRL: string; declaredBRL: string; deltaBRL: string }
-  | { kind: "no-total" };
+  | { kind: "delta"; label?: string; readBRL: string; declaredBRL: string; deltaBRL: string }
+  | { kind: "no-total"; label?: string };
 
 // One file in a multi-file import batch (each file = one async job).
 type BatchItem = {
@@ -500,13 +502,19 @@ type BatchItem = {
   comprasCount?: number;
   accountCount?: number;
   error?: string;
+  // Per-file reconciliation result (account jobs) — read from the job doc, used
+  // to build one delta warning per file in the merged review.
+  unverified?: boolean;
+  readBalance?: number | null;
+  declaredBalance?: number | null;
+  delta?: number | null;
 };
 
 type ImportState =
   | { phase: "parsing" }
   | { phase: "background"; jobId: string; filename: string }
   | { phase: "batch"; items: BatchItem[]; accountRows: ParsedWithMeta[] }
-  | { phase: "preview"; rows: ParsedWithMeta[]; error?: string; recon?: ReconWarn }
+  | { phase: "preview"; rows: ParsedWithMeta[]; error?: string; recon?: ReconWarn; recons?: ReconWarn[] }
   | { phase: "saving"; rows: ParsedWithMeta[] };
 
 function inferSource(sourceLabel?: string): "account" | "card" | undefined {
@@ -1037,15 +1045,25 @@ function WorkspaceApp({
           status: string; type?: string; transactions?: ParsedTransaction[];
           error?: string; cardLabel?: string; comprasCount?: number;
           verification?: "verificado" | "nao_conferido";
+          readBalance?: number | null; declaredBalance?: number | null; delta?: number | null;
         };
         if (d.status === "done") {
           if (d.type === "fatura") {
             settleBatchItem(id, { status: "done", kind: "fatura", cardLabel: d.cardLabel ?? "cartão", comprasCount: d.comprasCount ?? 0 }, []);
           } else {
-            const recon = d.verification === "nao_conferido" ? { verification: "nao_conferido" as const, importId: id } : undefined;
+            const unverified = d.verification === "nao_conferido";
+            const recon = unverified ? { verification: "nao_conferido" as const, importId: id } : undefined;
             const rows = jobTxToRows(d.transactions ?? [], recon);
             autoDeselectDuplicates(rows);
-            settleBatchItem(id, { status: "done", kind: "account", accountCount: rows.length }, rows);
+            // Carry the per-file reconciliation result so the merged review can
+            // show this file's own delta (read straight from the job doc).
+            settleBatchItem(id, {
+              status: "done", kind: "account", accountCount: rows.length,
+              unverified,
+              readBalance: d.readBalance ?? null,
+              declaredBalance: d.declaredBalance ?? null,
+              delta: d.delta ?? null,
+            }, rows);
           }
         } else if (d.status === "failed") {
           settleBatchItem(id, {
@@ -2342,13 +2360,29 @@ function WorkspaceApp({
         <BatchModal
           items={importState.items}
           accountRows={importState.accountRows}
-          onReview={() => setImportState({
-            phase: "preview",
-            rows: importState.accountRows,
-            // Merged review: a generic warning if any row didn't reconcile (the
-            // per-import delta lives on each job; not aggregated here).
-            recon: importState.accountRows.some((r) => r.verification === "nao_conferido") ? { kind: "no-total" } : undefined,
-          })}
+          onReview={() => {
+            // One warning PER FILE — each extrato carries its own delta (read
+            // from its job doc). NEVER sum balances/deltas across files: each
+            // reconciles against its own declared total. Label "Extrato N" só
+            // quando há mais de um extrato (job único = igual à rota única).
+            const accountItems = importState.items.filter((it) => it.kind === "account");
+            const multi = accountItems.length > 1;
+            const recons: ReconWarn[] = accountItems.flatMap((it, i): ReconWarn[] => {
+              const label = multi ? `Extrato ${i + 1}` : undefined;
+              // Gate = delta numérico presente (mesma condição/forma da rota única).
+              if (it.delta != null && it.readBalance != null && it.declaredBalance != null) {
+                return [{ kind: "delta" as const, label, readBRL: formatCurrency(it.readBalance), declaredBRL: formatCurrency(it.declaredBalance), deltaBRL: formatCurrency(Math.abs(it.delta)) }];
+              }
+              // Só "no-total" quando não há delta nem saldo declarado pra conferir.
+              if (it.unverified) return [{ kind: "no-total" as const, label }];
+              return [];
+            });
+            setImportState({
+              phase: "preview",
+              rows: importState.accountRows,
+              recons: recons.length ? recons : undefined,
+            });
+          }}
           onOpenCards={() => { localStorage.setItem("fincheck_workspace", workspace.id); setImportState(null); router.push("/cards"); }}
           onClose={() => setImportState(null)}
         />
@@ -4029,6 +4063,10 @@ function ImportModal({
   const selectedCount = rows.filter((r) => r.selected).length;
   const error = state.phase === "preview" ? state.error : undefined;
   const recon = state.phase === "preview" ? state.recon : undefined;
+  // Single-file route feeds `recon` (one warning, no label); batch route feeds
+  // `recons` (one per file). Normalize to a list so the SAME warning renders for
+  // both — single-file stays a 1-item list = identical behavior.
+  const reconList: ReconWarn[] = state.phase === "preview" && state.recons ? state.recons : (recon ? [recon] : []);
 
   const categoriesFor = (type: "income" | "expense") => {
     if (type === "income") return [...CATEGORIES].sort();
@@ -4162,24 +4200,28 @@ function ImportModal({
                   {error}
                 </div>
               )}
-              {recon && (
+              {reconList.length > 0 && (
                 <div style={{ marginBottom: 14 }}>
-                  <div
-                    style={{
-                      background: "rgba(184,245,90,0.07)",
-                      border: "1px solid rgba(184,245,90,0.25)",
-                      borderRadius: 12,
-                      padding: "12px 14px",
-                      fontSize: 12.5,
-                      color: "rgba(255,255,255,0.72)",
-                      lineHeight: 1.5,
-                      marginBottom: 10,
-                    }}
-                  >
-                    {recon.kind === "delta"
-                      ? `Importei teus lançamentos. Só não bateu o total: li ${recon.readBRL}, teu banco diz ${recon.declaredBRL} — faltou ${recon.deltaBRL}. Confere a lista e, se estiver tudo certo, confirma.`
-                      : "Importei teus lançamentos, mas não achei o total pra conferir. Dá uma olhada na lista e confirma se está tudo aí."}
-                  </div>
+                  {reconList.map((w, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        background: "rgba(184,245,90,0.07)",
+                        border: "1px solid rgba(184,245,90,0.25)",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                        fontSize: 12.5,
+                        color: "rgba(255,255,255,0.72)",
+                        lineHeight: 1.5,
+                        marginBottom: 10,
+                      }}
+                    >
+                      {w.label ? <strong style={{ color: "#fff" }}>{w.label}: </strong> : null}
+                      {w.kind === "delta"
+                        ? `Importei teus lançamentos. Só não bateu o total: li ${w.readBRL}, teu banco diz ${w.declaredBRL} — faltou ${w.deltaBRL}. Confere a lista e, se estiver tudo certo, confirma.`
+                        : "Importei teus lançamentos, mas não achei o total pra conferir. Dá uma olhada na lista e confirma se está tudo aí."}
+                    </div>
+                  ))}
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(184,245,90,0.1)", border: "1px solid rgba(184,245,90,0.3)", borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: G }}>
                     Confira estes lançamentos
                   </span>
