@@ -46,3 +46,20 @@ referenciar o arquivo pelo caminho. Manter o SALVO_CONTEXT enxuto (alvo < 200 li
 Apresentar a decisão de arquitetura e as consequências downstream **antes** de codar
 mudanças não triviais. Consolidar mudanças relacionadas num passo só. Sempre preservar
 o design system.
+
+## Decisão — Completude de extração bank-agnostic (jun/2026)
+- Raiz do churn no realMonth: extração LLM omite linhas em silêncio em extratos
+  longos e a re-extração era pulada na falha de totais (sentinela -1) → omissão
+  persistia (ex.: 79 de 110 transações lidas, delta fantasma de ~R$2,2k).
+- Fix bank-agnostic: auditoria de completude por dia usando subtotais declarados
+  ("Total de entradas/saídas" por data) + totais globais como âncoras. Compara por
+  sinal e valor o extraído vs declarado; dia curto → re-extração Claude escopada só
+  no trecho do dia, bounded (1x/dia, cap 8 dias/job).
+- Subtotais e totais declarados são ÂNCORAS, nunca transações (igual SALDO DO DIA).
+- Subtotal de fluxo por dia ≠ checkpoint de saldo: auditoria é camada nova
+  pré-reconcile; reconcileLedger e os 3 estados ficam inalterados, sobre ledger completo.
+- RDB/Cofrinho conta na completude (linha real do ledger), mas segue neutro no
+  diagnóstico. Cartão segue lente separada.
+- nao_conferido + delta só após a recuperação falhar → delta passa a ser real.
+- Adapter determinístico do Nubank: otimização deferida em cima dessa base
+  (determinístico-primeiro / Claude-fallback, padrão Mercado Pago).

@@ -13,6 +13,7 @@ import {
   reconcileLedger,
   classifyServer,
   isInternalTransfer,
+  parseBRCentavosSrv,
   IMPORT_CATEGORIES,
   buildCategorySystemPrompt,
   buildCategoryUserMessage,
@@ -595,66 +596,195 @@ function assembleMerged(
   };
 }
 
+// ─── Completeness recovery (bank-agnostic, pre-reconciliation) ───────────────
+// LLM extraction silently drops lines on long statements. BEFORE reconciling,
+// audit each day's extracted flow against the DECLARED per-day subtotals
+// ("Total de entradas/saídas" under each date) and re-extract only the days that
+// came up short. Declared subtotals/totals are ANCHORS — never transactions
+// (same treatment as SALDO DO DIA), and kept SEPARATE from balance checkpoints
+// (subtotal de fluxo ≠ saldo corrente). Bounded: 1 re-extraction per short day,
+// max 8 days/job. reconcileLedger and the 3 states are untouched — they run on
+// the completed ledger.
+const COMPLETENESS_TOL_CENTS = 2;
+const MAX_REEXTRACT_DAYS = 8;
+const PT_MONTH: Record<string, number> = {
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+};
+// Subtotal/balance ANCHOR lines — never a real transaction.
+const ANCHOR_LINE = /^(total\s+de\s+(entradas|sa[ií]das)|saldo\s+(inicial|final|do\s+dia|anterior|em\s+conta))/i;
+
+// "MM-DD" key from a line carrying a date (DD/MM[/YYYY] or "DD mmm").
+function dayKeyOf(line: string): string | null {
+  let m = line.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-]\d{2,4})?\b/);
+  if (m) return `${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  m = line.match(/\b(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)/i);
+  if (m) { const mm = PT_MONTH[m[2].toLowerCase().slice(0, 3)]; return `${String(mm).padStart(2, "0")}-${m[1].padStart(2, "0")}`; }
+  return null;
+}
+const txDayKey = (t: { date: string }): string => (t.date ?? "").slice(5); // "YYYY-MM-DD" → "MM-DD"
+
+type FlowAnchors = {
+  perDay: Map<string, { entradasCents: number; saidasCents: number }>; // key "MM-DD"
+  globalEntradasCents?: number;
+  globalSaidasCents?: number;
+};
+
+// Parse declared flow subtotals. A subtotal counts as PER-DAY only when a date
+// line appeared within the last few lines (fresh context); otherwise it's a
+// document-level total (used only as a backstop). Never touches transactions or
+// balance checkpoints.
+function parseFlowAnchors(text: string): FlowAnchors {
+  const lines = text.split("\n");
+  const perDay = new Map<string, { entradasCents: number; saidasCents: number }>();
+  let curKey: string | null = null;
+  let sinceDate = 999;
+  let globalEntradasCents: number | undefined;
+  let globalSaidasCents: number | undefined;
+  for (const raw of lines) {
+    const line = raw.trim();
+    const dk = dayKeyOf(line);
+    if (dk) { curKey = dk; sinceDate = 0; } else { sinceDate++; }
+    const ent = line.match(/total\s+de\s+entradas[^0-9R-]*(R?\$?\s*[\d.,]+)/i);
+    const sai = line.match(/total\s+de\s+sa[ií]das[^0-9R−-]*([-−]?\s*R?\$?\s*[\d.,]+)/i);
+    if (ent || sai) {
+      const fresh = curKey && sinceDate <= 8;
+      if (fresh) {
+        const e = perDay.get(curKey!) ?? { entradasCents: 0, saidasCents: 0 };
+        if (ent) e.entradasCents = Math.abs(parseBRCentavosSrv(ent[1]));
+        if (sai) e.saidasCents = Math.abs(parseBRCentavosSrv(sai[1]));
+        perDay.set(curKey!, e);
+      } else {
+        if (ent) globalEntradasCents = Math.abs(parseBRCentavosSrv(ent[1]));
+        if (sai) globalSaidasCents = Math.abs(parseBRCentavosSrv(sai[1]));
+      }
+    }
+  }
+  return { perDay, globalEntradasCents, globalSaidasCents };
+}
+
+type Tx = NonNullable<ParsedClaudeResponse["transactions"]>[number];
+// Drop any anchor line that leaked into the ledger (defensive — never a tx).
+function stripAnchorTxs(txs: Tx[]): Tx[] {
+  return txs.filter((t) => !ANCHOR_LINE.test((t.description ?? "").trim()));
+}
+function sumBySign(txs: Tx[]): { entradasCents: number; saidasCents: number } {
+  let entradasCents = 0, saidasCents = 0;
+  for (const t of txs) {
+    const c = Math.round(Math.abs(t.amount) * 100);
+    if (t.type === "income") entradasCents += c; else saidasCents += c;
+  }
+  return { entradasCents, saidasCents };
+}
+function dayShortfall(dayTxs: Tx[], decl: { entradasCents: number; saidasCents: number }): number {
+  const ext = sumBySign(dayTxs);
+  return Math.max(0, decl.entradasCents - ext.entradasCents) + Math.max(0, decl.saidasCents - ext.saidasCents);
+}
+// Raw text of a single day: from its first date line to the next different-day line.
+function sliceDay(text: string, mmdd: string): string | null {
+  const lines = text.split("\n");
+  let start = -1, end = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const dk = dayKeyOf(lines[i]);
+    if (dk === mmdd && start === -1) start = i;
+    else if (start !== -1 && dk && dk !== mmdd) { end = i; break; }
+  }
+  return start === -1 ? null : lines.slice(start, end).join("\n");
+}
+
+async function recoverCompleteness(
+  client: Anthropic, text: string, merged: ParsedClaudeResponse, filename?: string
+): Promise<ParsedClaudeResponse> {
+  let txs = stripAnchorTxs(merged.transactions ?? []);
+  const removed = (merged.transactions?.length ?? 0) - txs.length;
+  const anchors = parseFlowAnchors(text);
+
+  // No per-day anchors → at most a global backstop (can't target a day; let
+  // reconcileLedger flag it honestly). No anchors at all → pure no-op.
+  if (anchors.perDay.size === 0) {
+    if (anchors.globalEntradasCents != null || anchors.globalSaidasCents != null) {
+      const ext = sumBySign(txs);
+      const short =
+        (anchors.globalEntradasCents != null && ext.entradasCents < anchors.globalEntradasCents - COMPLETENESS_TOL_CENTS) ||
+        (anchors.globalSaidasCents != null && ext.saidasCents < anchors.globalSaidasCents - COMPLETENESS_TOL_CENTS);
+      console.log(`[completeness] global-only anchors, ${short ? "SHORT" : "ok"}, removed ${removed} anchor row(s)`);
+    } else {
+      console.log(`[completeness] no flow anchors found, removed ${removed} anchor row(s) — no-op`);
+    }
+    return { ...merged, transactions: txs };
+  }
+
+  // Per-line-balance statements (Mercado Pago-style) reconcile by line chain —
+  // don't reorder them; defer to that path.
+  const withBal = txs.filter((t) => t.balance != null).length;
+  if (txs.length > 0 && withBal >= Math.ceil(txs.length * 0.8)) {
+    console.log(`[completeness] per-line balance present — deferring to line chain (no-op)`);
+    return { ...merged, transactions: txs };
+  }
+
+  const shortDays: string[] = [];
+  for (const [mmdd, decl] of anchors.perDay) {
+    if (decl.entradasCents <= 0 && decl.saidasCents <= 0) continue;
+    if (dayShortfall(txs.filter((t) => txDayKey(t) === mmdd), decl) > COMPLETENESS_TOL_CENTS) shortDays.push(mmdd);
+  }
+  console.log(`[completeness] ${anchors.perDay.size} declared day(s), ${shortDays.length} short, removed ${removed} anchor row(s)`);
+
+  const header = text.split("\n").slice(0, 3).join("\n"); // período/banco p/ inferir ano
+  let reextracted = 0;
+  for (const mmdd of shortDays) {
+    if (reextracted >= MAX_REEXTRACT_DAYS) break;
+    const body = sliceDay(text, mmdd);
+    if (!body) continue;
+    reextracted++;
+    let dayTxs: Tx[];
+    try {
+      const r = await callClaudeExtraction(client, `${header}\n${body}`, "text/plain", filename);
+      dayTxs = stripAnchorTxs(r.transactions ?? []).filter((t) => txDayKey(t) === mmdd);
+    } catch { continue; }
+    const decl = anchors.perDay.get(mmdd)!;
+    const orig = txs.filter((t) => txDayKey(t) === mmdd);
+    // Keep whichever day-set is MORE complete (smaller shortfall vs declared).
+    if (dayShortfall(dayTxs, decl) < dayShortfall(orig, decl)) {
+      txs = txs.filter((t) => txDayKey(t) !== mmdd).concat(dayTxs);
+    }
+  }
+  if (reextracted > 0) console.log(`[completeness] re-extracted ${reextracted} day(s)`);
+  return { ...merged, transactions: txs };
+}
+
 async function extractTextInChunks(
   client: Anthropic,
   text: string,
   filename?: string
 ): Promise<ParsedClaudeResponse> {
   const chunks = splitTextIntoChunks(text);
+  let merged: ParsedClaudeResponse;
 
-  // Small statement → one call. Retry once if it doesn't reconcile.
   if (chunks.length === 1) {
-    let parsed = await callClaudeExtraction(client, text, "text/plain", filename);
-    if (!reconcileParsed(parsed).ok) {
+    // Small statement → one call. Retry once if it doesn't reconcile.
+    merged = await callClaudeExtraction(client, text, "text/plain", filename);
+    if (!reconcileParsed(merged).ok) {
       const retry = await callClaudeExtraction(client, text, "text/plain", filename);
-      if (reconcileParsed(retry).ok) parsed = retry;
+      if (reconcileParsed(retry).ok) merged = retry;
     }
-    return parsed;
-  }
-
-  // Sequential extraction: the output-token throttle spaces the calls to stay
-  // under the Tier 1 budget. Parallelism wouldn't help — the per-minute rate
-  // cap is the floor, not concurrency. Optimize for never failing, not speed.
-  const perChunk: Array<NonNullable<ParsedClaudeResponse["transactions"]>> = [];
-  const headers: ParsedClaudeResponse[] = [];
-  for (const chunk of chunks) {
-    const r = await callClaudeExtraction(client, chunk, "text/plain", filename);
-    headers.push(r);
-    perChunk.push(r.transactions ?? []);
-  }
-
-  let merged = assembleMerged(perChunk, headers);
-  const rec = reconcileParsed(merged);
-
-  // Targeted retry: a broken balance points at the region that dropped (or
-  // misread) a transaction. Map each suspect tx back to its chunk via cumulative
-  // offsets, plus the chunk immediately before it (a missing tx makes the NEXT
-  // balance look wrong, so the gap often sits at the boundary). Re-extract only
-  // those chunks — ~2.5K output each, not the whole document. "partial" only if
-  // it still doesn't reconcile after this.
-  if (!rec.ok && rec.suspectIndices.length > 0) {
-    const affected = new Set<number>();
-    for (const idx of rec.suspectIndices) {
-      if (idx < 0) continue; // sentinel from the totals strategy — not a tx index
-      let acc = 0;
-      for (let ci = 0; ci < perChunk.length; ci++) {
-        if (idx < acc + perChunk[ci].length) {
-          affected.add(ci);
-          if (ci > 0) affected.add(ci - 1);
-          break;
-        }
-        acc += perChunk[ci].length;
-      }
-    }
-    for (const ci of affected) {
-      const r = await callClaudeExtraction(client, chunks[ci], "text/plain", filename);
-      headers[ci] = r;
-      perChunk[ci] = r.transactions ?? [];
+  } else {
+    // Sequential extraction: the output-token throttle spaces the calls to stay
+    // under the Tier 1 budget. Parallelism wouldn't help — the per-minute rate
+    // cap is the floor, not concurrency. Optimize for never failing, not speed.
+    const perChunk: Array<NonNullable<ParsedClaudeResponse["transactions"]>> = [];
+    const headers: ParsedClaudeResponse[] = [];
+    for (const chunk of chunks) {
+      const r = await callClaudeExtraction(client, chunk, "text/plain", filename);
+      headers.push(r);
+      perChunk.push(r.transactions ?? []);
     }
     merged = assembleMerged(perChunk, headers);
   }
 
-  return merged;
+  // Completeness layer (bank-agnostic): audit per-day declared subtotals and
+  // re-extract short days. Replaces the old balance-suspect targeted retry (which
+  // was SKIPPED on the totals-sentinel -1, so dropped lines were never
+  // recovered). No-op when there are no flow anchors. reconcileLedger unchanged.
+  return recoverCompleteness(client, text, merged, filename);
 }
 
 async function alertJobFailure(
