@@ -63,3 +63,22 @@ o design system.
 - nao_conferido + delta só após a recuperação falhar → delta passa a ser real.
 - Adapter determinístico do Nubank: otimização deferida em cima dessa base
   (determinístico-primeiro / Claude-fallback, padrão Mercado Pago).
+
+## Decisão — Reserva/poupança real-no-ledger + neutro-no-diagnóstico (jun/2026)
+- Extração trata movimento interno de reserva/poupança como real-no-ledger + neutro-no-
+  diagnóstico, bank-agnostic (semântico). Substituiu a regra format-specific "ignorar
+  reservado/retirado" que dropava linhas e quebrava a cadeia saldo-por-linha (MP) →
+  nao_conferido/churn no fallback. Validado na POC, 3 modelos, estável.
+- Dois pontos em functions: `buildSystemPrompt` default = 'neutral' ('ignore' mantido
+  válido p/ reversão); `isInternalTransfer` generalizado (cofrinho/caixinha/dinheiro
+  reservado-retirado/CDB/RDB/aplicação-resgate) → o `internal:true` neutraliza no score.
+- Reconciliação inalterada: a linha entra no ledger (conta na cadeia/totais), só sai do
+  diagnóstico. Cartão segue lente separada.
+
+## Decisão — Throughput de extração: throttle no teto real + chunks paralelos (jun/2026)
+- O throttle era 7.500 output tok/min (~9% do teto real). Limite REAL da conta (lido do
+  header): 80K output / 500K input / 1000 req por min. Subiu pra guard a **72K** (90%) +
+  chunks extraídos em **PARALELO** (cap 5, ordem preservada); retry/backoff do SDK no 429.
+- Stress (extrato 304 linhas, Claude): **321s → 76s (4,2×)**, mesma contagem de tx e mesma
+  reconciliação (sem perder accuracy). `OUTPUT_TOKENS_PER_MIN` / `EXTRACT_CONCURRENCY=1`
+  reproduzem o comportamento antigo. reconcileLedger e os 3 estados inalterados.

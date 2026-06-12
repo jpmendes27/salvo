@@ -51,8 +51,35 @@ function checkVerifToken(token: string, uid: string, enteredCode: string, secret
   }
 }
 
-function buildSystemPrompt(): string {
+export function buildSystemPrompt(cofrinhoMode: "ignore" | "neutral" = "neutral"): string {
   const today = new Date().toISOString().slice(0, 10);
+  // cofrinhoMode: 'neutral' = DEFAULT de produção (bank-agnostic, semântico — movimento
+  // interno de reserva/poupança entra no ledger e é neutro no diagnóstico). Validado na
+  // POC (3 modelos: destravou a cadeia saldo-por-linha do MP, não regrediu o Itaú).
+  // 'ignore' = regra antiga format-specific (mantida válida p/ reversão e p/ o harness).
+  const cofrinhoRules = cofrinhoMode === "neutral"
+    ? `- IGNORAR: movimento que NÃO representa receita nem gasto real:
+  • "Reembolso" sem contexto de terceiro — estorno interno do banco
+  • "Estorno" — cancelamento de operação anterior (compensa operação prévia)
+  • Qualquer linha com amount = 0
+- MOVIMENTO INTERNO DE RESERVA/POUPANÇA — julgue pelo SIGNIFICADO, não por palavra exata:
+  é o dinheiro do próprio dono mudando de bolso dentro da mesma instituição (reservar/
+  desreservar, guardar/resgatar, aplicar/resgatar em reserva ou investimento). Exemplos de
+  QUALQUER banco/carteira: "Caixinha"/"Caixinhas" (Nubank), "Cofrinho" (PicPay), "Dinheiro
+  reservado", "Dinheiro retirado", aplicação/resgate de CDB, RDB, poupança, tesouro ou fundo.
+  • NÃO é IGNORAR: são transações REAIS — EXTRAIA SEMPRE, NUNCA descarte. Mexem no saldo e
+    entram na reconciliação. Classifique pelo sinal (guardar/reservar/aplicar = SAIDA;
+    resgatar/retirar/desreservar = ENTRADA). São neutras no diagnóstico (nem gasto nem
+    receita), mas SEMPRE presentes no ledger.`
+    : `- IGNORAR: movimento interno que NÃO representa receita nem gasto real:
+  • "Dinheiro reservado" — reserva para pagamento futuro, não saiu de facto
+  • "Dinheiro retirado" — transferência interna entre contas do mesmo banco/carteira
+  • "Reembolso" sem contexto de terceiro — estorno interno do banco
+  • "Estorno" — cancelamento de operação anterior (compensa operação prévia)
+  • Qualquer linha com amount = 0
+- NÃO é IGNORAR (são transações REAIS, classifique pelo sinal): aplicação/resgate de
+  cofrinho, CDB, RDB, poupança, tesouro ou fundo. Mexem no saldo e entram normalmente
+  (resgate = ENTRADA, aplicação = SAIDA). NÃO descarte essas linhas.`;
   return `Hoje é ${today}. Use esta data como referência para inferir o ano quando as datas do documento não tiverem ano explícito (ex: "06 MAI" → use o ano corrente ou o mais próximo cronologicamente).
 
 Você é um extrator especializado de transações financeiras de extratos bancários brasileiros.
@@ -98,15 +125,7 @@ Dado um arquivo (PDF, imagem ou CSV), extraia TODAS as transações financeiras 
 === REGRAS PARA classification ===
 - ENTRADA: dinheiro que entrou de fora (salário, PIX recebido, rendimento, reembolso de terceiro real)
 - SAIDA: dinheiro que saiu para fora (compra, pagamento, PIX enviado, transferência para outro banco)
-- IGNORAR: movimento interno que NÃO representa receita nem gasto real:
-  • "Dinheiro reservado" — reserva para pagamento futuro, não saiu de facto
-  • "Dinheiro retirado" — transferência interna entre contas do mesmo banco/carteira
-  • "Reembolso" sem contexto de terceiro — estorno interno do banco
-  • "Estorno" — cancelamento de operação anterior (compensa operação prévia)
-  • Qualquer linha com amount = 0
-- NÃO é IGNORAR (são transações REAIS, classifique pelo sinal): aplicação/resgate de
-  cofrinho, CDB, RDB, poupança, tesouro ou fundo. Mexem no saldo e entram normalmente
-  (resgate = ENTRADA, aplicação = SAIDA). NÃO descarte essas linhas.
+${cofrinhoRules}
 
 === REGRAS PARA balance (saldo na LINHA da transação) ===
 - "balance": o saldo APÓS esta transação, SÓ quando o documento imprime um saldo
@@ -215,7 +234,21 @@ async function parseOrRepairJson(
 // (maxRetries), which honours the Retry-After header. The goal is zero failures,
 // not speed — a ~2-2.5min background job for a 304-tx statement is invisible to
 // the user, a 429 is not.
-const OUTPUT_TOKENS_PER_MIN = 7500; // 8K hard limit minus safety margin
+// Throttle = GUARD at ~90% of the REAL account ceiling (header: 80K output tok/min),
+// not the old 7500 (~9% of real — a stale "Tier 1 = 8K" assumption that strangled the
+// pipeline). Env-overridable for A/B latency tests; the SDK's maxRetries handles any 429.
+const OUTPUT_TOKENS_PER_MIN_DEFAULT = 72000;
+function outputTokensPerMin(): number {
+  const v = Number(process.env.OUTPUT_TOKENS_PER_MIN);
+  return Number.isFinite(v) && v > 0 ? v : OUTPUT_TOKENS_PER_MIN_DEFAULT;
+}
+// Parallel chunk extraction concurrency cap — far under the real 1000 req/min ceiling.
+// Env-overridable (EXTRACT_CONCURRENCY=1 reproduces the old sequential behavior).
+const EXTRACT_CONCURRENCY_DEFAULT = 5;
+function extractConcurrency(): number {
+  const v = Number(process.env.EXTRACT_CONCURRENCY);
+  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : EXTRACT_CONCURRENCY_DEFAULT;
+}
 const tokenLog: Array<{ t: number; tokens: number }> = [];
 
 function recentOutputTokens(): number {
@@ -226,7 +259,7 @@ function recentOutputTokens(): number {
 
 async function throttleOutput(estimatedTokens: number): Promise<void> {
   // Block until the trailing-60s usage plus this request fits the budget.
-  while (recentOutputTokens() + estimatedTokens > OUTPUT_TOKENS_PER_MIN && tokenLog.length) {
+  while (recentOutputTokens() + estimatedTokens > outputTokensPerMin() && tokenLog.length) {
     const waitMs = Math.max(1000, tokenLog[0].t + 60_000 - Date.now());
     await new Promise((r) => setTimeout(r, Math.min(waitMs, 15_000)));
   }
@@ -751,32 +784,41 @@ async function recoverCompleteness(
   return { ...merged, transactions: txs };
 }
 
-async function extractTextInChunks(
+export async function extractTextInChunks(
   client: Anthropic,
   text: string,
-  filename?: string
+  filename?: string,
+  // Modelo BASE da extração, injetável. Default = Claude (produção intacta).
+  // A recoverCompleteness (re-extração corretiva) segue SEMPRE no Claude (client).
+  baseExtract?: (t: string) => Promise<ParsedClaudeResponse>
 ): Promise<ParsedClaudeResponse> {
+  const baseDo = (t: string) =>
+    baseExtract ? baseExtract(t) : callClaudeExtraction(client, t, "text/plain", filename);
   const chunks = splitTextIntoChunks(text);
   let merged: ParsedClaudeResponse;
 
   if (chunks.length === 1) {
     // Small statement → one call. Retry once if it doesn't reconcile.
-    merged = await callClaudeExtraction(client, text, "text/plain", filename);
+    merged = await baseDo(text);
     if (!reconcileParsed(merged).ok) {
-      const retry = await callClaudeExtraction(client, text, "text/plain", filename);
+      const retry = await baseDo(text);
       if (reconcileParsed(retry).ok) merged = retry;
     }
   } else {
-    // Sequential extraction: the output-token throttle spaces the calls to stay
-    // under the Tier 1 budget. Parallelism wouldn't help — the per-minute rate
-    // cap is the floor, not concurrency. Optimize for never failing, not speed.
-    const perChunk: Array<NonNullable<ParsedClaudeResponse["transactions"]>> = [];
-    const headers: ParsedClaudeResponse[] = [];
-    for (const chunk of chunks) {
-      const r = await callClaudeExtraction(client, chunk, "text/plain", filename);
-      headers.push(r);
-      perChunk.push(r.transactions ?? []);
-    }
+    // Parallel extraction, bounded concurrency. The real ceiling (80K output tok/min,
+    // 1000 req/min) is far above one statement's needs, so chunks run concurrently
+    // instead of one-at-a-time; the throttle stays as a guard and the SDK retries 429s.
+    // Order is preserved (indexed pool) so the balance chain and merge stay intact.
+    const results: ParsedClaudeResponse[] = new Array(chunks.length);
+    let next = 0;
+    const worker = async () => {
+      for (let i = next++; i < chunks.length; i = next++) {
+        results[i] = await baseDo(chunks[i]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(extractConcurrency(), chunks.length) }, worker));
+    const headers = results;
+    const perChunk = results.map((r) => r.transactions ?? []);
     merged = assembleMerged(perChunk, headers);
   }
 

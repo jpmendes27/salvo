@@ -15,6 +15,7 @@
     "resend": "^6.12.3"
   },
   "devDependencies": {
+    "@google/genai": "^2.8.0",
     "typescript": "^5.0.0"
   },
   "engines": {

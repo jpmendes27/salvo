@@ -409,11 +409,16 @@ const MP_IGNORE_PATTERNS = [
 // reconciliação), mas NEUTRAS no diagnóstico (dinheiro do próprio dono mudando
 // de bolso — nem gasto nem receita). NÃO confundir com PIX/transferência a
 // terceiro (essas continuam entrada/saída normal).
+// Bank-agnostic por CONCEITO (não por banco): reserva/poupança do próprio dono mudando
+// de bolso. Cobre as features nomeadas (Cofrinho/PicPay, Caixinha/Nubank, "Dinheiro
+// reservado/retirado"/MP) + aplicação/resgate de investimento/reserva de qualquer banco.
 const INTERNAL_TRANSFER_PATTERNS = [
   /cofrinho/,
+  /caixinha/,
+  /dinheiro\s+(reservado|retirado)/,
   /\bcdb\b/,
   /\brdb\b/,
-  /(aplicac\w*|resgate)\s*(de\s+)?(cofrinho|cdb|rdb|poupan|tesouro|investiment|fundo|reserva)/,
+  /(aplicac\w*|resgate)\s*(de\s+)?(cofrinho|caixinha|cdb|rdb|poupan|tesouro|investiment|fundo|reserva)/,
   /(aplicac\w*|resgate)\s+(automat\w*|program\w*)/,
   /poupan\w*\s+(aplicac|resgate)/,
 ];

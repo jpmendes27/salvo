@@ -19,7 +19,8 @@ número, sempre degradar honestamente. Vale pra mensagem e pra integridade de da
 ## Stack
 Next.js 14 estático (GitHub Pages) · Firebase (Auth, Firestore, Functions v2/Cloud Run,
 project `fincheck-pro`, região `us-central1`) · Claude (Anthropic API) · WhatsApp
-(Evolution API) · e-mail (Resend). Conta Anthropic Nível 1 (gargalo: 8K output tok/min).
+(Evolution API) · e-mail (Resend). Limite real da conta Anthropic (header): 80K output
+tok/min · 500K input · 1000 req/min. O pipeline usa guard a 72K + chunks paralelos.
 
 **Identificadores imutáveis (NÃO renomear, nem em rebrand):** project id `fincheck-pro`,
 domínios, service accounts.
@@ -57,7 +58,7 @@ tende a zero conforme o cache enche.
 
 **Upload de múltiplos arquivos:** um job por arquivo; cada um se autodetecta (extrato vs
 fatura) e roteia sozinho; resumo honesto por arquivo; **idempotência** (reimportar atualiza,
-não duplica); concorrência limitada (rate limit Nível 1).
+não duplica); concorrência limitada (cap por instância, abaixo do teto real da conta).
 
 ## Arquitetura — Feature de cartão (lente separada)
 **INEGOCIÁVEL — cartão é uma lente separada da conta.** Compras de cartão (`source='card'`)

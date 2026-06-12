@@ -11,3 +11,10 @@ firestore-debug.log
 
 # Contexto local sensível (estratégia, bugs em aberto) — não publicar
 SALVO_CONTEXT.local.md
+
+# POC de extração (dados reais com PII — nunca no repo) + golden/fixtures
+poc_gemini/
+fixtures/golden/
+# Harness do bench com dado financeiro real embutido (merchants, valores, nº de conta)
+scripts/poc-gabarito.ts
+scripts/poc-extraction.ts
