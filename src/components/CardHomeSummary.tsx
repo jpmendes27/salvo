@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { CreditCard, ArrowRight } from "lucide-react";
 import { colors, radius, typography } from "@/lib/design-system";
 import { currentMonthKey, formatCurrency } from "@/lib/money";
-import { useCardData, currentFatura, limitInfo } from "@/lib/cards";
+import { useCardData, currentFatura, faturaForPeriod, limitInfo } from "@/lib/cards";
 import { detectBank } from "@/lib/banks";
 import type { Card, Fatura } from "@/lib/types";
 
@@ -28,17 +28,11 @@ function vencDay(f: Fatura): number | null {
   return Number.isFinite(d) ? d : null;
 }
 
-export function CardHomeSummary({ workspaceId }: { workspaceId: string }) {
+export function CardHomeSummary({ workspaceId, monthKey }: { workspaceId: string; monthKey: string }) {
   const router = useRouter();
   const { cards, faturas, loading } = useCardData(workspaceId);
 
   if (loading || cards.length === 0) return null;
-
-  const ordered = [...cards].sort((a, b) => {
-    const fa = currentFatura(faturas, a.id)?.period ?? "";
-    const fb = currentFatura(faturas, b.id)?.period ?? "";
-    return fb.localeCompare(fa);
-  });
 
   const openCards = (cardId?: string) => {
     localStorage.setItem("fincheck_workspace", workspaceId);
@@ -61,6 +55,78 @@ export function CardHomeSummary({ workspaceId }: { workspaceId: string }) {
       </button>
     </div>
   );
+
+  // ── Mês consultado ≠ atual: seleciona por faturaPeriod (competência), igual /cards —
+  //    NUNCA mês-calendário. Sem fatura nesse período → vazio honesto, nunca dado de outro mês.
+  if (monthKey !== currentMonthKey()) {
+    const periodBills = cards
+      .map((card) => ({ card, fatura: faturaForPeriod(faturas, card.id, monthKey) }))
+      .filter((e): e is { card: Card; fatura: Fatura } => !!e.fatura)
+      .sort((a, b) => b.fatura.totalAPagar - a.fatura.totalAPagar);
+
+    if (periodBills.length === 0) {
+      return (
+        <section style={{ ...box(), padding: "16px 18px" }}>
+          {Header}
+          <div style={{ fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.5 }}>
+            Sem fatura em {monthName(monthKey)}.
+          </div>
+        </section>
+      );
+    }
+
+    const totalPeriodo = periodBills.reduce((s, b) => s + b.fatura.totalAPagar, 0);
+    return (
+      <section style={{ ...box(), padding: "16px 18px" }}>
+        {Header}
+        <div style={{ fontSize: 12, color: colors.textMuted, fontWeight: 600 }}>
+          Fatura de {monthName(monthKey)}
+        </div>
+        <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", marginTop: 2 }}>
+          {formatCurrency(totalPeriodo)}
+        </div>
+        <div style={{ display: "grid", gap: 2, marginTop: 14 }}>
+          {periodBills.map(({ card, fatura }) => {
+            const bank = detectBank(card.bank || card.name);
+            const day = vencDay(fatura);
+            return (
+              <button
+                key={fatura.id}
+                onClick={() => openCards(card.id)}
+                style={{
+                  width: "100%", textAlign: "left", background: "transparent", border: "none",
+                  padding: "8px 0", cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                  borderBottom: `1px solid ${colors.border}`,
+                }}
+              >
+                <div style={{ width: 30, height: 30, borderRadius: 9, background: bank.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <CreditCard size={15} color={bank.glyph} strokeWidth={2} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: colors.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {card.name || card.bank}{card.last4 ? ` ••• ${card.last4}` : ""}
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>
+                    {day ? `vence dia ${day}` : "sem vencimento"}
+                  </div>
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: "-0.02em", color: colors.textPrimary }}>
+                  {formatCurrency(fatura.totalAPagar)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
+  // ── Mês atual: comportamento existente, INALTERADO ──────────────────────────
+  const ordered = [...cards].sort((a, b) => {
+    const fa = currentFatura(faturas, a.id)?.period ?? "";
+    const fb = currentFatura(faturas, b.id)?.period ?? "";
+    return fb.localeCompare(fa);
+  });
 
   // Cards with a current fatura (each fatura = one bill).
   const bills = ordered

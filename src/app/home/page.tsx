@@ -1749,7 +1749,7 @@ function WorkspaceApp({
             />
 
             {/* Cartões (lente separada — aparece quando há ≥1 cartão) */}
-            <CardHomeSummary workspaceId={workspace.id} />
+            <CardHomeSummary workspaceId={workspace.id} monthKey={showDemo ? "2026-04" : monthKey} />
 
             {/* View tabs */}
             <WsCard>
@@ -2158,7 +2158,7 @@ function WorkspaceApp({
         <UploadZone onFiles={handleFiles} onAddManual={() => setAddOpen(true)} />
 
         {/* 4b. Cartão de crédito (lente separada — aparece quando há ≥1 cartão) */}
-        <CardHomeSummary workspaceId={workspace.id} />
+        <CardHomeSummary workspaceId={workspace.id} monthKey={showDemo ? "2026-04" : monthKey} />
 
         {/* 5. Plano do mês */}
         <PlanCard

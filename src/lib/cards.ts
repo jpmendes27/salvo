@@ -56,6 +56,12 @@ export function currentFatura(faturas: Fatura[], cardId: string): Fatura | null 
     .sort((a, b) => b.period.localeCompare(a.period))[0] ?? null;
 }
 
+// Fatura de um cartão para um PERÍODO específico (faturaPeriod = competência YYYY-MM) —
+// a mesma seleção que /cards faz pela navegação de período. NUNCA filtro de mês-calendário.
+export function faturaForPeriod(faturas: Fatura[], cardId: string, period: string): Fatura | null {
+  return faturas.find((f) => f.cardId === cardId && f.period === period) ?? null;
+}
+
 export type LimitInfo = {
   total: number | null;
   usado: number | null;
