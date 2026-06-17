@@ -164,6 +164,14 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
   // a one-shot hint or a single card collapses to that card.
   const tab: string | null = selectedId ?? (ordered.length > 1 ? "all" : ordered[0]?.id ?? null);
 
+  // ?mes pedido mas SEM fatura nesse período (na aba ativa) → vazio honesto; nunca
+  // cai no período mais recente (era o bug: mes=2026-03 mostrava junho).
+  const allPeriods = [...new Set(faturas.map((f) => f.period))].sort((a, b) => b.localeCompare(a));
+  const tabPeriods = tab === "all"
+    ? allPeriods
+    : faturas.filter((f) => f.cardId === tab).map((f) => f.period).sort((a, b) => b.localeCompare(a));
+  const monthMissing = !!mes && !tabPeriods.includes(mes);
+
   if (loading) return <Shell text="Carregando..." />;
 
   return (
@@ -216,11 +224,20 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
             )}
 
             {tab === "all" ? (
-              <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} />
+              monthMissing ? (
+                <EmptyPeriodView periods={allPeriods} mes={mes!} setMes={setMes} />
+              ) : (
+                <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} />
+              )
             ) : (
               (() => {
                 const c = ordered.find((x) => x.id === tab) ?? ordered[0];
-                return c ? <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} /> : null;
+                if (!c) return null;
+                return monthMissing ? (
+                  <EmptyPeriodView periods={tabPeriods} mes={mes!} setMes={setMes} />
+                ) : (
+                  <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} />
+                );
               })()
             )}
           </>
@@ -233,10 +250,16 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
 // Period navigator (statement period = competência, NOT a calendar month).
 // Mirrors the /transactions month nav, but over the fatura periods that exist.
 function PeriodNav({ periods, current, onChange }: { periods: string[]; current: string | null; onChange: (p: string) => void }) {
-  if (!current) return null;
+  if (!current || periods.length === 0) return null;
   const idx = periods.indexOf(current);
-  const older = idx >= 0 && idx < periods.length - 1 ? periods[idx + 1] : null;
-  const newer = idx > 0 ? periods[idx - 1] : null;
+  // periods são desc (mais novo primeiro). Quando current não existe (mês sem fatura),
+  // navega pros vizinhos EXISTENTES mais próximos em vez de travar.
+  const older = idx >= 0
+    ? (idx < periods.length - 1 ? periods[idx + 1] : null)
+    : (periods.find((p) => p < current) ?? null);
+  const newer = idx >= 0
+    ? (idx > 0 ? periods[idx - 1] : null)
+    : ([...periods].reverse().find((p) => p > current) ?? null);
   const label = monthLabel(current).replace(/^./, (c) => c.toUpperCase());
   const navBtn = (enabled: boolean): React.CSSProperties => ({
     background: "transparent", border: "none", padding: 4, display: "flex",
@@ -249,6 +272,27 @@ function PeriodNav({ periods, current, onChange }: { periods: string[]; current:
       <span style={{ fontSize: 13.5, fontWeight: 700, minWidth: 130, textAlign: "center" }}>{label}</span>
       <button disabled={!newer} onClick={() => newer && onChange(newer)} style={navBtn(!!newer)} aria-label="Próxima fatura"><ChevronRight size={18} /></button>
     </div>
+  );
+}
+
+// Vazio honesto pro período pedido sem fatura — NUNCA cai no dado de outro mês.
+// Mantém a navegação pra alcançar as faturas existentes.
+function EmptyPeriodView({ periods, mes, setMes }: { periods: string[]; mes: string; setMes: (p: string) => void }) {
+  const label = monthLabel(mes).replace(/^./, (c) => c.toUpperCase());
+  return (
+    <>
+      {periods.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <PeriodNav periods={periods} current={mes} onChange={setMes} />
+        </div>
+      )}
+      <div style={{ ...cardBox(), textAlign: "center", padding: "32px 22px" }}>
+        <CreditCard size={26} color={colors.textFaint} style={{ marginBottom: 10 }} />
+        <p style={{ fontSize: 14, color: colors.textSecondary, lineHeight: 1.5 }}>
+          Sem fatura em {label}.
+        </p>
+      </div>
+    </>
   );
 }
 
