@@ -264,6 +264,12 @@ export function CardHomeSummary({ workspaceId, monthKey }: { workspaceId: string
                       <span style={{ color: colors.textSecondary, fontWeight: 700 }}>{formatCurrency(fatura.totalAPagar)}</span>
                     </div>
                   )}
+                  {/* Completude por valor — nota discreta só quando pode faltar lançamento. */}
+                  {fatura?.verification === "nao_conferido" && (
+                    <div style={{ fontSize: 10.5, color: colors.textSecondary, marginTop: 2 }}>
+                      Pode faltar um lançamento — confere a lista.
+                    </div>
+                  )}
                 </div>
               </div>
 

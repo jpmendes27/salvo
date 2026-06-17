@@ -337,6 +337,12 @@ function CardDetail({ workspaceId, card, faturas, cardTx, mes, rendaRef }: { wor
             <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em", marginTop: 2 }}>
               {formatCurrency(fatura.totalAPagar)}
             </div>
+            {/* Completude por valor — nota discreta só quando pode faltar lançamento. */}
+            {fatura.verification === "nao_conferido" && (
+              <div style={{ fontSize: 11.5, color: colors.textSecondary, marginTop: 4 }}>
+                Pode faltar um lançamento — confere a lista.
+              </div>
+            )}
           </div>
         )}
 

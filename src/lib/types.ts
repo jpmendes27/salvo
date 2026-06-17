@@ -175,6 +175,10 @@ export type Fatura = {
   totalCreditos: number;
   totalAPagar: number;   // saldo desta fatura
   vencimento?: string;   // YYYY-MM-DD
+  // Completude por valor (lente de cartão): 'verificado' (soma bateu) | 'nao_conferido'
+  // (pode faltar lançamento) | 'nao_verificavel' (atraso/rotativo ou sem total impresso).
+  verification?: "verificado" | "nao_conferido" | "nao_verificavel";
+  completenessDelta?: number; // R$ que pode faltar (só em nao_conferido)
   createdAt?: unknown;
   updatedAt?: unknown;
 };

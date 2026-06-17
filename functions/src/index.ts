@@ -25,6 +25,9 @@ import {
   buildFaturaSystemPrompt,
   parseFaturaJson,
   reconcileFatura,
+  parseFaturaNovasDespesas,
+  checkFaturaCompleteness,
+  detectFaturaAtraso,
 } from "./pdf-core";
 
 admin.initializeApp();
@@ -1997,6 +2000,14 @@ async function processFatura(
     return;
   }
 
+  // 2b ─ COMPLETENESS by value (não bloqueia). Os totais impressos sempre fecham
+  // entre si; aqui conferimos se a soma dos débitos extraídos bate com o total de
+  // novas despesas IMPRESSO. Soma abaixo → faltou lançamento (nao_conferido); sem
+  // total impresso → nao_verificavel (sem alarme). Verificado quando bate.
+  const atraso = detectFaturaAtraso(fatura.lancamentos, fatura.totals, statementText);
+  const completeness = checkFaturaCompleteness(fatura.lancamentos, parseFaturaNovasDespesas(statementText), atraso);
+  console.log(`[fatura-job] completeness: ${completeness.state} (atraso=${atraso}, anchor=${completeness.anchorCents}, sum=${completeness.sumCents}, delta=${completeness.deltaCents})`);
+
   // 3 ─ Identity & period.
   const cardId = cardIdFor(fatura.card);
   const period =
@@ -2046,6 +2057,12 @@ async function processFatura(
     totalPagamentos: t.totalPagamentos ?? 0,
     totalCreditos: t.totalCreditos ?? 0,
     totalAPagar: t.totalAPagar ?? 0,
+    // Completude por valor (lente de cartão). 'verificado' | 'nao_conferido' |
+    // 'nao_verificavel'. delta (R$) só quando nao_conferido → quanto pode faltar.
+    verification: completeness.state,
+    ...(completeness.state === "nao_conferido" && completeness.deltaCents != null
+      ? { completenessDelta: completeness.deltaCents / 100 }
+      : {}),
     ...(fatura.vencimento ? { vencimento: fatura.vencimento } : {}),
     ...(fatura.historico?.length ? { historico: fatura.historico } : {}),
     updatedAt: now,

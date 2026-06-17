@@ -27,6 +27,10 @@ exports.isCreditCardStatement = isCreditCardStatement;
 exports.buildFaturaSystemPrompt = buildFaturaSystemPrompt;
 exports.parseFaturaJson = parseFaturaJson;
 exports.reconcileFatura = reconcileFatura;
+exports.parseFaturaNovasDespesas = parseFaturaNovasDespesas;
+exports.sumPeriodDebitsCents = sumPeriodDebitsCents;
+exports.detectFaturaAtraso = detectFaturaAtraso;
+exports.checkFaturaCompleteness = checkFaturaCompleteness;
 // ─── Server-side PDF text extraction (pdfjs in Node, no worker) ──────────────
 // pdfjs-dist v5 ships ESM only. The runtime dynamic import below is wrapped in
 // new Function so TypeScript (module: commonjs) doesn't down-level it to
@@ -521,10 +525,19 @@ REGRAS:
 - "period": mês de referência da fatura (YYYY-MM). "vencimento": data de vencimento (YYYY-MM-DD).
 - totals: SaldoAnterior, TotalDespesas (soma das compras), TotalPagamentos (pagamentos recebidos), TotalCreditos (estornos/créditos), TotalAPagar (saldo desta fatura). Use os valores IMPRESSOS na fatura. null se não houver.
 - "historico": tabela de faturas anteriores (mês → total), se a fatura listar. [] se não houver.
-- "lancamentos": TODOS os lançamentos:
-  • "compra": uma compra (amount positivo). Se parcelada (ex "PARC 03/10", "3/10"), preencha parcela { atual, total }; senão parcela=null.
+- "lancamentos": TODOS os débitos e créditos do período, cada um com seu valor:
+  • "compra": QUALQUER débito novo do período — não só compras. Inclui IOF (de compra E de
+    atraso), anuidade, produtos e serviços, juros, multa, mensalidade, seguro, saque. amount
+    positivo. Se parcelada ("PARC 03/10", "3/10"), preencha parcela {atual,total} e use o
+    valor DA PARCELA do mês corrente, NUNCA o valor cheio da compra.
   • "pagamento": pagamento da fatura recebido (amount positivo).
-  • "credito": estorno/crédito/reembolso (amount positivo).
+  • "credito": estorno/crédito/reembolso/crédito de atraso (amount positivo).
+- NUNCA inclua o bloco "Compras parceladas - próximas faturas" / "próximas faturas" / "demais
+  parcelas" (parcelas de meses FUTUROS): não são lançamentos deste período, não entram.
+- Em seções que MISTURAM crédito e débito (ex. Nubank "Pagamentos e Financiamentos"), NÃO
+  assuma que tudo é crédito/pagamento: classifique CADA linha pelo PRÓPRIO sinal — valor
+  negativo = "pagamento"/"credito"; valor positivo (financiamento, Pix no crédito) = débito
+  novo do período → "compra".
 - "amount" SEMPRE positivo. "date" ISO YYYY-MM-DD.
 - "description": texto do estabelecimento, limpo (sem o "PARC X/Y", que vai em parcela).
 - Retorne APENAS o JSON puro, sem markdown, sem texto extra.`;
@@ -580,5 +593,81 @@ function reconcileFatura(totals, toleranceCents = 2) {
     return diff <= toleranceCents
         ? { ok: true }
         : { ok: false, reason: `totais não fecham (diferença de ${(diff / 100).toFixed(2)})` };
+}
+// ─── Fatura completeness by VALUE (not line count) ───────────────────────────
+// O gate de totais (reconcileFatura) só confere os totais IMPRESSOS entre si — eles
+// sempre fecham, mesmo quando a extração perde um lançamento. Esta camada confere
+// COMPLETUDE: a soma dos débitos extraídos (líquida dos créditos do período) tem que
+// bater com o "total de novas despesas" IMPRESSO. Se ficar abaixo, faltou lançamento.
+// Reconciliação ÚNICA (bank-agnostic); só a leitura da âncora tem formato por banco.
+const FATURA_COMPLETENESS_TOL_CENTS = 10; // ±R$0,10
+// Âncora = total de novas despesas do período (valor IMPRESSO). Adapter por FORMATO:
+//  • Itaú: linha única "Total desta fatura" / "Lançamentos atuais".
+//  • Nubank: "Total de compras…" + "IOF de compras internacionais" + "Outros lançamentos".
+// null quando a fatura não declara esse total → nao_verificavel (não inventa alarme).
+function parseFaturaNovasDespesas(text) {
+    const s = text.replace(/ /g, " ");
+    const g = (re) => {
+        const m = s.match(re);
+        return m ? Math.abs(parseBRCentavosSrv(m[1])) : null;
+    };
+    // Formato A — total único (Itaú e similares).
+    const single = g(/total desta fatura\s+R?\$?\s*([\d.]+,\d{2})/i) ??
+        g(/lan[çc]amentos atuais\s+R?\$?\s*([\d.]+,\d{2})/i);
+    if (single != null)
+        return single;
+    // Formato B — soma de componentes (Nubank e similares).
+    const compras = g(/total de compras[^\n]*?R\$\s*([\d.]+,\d{2})/i);
+    if (compras != null) {
+        const iofIntl = g(/IOF de compras internacionais\s+R\$\s*([\d.]+,\d{2})/i) ?? 0;
+        const outros = g(/outros lan[çc]amentos\s+R\$\s*([\d.]+,\d{2})/i) ?? 0;
+        return compras + iofIntl + outros;
+    }
+    return null;
+}
+// Σ dos débitos do período menos os créditos do período. Pagamentos NÃO entram —
+// abatem saldo anterior, não são despesa nova. Parcelado já vem com o valor da
+// parcela do mês (o bloco "próximas faturas" nunca entra no ledger).
+function sumPeriodDebitsCents(lancamentos) {
+    let s = 0;
+    for (const l of lancamentos) {
+        const c = Math.round(Math.abs(l.amount) * 100);
+        if (l.kind === "compra")
+            s += c; // débito: compra/IOF/anuidade/juros/multa
+        else if (l.kind === "credito")
+            s -= c; // crédito do período: estorno/crédito de atraso
+        // kind === "pagamento": ignorado (abatimento de saldo anterior)
+    }
+    return s;
+}
+// Atraso/rotativo DE VERDADE — detectado por LANÇAMENTOS reais + valores do resumo,
+// NUNCA pelo boilerplate de "alternativas de pagamento / rotativo / atraso" que toda
+// fatura traz no rodapé. Numa fatura em atraso a mecânica de dívida (crédito de atraso,
+// encerramento, juros de dívida) mistura débitos/créditos que não são despesa nova, então
+// a reconciliação de novas despesas não é confiável → o gate marca nao_verificavel.
+const ATRASO_LANCAMENTO = /saldo em atraso|cr[eé]dito de atraso|encerramento de d[ií]vida|juros de d[ií]vida|multa de atraso|juros do rotativo|juros de mora/i;
+function detectFaturaAtraso(lancamentos, totals, text) {
+    // (a) lançamentos reais de atraso/dívida na lista de transações.
+    if (lancamentos.some((l) => ATRASO_LANCAMENTO.test(l.description ?? "")))
+        return true;
+    // (b) saldo financiado COBRADO (valor do resumo > 0) — não a taxa do rodapé.
+    const sf = text.match(/saldo financiado\s+R?\$?\s*([\d.]+,\d{2})/i);
+    if (sf && parseBRCentavosSrv(sf[1]) > 0)
+        return true;
+    // (c) fatura anterior não quitada: saldo anterior não coberto por pagamentos+créditos.
+    const c = (v) => Math.round((v ?? 0) * 100);
+    const carry = c(totals.saldoAnterior) - c(totals.totalPagamentos) - c(totals.totalCreditos);
+    return carry > 10; // sobrou dívida do período anterior (> R$0,10)
+}
+// NUNCA recalcula o total autoritativo a partir das linhas — o impresso é a verdade.
+function checkFaturaCompleteness(lancamentos, anchorCents, atraso = false) {
+    const sumCents = sumPeriodDebitsCents(lancamentos);
+    // Atraso/rotativo OU sem total de novas despesas impresso → não verificável (sem alarme).
+    if (atraso || anchorCents == null) {
+        return { state: "nao_verificavel", anchorCents, sumCents, deltaCents: null };
+    }
+    const deltaCents = anchorCents - sumCents; // >0 → soma abaixo → faltou lançamento
+    const state = Math.abs(deltaCents) <= FATURA_COMPLETENESS_TOL_CENTS ? "verificado" : "nao_conferido";
+    return { state, anchorCents, sumCents, deltaCents };
 }
 //# sourceMappingURL=pdf-core.js.map
