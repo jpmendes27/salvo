@@ -7,12 +7,13 @@
 
 import { deleteDoc, doc, getDoc, onSnapshot, writeBatch } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { ArrowLeft, CreditCard, ChevronRight, ChevronLeft, Search, Sparkles } from "lucide-react";
+import { ArrowLeft, CreditCard, ChevronRight, Search, Sparkles } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useAuthUser } from "@/app/auth-provider";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { TxRow } from "@/components/TxRow";
+import { MonthFilter } from "@/components/MonthFilter";
 import { app, db } from "@/lib/firebase";
 import { useCardData, currentFatura, limitInfo, cardToneLine } from "@/lib/cards";
 import { detectBank } from "@/lib/banks";
@@ -132,9 +133,10 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
   );
   useEffect(() => { localStorage.removeItem("fincheck_card"); }, []);
 
-  // Selected statement period (faturaPeriod) from the URL — NOT a calendar month.
-  // Scopes the whole view. Navigation updates ?mes, mirroring /transactions.
-  const mes = params.get("mes");
+  // Mês selecionado — MÊS-CALENDÁRIO (YYYY-MM), igual à home. Default = mês vigente.
+  // O faturaPeriod é também YYYY-MM, então casar period === mes É o filtro por fatura.
+  // Navegação livre mês a mês (MonthFilter no topo); ?mes na URL espelha /transactions.
+  const mes = params.get("mes") || currentMonthKey();
   const setMes = (p: string) => {
     const q = new URLSearchParams(params.toString());
     q.set("mes", p);
@@ -160,17 +162,22 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
     });
   }, [cards, faturas]);
 
-  // Active tab: "all" (aggregated) or a card id. Default "all" with >1 card;
-  // a one-shot hint or a single card collapses to that card.
-  const tab: string | null = selectedId ?? (ordered.length > 1 ? "all" : ordered[0]?.id ?? null);
+  // Faturas do mês selecionado (faturaPeriod === mes). Sem nenhuma → mês vazio:
+  // vazio honesto e SEM abas (não há o que selecionar). Nunca cai noutro mês.
+  const monthFaturas = faturas.filter((f) => f.period === mes);
+  const monthCards = ordered.filter((c) => monthFaturas.some((f) => f.cardId === c.id));
+  const hasData = monthFaturas.length > 0;
 
-  // ?mes pedido mas SEM fatura nesse período (na aba ativa) → vazio honesto; nunca
-  // cai no período mais recente (era o bug: mes=2026-03 mostrava junho).
-  const allPeriods = [...new Set(faturas.map((f) => f.period))].sort((a, b) => b.localeCompare(a));
-  const tabPeriods = tab === "all"
-    ? allPeriods
-    : faturas.filter((f) => f.cardId === tab).map((f) => f.period).sort((a, b) => b.localeCompare(a));
-  const monthMissing = !!mes && !tabPeriods.includes(mes);
+  // Aba ativa só entre os cartões COM fatura nesse mês. "Todos" só com >1.
+  const tab: string | null = !hasData
+    ? null
+    : selectedId === "all" && monthCards.length > 1
+    ? "all"
+    : selectedId && monthCards.some((c) => c.id === selectedId)
+    ? selectedId
+    : monthCards.length > 1
+    ? "all"
+    : monthCards[0]?.id ?? null;
 
   if (loading) return <Shell text="Carregando..." />;
 
@@ -194,51 +201,59 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
           </div>
         ) : (
           <>
-            {/* Tabs: [Todos] + one per card (only with >1 card) */}
-            {ordered.length > 1 && (
-              <ScrollTabs>
-                {[{ id: "all", label: "Todos" }, ...ordered.map((c) => ({ id: c.id, label: `${c.name || c.bank}${c.last4 ? ` ••${c.last4}` : ""}` }))].map((t) => {
-                  const active = t.id === tab;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setSelectedId(t.id)}
-                      style={{
-                        flexShrink: 0,
-                        background: active ? colors.accentMuted : colors.card,
-                        border: `1px solid ${active ? colors.borderAccent : colors.border}`,
-                        borderRadius: radius.pill,
-                        padding: "8px 14px",
-                        color: active ? colors.accent : colors.textSecondary,
-                        fontSize: 12.5,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {t.label}
-                    </button>
-                  );
-                })}
-              </ScrollTabs>
-            )}
+            {/* Filtro de mês — sempre presente, igual à home (navega mês a mês). */}
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+              <MonthFilter value={mes} onChange={setMes} />
+            </div>
 
-            {tab === "all" ? (
-              monthMissing ? (
-                <EmptyPeriodView periods={allPeriods} mes={mes!} setMes={setMes} />
-              ) : (
-                <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} />
-              )
+            {!hasData ? (
+              // Mês sem fatura: vazio honesto, SEM abas. Navega pelo filtro acima.
+              <div style={{ ...cardBox(), textAlign: "center", padding: "32px 22px" }}>
+                <CreditCard size={26} color={colors.textFaint} style={{ marginBottom: 10 }} />
+                <p style={{ fontSize: 14, color: colors.textSecondary, lineHeight: 1.5 }}>
+                  Sem fatura em {monthLabel(mes).replace(/^./, (c) => c.toUpperCase())}.
+                </p>
+              </div>
             ) : (
-              (() => {
-                const c = ordered.find((x) => x.id === tab) ?? ordered[0];
-                if (!c) return null;
-                return monthMissing ? (
-                  <EmptyPeriodView periods={tabPeriods} mes={mes!} setMes={setMes} />
+              <>
+                {/* Abas: [Todos] + os cartões COM fatura nesse mês (só com >1). */}
+                {monthCards.length > 1 && (
+                  <ScrollTabs>
+                    {[{ id: "all", label: "Todos" }, ...monthCards.map((c) => ({ id: c.id, label: `${c.name || c.bank}${c.last4 ? ` ••${c.last4}` : ""}` }))].map((t) => {
+                      const active = t.id === tab;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setSelectedId(t.id)}
+                          style={{
+                            flexShrink: 0,
+                            background: active ? colors.accentMuted : colors.card,
+                            border: `1px solid ${active ? colors.borderAccent : colors.border}`,
+                            borderRadius: radius.pill,
+                            padding: "8px 14px",
+                            color: active ? colors.accent : colors.textSecondary,
+                            fontSize: 12.5,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                  </ScrollTabs>
+                )}
+
+                {tab === "all" ? (
+                  <AllCardsView workspaceId={workspaceId} cards={ordered} faturas={faturas} cardTx={cardTx} mes={mes} rendaRef={rendaRef} />
                 ) : (
-                  <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} mes={mes} setMes={setMes} rendaRef={rendaRef} />
-                );
-              })()
+                  (() => {
+                    const c = monthCards.find((x) => x.id === tab) ?? monthCards[0];
+                    return c ? <CardDetail workspaceId={workspaceId} card={c} faturas={faturas} cardTx={cardTx} mes={mes} rendaRef={rendaRef} /> : null;
+                  })()
+                )}
+              </>
             )}
           </>
         )}
@@ -247,56 +262,8 @@ function CardsView({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-// Period navigator (statement period = competência, NOT a calendar month).
-// Mirrors the /transactions month nav, but over the fatura periods that exist.
-function PeriodNav({ periods, current, onChange }: { periods: string[]; current: string | null; onChange: (p: string) => void }) {
-  if (!current || periods.length === 0) return null;
-  const idx = periods.indexOf(current);
-  // periods são desc (mais novo primeiro). Quando current não existe (mês sem fatura),
-  // navega pros vizinhos EXISTENTES mais próximos em vez de travar.
-  const older = idx >= 0
-    ? (idx < periods.length - 1 ? periods[idx + 1] : null)
-    : (periods.find((p) => p < current) ?? null);
-  const newer = idx >= 0
-    ? (idx > 0 ? periods[idx - 1] : null)
-    : ([...periods].reverse().find((p) => p > current) ?? null);
-  const label = monthLabel(current).replace(/^./, (c) => c.toUpperCase());
-  const navBtn = (enabled: boolean): React.CSSProperties => ({
-    background: "transparent", border: "none", padding: 4, display: "flex",
-    color: enabled ? colors.textPrimary : colors.textFaint,
-    cursor: enabled ? "pointer" : "default", opacity: enabled ? 1 : 0.4,
-  });
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 18, padding: "9px 14px", borderRadius: 12, background: colors.card, border: `1px solid ${colors.border}` }}>
-      <button disabled={!older} onClick={() => older && onChange(older)} style={navBtn(!!older)} aria-label="Fatura anterior"><ChevronLeft size={18} /></button>
-      <span style={{ fontSize: 13.5, fontWeight: 700, minWidth: 130, textAlign: "center" }}>{label}</span>
-      <button disabled={!newer} onClick={() => newer && onChange(newer)} style={navBtn(!!newer)} aria-label="Próxima fatura"><ChevronRight size={18} /></button>
-    </div>
-  );
-}
 
-// Vazio honesto pro período pedido sem fatura — NUNCA cai no dado de outro mês.
-// Mantém a navegação pra alcançar as faturas existentes.
-function EmptyPeriodView({ periods, mes, setMes }: { periods: string[]; mes: string; setMes: (p: string) => void }) {
-  const label = monthLabel(mes).replace(/^./, (c) => c.toUpperCase());
-  return (
-    <>
-      {periods.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <PeriodNav periods={periods} current={mes} onChange={setMes} />
-        </div>
-      )}
-      <div style={{ ...cardBox(), textAlign: "center", padding: "32px 22px" }}>
-        <CreditCard size={26} color={colors.textFaint} style={{ marginBottom: 10 }} />
-        <p style={{ fontSize: 14, color: colors.textSecondary, lineHeight: 1.5 }}>
-          Sem fatura em {label}.
-        </p>
-      </div>
-    </>
-  );
-}
-
-function CardDetail({ workspaceId, card, faturas, cardTx, mes, setMes, rendaRef }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void; rendaRef: number | null }) {
+function CardDetail({ workspaceId, card, faturas, cardTx, mes, rendaRef }: { workspaceId: string; card: Card; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; rendaRef: number | null }) {
   const lim = limitInfo(card);
   const bank = detectBank(card.bank || card.name);
 
@@ -335,8 +302,6 @@ function CardDetail({ workspaceId, card, faturas, cardTx, mes, setMes, rendaRef 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {periods.length > 1 && <PeriodNav periods={periods} current={fatura?.period ?? null} onChange={setMes} />}
-
       {/* Diagnóstico do cartão (lente separada — cache Firestore, IA só quando muda) */}
       {fatura && (
         <CardDiagnosis
@@ -703,7 +668,7 @@ function CardDiagnosis({
 
 // ─── Aggregated "Todos os cartões" view ──────────────────────────────────────
 
-function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, setMes, rendaRef }: { workspaceId: string; cards: Card[]; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; setMes: (p: string) => void; rendaRef: number | null }) {
+function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, rendaRef }: { workspaceId: string; cards: Card[]; faturas: Fatura[]; cardTx: Transaction[]; mes: string | null; rendaRef: number | null }) {
   // Periods = competências (faturaPeriod) across all cards, newest first.
   const allPeriods = useMemo(
     () => [...new Set(faturas.map((f) => f.period))].sort((a, b) => b.localeCompare(a)),
@@ -777,8 +742,6 @@ function AllCardsView({ workspaceId, cards, faturas, cardTx, mes, setMes, rendaR
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {allPeriods.length > 1 && <PeriodNav periods={allPeriods} current={selectedPeriod} onChange={setMes} />}
-
       <DiagnosisCard label="Diagnóstico dos cartões" diag={diag} loading={loading} loadingText="Analisando os cartões…" />
 
       {/* Header agregado: total da competência + vencendo (quando atual) + lista */}
