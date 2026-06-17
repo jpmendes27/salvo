@@ -34,10 +34,12 @@ export function CardHomeSummary({ workspaceId, monthKey }: { workspaceId: string
 
   if (loading || cards.length === 0) return null;
 
+  // Sempre abre o /cards no MÊS VIGENTE (faturaPeriod do mês corrente), nunca no
+  // "mês que por acaso tem fatura" (o /cards, sem ?mes, cairia no período mais recente).
   const openCards = (cardId?: string) => {
     localStorage.setItem("fincheck_workspace", workspaceId);
     if (cardId) localStorage.setItem("fincheck_card", cardId);
-    router.push("/cards");
+    router.push(`/cards?mes=${currentMonthKey()}`);
   };
 
   const Header = (
@@ -65,9 +67,13 @@ export function CardHomeSummary({ workspaceId, monthKey }: { workspaceId: string
       .sort((a, b) => b.fatura.totalAPagar - a.fatura.totalAPagar);
 
     if (periodBills.length === 0) {
+      // Vazio honesto — SEM CTA: não há o que ver nesse mês, e "Ver cartões" só
+      // levaria pro mês vigente (dado de outro mês). Só o rótulo + a mensagem honesta.
       return (
         <section style={{ ...box(), padding: "16px 18px" }}>
-          {Header}
+          <div style={{ marginBottom: 10 }}>
+            <span style={typography.labelSmall}>Cartões</span>
+          </div>
           <div style={{ fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.5 }}>
             Sem fatura em {monthName(monthKey)}.
           </div>
