@@ -52,6 +52,17 @@ Async: trigger de Storage → `processImportJob` → status no Firestore → cli
 `onSnapshot`. Timeout 540s + watchdog interno 500s. Alerting em 3 camadas (Resend + beacon
 do cliente + Cloud Monitoring de latência).
 
+**Segurança — prompt injection (extração):** o documento do usuário vai direto pro modelo,
+então o conteúdo é **delimitado por nonce não-forjável** (`<<<DOC:nonce>>>…<<<FIM:nonce>>>`)
+e o prompt do sistema deixa explícito: tudo entre os marcadores é DADO, nunca instrução.
+Saída só pelo **schema rígido** de transações — o servidor valida e descarta o que estiver
+fora (nunca texto livre, nunca o prompt). Contexto = só prompt + doc delimitado + schema
+(chaves no env, nunca no prompt); um job = um doc de um workspace; categorização/diagnóstico
+consomem só os dados já validados, nunca o texto cru. **Defesa em profundidade** (não o
+controle principal): o gate determinístico de completude/reconciliação pega transação falsa
+injetada — dado envenenado não fecha a conta → `nao_conferido`. Sinal de injeção/off-schema
+é logado pro futuro (Card 5), sem agir.
+
 Categorização: **cascata determinística** (regras + seed de merchants comuns + cache
 Firestore `merchantCategories`) → Claude só pro resíduo, resultado volta pro cache. Custo
 tende a zero conforme o cache enche.

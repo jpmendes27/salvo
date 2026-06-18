@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:fatura": "node tests/fatura.test.js",
     "test:extrato": "node tests/extrato.test.js",
+    "test:injection": "node tests/injection.test.js",
     "deploy:demo": "npm run build:demo && firebase deploy --only hosting",
     "firebase:deploy": "firebase deploy"
   },
