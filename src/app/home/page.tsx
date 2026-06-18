@@ -512,7 +512,7 @@ type BatchItem = {
 
 type ImportState =
   | { phase: "parsing" }
-  | { phase: "background"; jobId: string; filename: string }
+  | { phase: "background"; jobId: string; filename: string; stage?: string }
   | { phase: "batch"; items: BatchItem[]; accountRows: ParsedWithMeta[] }
   | { phase: "preview"; rows: ParsedWithMeta[]; error?: string; recon?: ReconWarn; recons?: ReconWarn[] }
   | { phase: "saving"; rows: ParsedWithMeta[] };
@@ -950,6 +950,7 @@ function WorkspaceApp({
           readBalance?: number | null;
           declaredBalance?: number | null;
           delta?: number | null;
+          stage?: string;
         };
 
         // Fatura (card statement): a SEPARATE lens. It persists server-side and
@@ -1017,6 +1018,9 @@ function WorkspaceApp({
             });
           }
           unsub();
+        } else {
+          // Ainda processando: reflete a ETAPA real (lendo → conferindo → organizando).
+          setImportState((s) => (s && s.phase === "background" ? { ...s, stage: data.stage } : s));
         }
       },
       () => {
@@ -4043,6 +4047,54 @@ function FaturaDoneModal({
 
 // ─── Import modal ─────────────────────────────────────────────────────────────
 
+// Etapas REAIS do pipeline de importação (o servidor escreve `stage` no job:
+// lendo → conferindo → organizando). Sem cronômetro fingido: o indicador reflete a
+// etapa de verdade; o passo atual pulsa (vivo) pra não parecer travado em doc longo.
+const IMPORT_STAGES = [
+  { key: "lendo", label: "Lendo seu extrato" },
+  { key: "conferindo", label: "Conferindo as contas" },
+  { key: "organizando", label: "Organizando os gastos" },
+];
+function StageSteps({ stage }: { stage?: string }) {
+  const found = IMPORT_STAGES.findIndex((s) => s.key === stage);
+  const target = found >= 0 ? found : 0; // sem stage ainda → começa em "lendo"
+  // Duração mínima por etapa: avança uma de cada vez com dwell, pra doc rápido não
+  // estrobar (ex.: "conferindo" é instantâneo). Só anda pra frente.
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (target <= idx) return;
+    const t = setTimeout(() => setIdx((s) => Math.min(s + 1, target)), 650);
+    return () => clearTimeout(t);
+  }, [target, idx]);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "40px 0", width: "100%", maxWidth: 280, margin: "0 auto" }}>
+      {IMPORT_STAGES.map((s, i) => {
+        const done = i < idx;
+        const active = i === idx;
+        return (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 12, opacity: i <= idx ? 1 : 0.45, transition: "opacity .4s ease" }}>
+            <span style={{
+              width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              border: `1.5px solid ${done || active ? G : "rgba(255,255,255,0.2)"}`,
+              background: done ? G : "transparent",
+            }}>
+              {done ? (
+                <svg width="9" height="7" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="#09090b" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              ) : active ? (
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: G, animation: "pulse 1.2s ease-in-out infinite" }} />
+              ) : null}
+            </span>
+            <span style={{ fontSize: 13.5, fontWeight: active ? 700 : 600, color: active ? "#fff" : done ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.4)" }}>
+              {s.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ImportModal({
   state,
   onCancel,
@@ -4149,7 +4201,15 @@ function ImportModal({
 
         {/* Modal body */}
         <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
-          {isParsing || isBackground || isSaving ? (
+          {isBackground ? (
+            // Indicador por ETAPA real (lê `stage` do job em tempo real). Sem spinner mudo.
+            <div style={{ padding: "8px 0" }}>
+              <StageSteps stage={state.phase === "background" ? state.stage : undefined} />
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", textAlign: "center", marginTop: 8 }}>
+                Extratos grandes podem levar até um minuto.
+              </p>
+            </div>
+          ) : isParsing || isSaving ? (
             <div
               style={{
                 display: "flex",
@@ -4171,17 +4231,8 @@ function ImportModal({
                 }}
               />
               <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
-                {isParsing
-                  ? "Extraindo transações com IA..."
-                  : isBackground
-                  ? "Processando em segundo plano..."
-                  : "Salvando lançamentos..."}
+                {isParsing ? "Lendo seu arquivo..." : "Salvando lançamentos..."}
               </p>
-              {isBackground && (
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: -6 }}>
-                  Pode levar até 1 minuto para extratos grandes.
-                </p>
-              )}
             </div>
           ) : (
             <>

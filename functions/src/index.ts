@@ -1990,6 +1990,7 @@ async function processFatura(
     return;
   }
 
+  await jobRef.update({ stage: "conferindo" }).catch(() => {}); // SALVO-13: etapa real
   // 2b ─ COMPLETENESS by value (não bloqueia). Os totais impressos sempre fecham
   // entre si; aqui conferimos se a soma dos débitos extraídos bate com o total de
   // novas despesas IMPRESSO. Soma abaixo → faltou lançamento (nao_conferido); sem
@@ -2010,6 +2011,7 @@ async function processFatura(
   // source='card'). Payments/credits are statement totals, not purchases.
   const compras = fatura.lancamentos.filter((l) => l.kind === "compra" && l.amount > 0);
   let codes: (string | null)[] = new Array(compras.length).fill(null);
+  await jobRef.update({ stage: "organizando" }).catch(() => {}); // SALVO-13: etapa real
   try {
     codes = await categorizeCascade(client, db, compras.map((c) => c.description));
   } catch (catErr) {
@@ -2187,6 +2189,10 @@ export const processImportJob = onObjectFinalized(
 
     const client = new Anthropic({ apiKey, maxRetries: 6 });
 
+    // SALVO-13: etapa REAL pro indicador de progresso do cliente (lê stage via
+    // onSnapshot). Só sinaliza a fase atual do pipeline; não toca extração/reconciliação.
+    await jobRef.update({ stage: "lendo" }).catch(() => {});
+
     // ── Fatura detour ───────────────────────────────────────────────────────
     // Detect a credit-card statement (fatura) BEFORE the account pipeline and
     // route it to its own pipeline (separate lens, separate gate, direct
@@ -2331,6 +2337,7 @@ export const processImportJob = onObjectFinalized(
     // blocks: a result that doesn't close is still imported, marked
     // "nao_conferido" with the delta — never discarded. Internal log of which
     // mode passed; never surfaced to the user.
+    await jobRef.update({ stage: "conferindo" }).catch(() => {}); // SALVO-13: etapa real
     const checkpoints = (parsed.balanceCheckpoints ?? [])
       .filter((c): c is { date: string; balance: number } => !!c && !!c.date && c.balance != null)
       .map((c) => ({ date: c.date, balanceCents: Math.round(c.balance * 100) }));
@@ -2379,6 +2386,7 @@ export const processImportJob = onObjectFinalized(
     // merchants no free layer resolved. On any failure the category stays null
     // and the client's rule-based categorizer fills it in. A reconciled import
     // is NEVER failed because of categorization.
+    await jobRef.update({ stage: "organizando" }).catch(() => {}); // SALVO-13: etapa real
     try {
       const codes = await categorizeCascade(client, db, transactions.map((t) => t.description));
       transactions.forEach((t, i) => { t.category = codes[i] ?? t.category; });
