@@ -30,6 +30,9 @@ exports.reconcileFatura = reconcileFatura;
 exports.parseFaturaNovasDespesas = parseFaturaNovasDespesas;
 exports.sumPeriodDebitsCents = sumPeriodDebitsCents;
 exports.detectFaturaAtraso = detectFaturaAtraso;
+exports.parseFlowAnchors = parseFlowAnchors;
+exports.auditByBalance = auditByBalance;
+exports.auditExtratoCompleteness = auditExtratoCompleteness;
 exports.checkFaturaCompleteness = checkFaturaCompleteness;
 // ─── Server-side PDF text extraction (pdfjs in Node, no worker) ──────────────
 // pdfjs-dist v5 ships ESM only. The runtime dynamic import below is wrapped in
@@ -658,6 +661,157 @@ function detectFaturaAtraso(lancamentos, totals, text) {
     const c = (v) => Math.round((v ?? 0) * 100);
     const carry = c(totals.saldoAnterior) - c(totals.totalPagamentos) - c(totals.totalCreditos);
     return carry > 10; // sobrou dívida do período anterior (> R$0,10)
+}
+// ─── Extrato completeness audit (pure, bank-agnostic) ────────────────────────
+// Duas âncoras de fluxo, detectadas pelo que o documento DECLARA (nunca por banco):
+//  • SUBTOTAL por dia ("Total de entradas/saídas") → audita POR SINAL (mais preciso).
+//  • SALDO DE FECHAMENTO ("SALDO DO DIA") → audita POR LÍQUIDO entre saldos consecutivos.
+// Detecção: subtotal → por sinal; só SALDO DO DIA → por líquido; ambos → prefere por sinal.
+// Subtotais e saldos são SEMPRE âncora, nunca transação. reconcileLedger/3 estados à parte.
+const COMPLETENESS_TOL_CENTS = 2;
+const PT_MONTH = {
+    jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+};
+const ANCHOR_LINE_EXTRATO = /^(total\s+de\s+(entradas|sa[ií]das)|saldo\s+(inicial|final|do\s+dia|anterior|em\s+conta))/i;
+// "MM-DD" de uma linha com data (DD/MM[/AAAA] ou "DD mmm").
+function dayKeyOf(line) {
+    let m = line.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-]\d{2,4})?\b/);
+    if (m)
+        return `${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    m = line.match(/\b(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)/i);
+    if (m) {
+        const mm = PT_MONTH[m[2].toLowerCase().slice(0, 3)];
+        return `${String(mm).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    }
+    return null;
+}
+function parseFlowAnchors(text) {
+    const lines = text.split("\n");
+    const perDay = new Map();
+    let curKey = null;
+    let sinceDate = 999;
+    let globalEntradasCents;
+    let globalSaidasCents;
+    for (const raw of lines) {
+        const line = raw.trim();
+        const dk = dayKeyOf(line);
+        if (dk) {
+            curKey = dk;
+            sinceDate = 0;
+        }
+        else {
+            sinceDate++;
+        }
+        const ent = line.match(/total\s+de\s+entradas[^0-9R-]*(R?\$?\s*[\d.,]+)/i);
+        const sai = line.match(/total\s+de\s+sa[ií]das[^0-9R−-]*([-−]?\s*R?\$?\s*[\d.,]+)/i);
+        if (ent || sai) {
+            const fresh = curKey && sinceDate <= 8;
+            if (fresh) {
+                const e = perDay.get(curKey) ?? { entradasCents: 0, saidasCents: 0 };
+                if (ent)
+                    e.entradasCents = Math.abs(parseBRCentavosSrv(ent[1]));
+                if (sai)
+                    e.saidasCents = Math.abs(parseBRCentavosSrv(sai[1]));
+                perDay.set(curKey, e);
+            }
+            else {
+                if (ent)
+                    globalEntradasCents = Math.abs(parseBRCentavosSrv(ent[1]));
+                if (sai)
+                    globalSaidasCents = Math.abs(parseBRCentavosSrv(sai[1]));
+            }
+        }
+    }
+    return { perDay, globalEntradasCents, globalSaidasCents };
+}
+const signedCentsOf = (t) => (t.type === "income" ? 1 : -1) * Math.round(Math.abs(t.amount) * 100);
+function sumBySignCents(txs) {
+    let entradasCents = 0, saidasCents = 0;
+    for (const t of txs) {
+        const c = Math.round(Math.abs(t.amount) * 100);
+        if (t.type === "income")
+            entradasCents += c;
+        else
+            saidasCents += c;
+    }
+    return { entradasCents, saidasCents };
+}
+function dayShortfallCents(dayTxs, decl) {
+    const ext = sumBySignCents(dayTxs);
+    return Math.max(0, decl.entradasCents - ext.entradasCents) + Math.max(0, decl.saidasCents - ext.saidasCents);
+}
+// Âncora por SALDO: diferença entre saldos de fechamento consecutivos = fluxo líquido do
+// intervalo. Itaú vem DECRESCENTE → ordena cronologicamente antes. Semente: saldo inicial
+// (cabeçalho) se houver; senão o saldo de fechamento MAIS ANTIGO vira baseline e o trecho
+// antes dele fica nao_verificavel (só marca se houver movimento pré-semente).
+function auditByBalance(txs, checkpoints, initialBalanceCents) {
+    const sorted = [...checkpoints].sort((a, b) => a.date.localeCompare(b.date));
+    const intervals = [];
+    if (sorted.length === 0)
+        return { intervals, shortTargets: [], state: "nao_verificavel", deltaCents: 0 };
+    const netIn = (lo, hi) => txs.filter((t) => (lo === null || t.date > lo) && t.date <= hi).reduce((s, t) => s + signedCentsOf(t), 0);
+    let prevBalance, prevDate, start;
+    if (initialBalanceCents !== undefined) {
+        prevBalance = initialBalanceCents;
+        prevDate = null;
+        start = 0;
+    }
+    else {
+        prevBalance = sorted[0].balanceCents;
+        prevDate = sorted[0].date;
+        start = 1;
+        // Sem saldo inicial: o saldo de fechamento mais antigo é a baseline. Qualquer
+        // movimento ANTES dela não dá pra conferir (txs que se anulam também escapariam) →
+        // trecho nao_verificavel quando há qualquer transação pré-semente.
+        const preSeedTxs = txs.filter((t) => t.date <= sorted[0].date);
+        if (preSeedTxs.length > 0) {
+            intervals.push({ fromDate: null, toDate: sorted[0].date, expectedCents: null, actualCents: netIn(null, sorted[0].date), deltaCents: null, ok: false, unverifiable: true });
+        }
+    }
+    for (let i = start; i < sorted.length; i++) {
+        const cp = sorted[i];
+        const actualCents = netIn(prevDate, cp.date);
+        const expectedCents = cp.balanceCents - prevBalance;
+        const deltaCents = expectedCents - actualCents;
+        const ok = Math.abs(deltaCents) <= COMPLETENESS_TOL_CENTS;
+        intervals.push({ fromDate: prevDate, toDate: cp.date, expectedCents, actualCents, deltaCents, ok, unverifiable: false });
+        prevBalance = cp.balanceCents;
+        prevDate = cp.date;
+    }
+    const shorts = intervals.filter((iv) => !iv.ok && !iv.unverifiable);
+    const shortTargets = shorts.map((iv) => ({ fromDate: iv.fromDate, toDate: iv.toDate }));
+    const deltaCents = shorts.reduce((s, iv) => s + Math.abs(iv.deltaCents ?? 0), 0);
+    const state = shorts.length > 0 ? "nao_conferido" : intervals.some((iv) => iv.unverifiable) ? "nao_verificavel" : "verificado";
+    return { intervals, shortTargets, state, deltaCents };
+}
+// Detecta a âncora e audita. Subtotal por dia (preferido) → por sinal; senão SALDO DO DIA
+// (balanceCheckpoints) → por líquido; senão nenhuma → no-op (nao_verificavel).
+function auditExtratoCompleteness(parsed, text) {
+    const txs = (parsed.transactions ?? []).filter((t) => t.classification !== "IGNORAR" && !ANCHOR_LINE_EXTRATO.test((t.description ?? "").trim()));
+    const flow = parseFlowAnchors(text);
+    if (flow.perDay.size > 0) {
+        const flowTargets = [];
+        let deltaCents = 0;
+        for (const [mmdd, decl] of flow.perDay) {
+            if (decl.entradasCents <= 0 && decl.saidasCents <= 0)
+                continue;
+            const sf = dayShortfallCents(txs.filter((t) => (t.date ?? "").slice(5) === mmdd), decl);
+            if (sf > COMPLETENESS_TOL_CENTS) {
+                flowTargets.push(mmdd);
+                deltaCents += sf;
+            }
+        }
+        return { mode: "flow", state: flowTargets.length ? "nao_conferido" : "verificado", deltaCents, flowTargets, balanceTargets: [] };
+    }
+    const cps = (parsed.balanceCheckpoints ?? [])
+        .filter((c) => c && c.date != null && c.balance != null)
+        .map((c) => ({ date: String(c.date), balanceCents: Math.round(Number(c.balance) * 100) }));
+    if (cps.length > 0) {
+        const init = parsed.initialBalance != null ? Math.round(Number(parsed.initialBalance) * 100) : undefined;
+        const a = auditByBalance(txs, cps, init);
+        return { mode: "balance", state: a.state, deltaCents: a.deltaCents, flowTargets: [], balanceTargets: a.shortTargets, intervals: a.intervals };
+    }
+    return { mode: "none", state: "nao_verificavel", deltaCents: 0, flowTargets: [], balanceTargets: [] };
 }
 // NUNCA recalcula o total autoritativo a partir das linhas — o impresso é a verdade.
 function checkFaturaCompleteness(lancamentos, anchorCents, atraso = false) {

@@ -13,7 +13,7 @@ import {
   reconcileLedger,
   classifyServer,
   isInternalTransfer,
-  parseBRCentavosSrv,
+  auditExtratoCompleteness,
   IMPORT_CATEGORIES,
   buildCategorySystemPrompt,
   buildCategoryUserMessage,
@@ -641,7 +641,6 @@ function assembleMerged(
 // (subtotal de fluxo ≠ saldo corrente). Bounded: 1 re-extraction per short day,
 // max 8 days/job. reconcileLedger and the 3 states are untouched — they run on
 // the completed ledger.
-const COMPLETENESS_TOL_CENTS = 2;
 const MAX_REEXTRACT_DAYS = 8;
 const PT_MONTH: Record<string, number> = {
   jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
@@ -657,65 +656,21 @@ function dayKeyOf(line: string): string | null {
   if (m) { const mm = PT_MONTH[m[2].toLowerCase().slice(0, 3)]; return `${String(mm).padStart(2, "0")}-${m[1].padStart(2, "0")}`; }
   return null;
 }
-const txDayKey = (t: { date: string }): string => (t.date ?? "").slice(5); // "YYYY-MM-DD" → "MM-DD"
-
-type FlowAnchors = {
-  perDay: Map<string, { entradasCents: number; saidasCents: number }>; // key "MM-DD"
-  globalEntradasCents?: number;
-  globalSaidasCents?: number;
-};
-
-// Parse declared flow subtotals. A subtotal counts as PER-DAY only when a date
-// line appeared within the last few lines (fresh context); otherwise it's a
-// document-level total (used only as a backstop). Never touches transactions or
-// balance checkpoints.
-function parseFlowAnchors(text: string): FlowAnchors {
-  const lines = text.split("\n");
-  const perDay = new Map<string, { entradasCents: number; saidasCents: number }>();
-  let curKey: string | null = null;
-  let sinceDate = 999;
-  let globalEntradasCents: number | undefined;
-  let globalSaidasCents: number | undefined;
-  for (const raw of lines) {
-    const line = raw.trim();
-    const dk = dayKeyOf(line);
-    if (dk) { curKey = dk; sinceDate = 0; } else { sinceDate++; }
-    const ent = line.match(/total\s+de\s+entradas[^0-9R-]*(R?\$?\s*[\d.,]+)/i);
-    const sai = line.match(/total\s+de\s+sa[ií]das[^0-9R−-]*([-−]?\s*R?\$?\s*[\d.,]+)/i);
-    if (ent || sai) {
-      const fresh = curKey && sinceDate <= 8;
-      if (fresh) {
-        const e = perDay.get(curKey!) ?? { entradasCents: 0, saidasCents: 0 };
-        if (ent) e.entradasCents = Math.abs(parseBRCentavosSrv(ent[1]));
-        if (sai) e.saidasCents = Math.abs(parseBRCentavosSrv(sai[1]));
-        perDay.set(curKey!, e);
-      } else {
-        if (ent) globalEntradasCents = Math.abs(parseBRCentavosSrv(ent[1]));
-        if (sai) globalSaidasCents = Math.abs(parseBRCentavosSrv(sai[1]));
-      }
-    }
-  }
-  return { perDay, globalEntradasCents, globalSaidasCents };
+// Full ISO date (YYYY-MM-DD) from a DD/MM[/YYYY] line, for interval slicing.
+function lineFullDate(line: string): string | null {
+  const m = line.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b/);
+  if (!m) return null;
+  const y = m[3].length === 2 ? `20${m[3]}` : m[3];
+  return `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
 }
+const txDayKey = (t: { date: string }): string => (t.date ?? "").slice(5); // "YYYY-MM-DD" → "MM-DD"
 
 type Tx = NonNullable<ParsedClaudeResponse["transactions"]>[number];
 // Drop any anchor line that leaked into the ledger (defensive — never a tx).
 function stripAnchorTxs(txs: Tx[]): Tx[] {
   return txs.filter((t) => !ANCHOR_LINE.test((t.description ?? "").trim()));
 }
-function sumBySign(txs: Tx[]): { entradasCents: number; saidasCents: number } {
-  let entradasCents = 0, saidasCents = 0;
-  for (const t of txs) {
-    const c = Math.round(Math.abs(t.amount) * 100);
-    if (t.type === "income") entradasCents += c; else saidasCents += c;
-  }
-  return { entradasCents, saidasCents };
-}
-function dayShortfall(dayTxs: Tx[], decl: { entradasCents: number; saidasCents: number }): number {
-  const ext = sumBySign(dayTxs);
-  return Math.max(0, decl.entradasCents - ext.entradasCents) + Math.max(0, decl.saidasCents - ext.saidasCents);
-}
-// Raw text of a single day: from its first date line to the next different-day line.
+// Raw text of a single day (MM-DD): first date line to the next different-day line.
 function sliceDay(text: string, mmdd: string): string | null {
   const lines = text.split("\n");
   let start = -1, end = lines.length;
@@ -726,64 +681,70 @@ function sliceDay(text: string, mmdd: string): string | null {
   }
   return start === -1 ? null : lines.slice(start, end).join("\n");
 }
+// Raw text of a date interval (fromDate, toDate] — datas ISO; linhas sem data herdam a
+// do dia corrente (descrição multi-linha do Itaú).
+function sliceInterval(text: string, fromDate: string | null, toDate: string): string | null {
+  const lines = text.split("\n");
+  let cur: string | null = null, start = -1, end = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const d = lineFullDate(lines[i]);
+    if (d) cur = d;
+    const inRange = cur != null && (fromDate === null || cur > fromDate) && cur <= toDate;
+    if (inRange && start === -1) start = i;
+    else if (start !== -1 && cur != null && cur > toDate) { end = i; break; }
+  }
+  return start === -1 ? null : lines.slice(start, end).join("\n");
+}
+
+type ReTarget = { mmdd?: string; from?: string | null; to?: string };
 
 async function recoverCompleteness(
   client: Anthropic, text: string, merged: ParsedClaudeResponse, filename?: string
 ): Promise<ParsedClaudeResponse> {
   let txs = stripAnchorTxs(merged.transactions ?? []);
   const removed = (merged.transactions?.length ?? 0) - txs.length;
-  const anchors = parseFlowAnchors(text);
-
-  // No per-day anchors → at most a global backstop (can't target a day; let
-  // reconcileLedger flag it honestly). No anchors at all → pure no-op.
-  if (anchors.perDay.size === 0) {
-    if (anchors.globalEntradasCents != null || anchors.globalSaidasCents != null) {
-      const ext = sumBySign(txs);
-      const short =
-        (anchors.globalEntradasCents != null && ext.entradasCents < anchors.globalEntradasCents - COMPLETENESS_TOL_CENTS) ||
-        (anchors.globalSaidasCents != null && ext.saidasCents < anchors.globalSaidasCents - COMPLETENESS_TOL_CENTS);
-      console.log(`[completeness] global-only anchors, ${short ? "SHORT" : "ok"}, removed ${removed} anchor row(s)`);
-    } else {
-      console.log(`[completeness] no flow anchors found, removed ${removed} anchor row(s) — no-op`);
-    }
-    return { ...merged, transactions: txs };
-  }
 
   // Per-line-balance statements (Mercado Pago-style) reconcile by line chain —
-  // don't reorder them; defer to that path.
+  // don't reorder them; defer to that path (no-op).
   const withBal = txs.filter((t) => t.balance != null).length;
   if (txs.length > 0 && withBal >= Math.ceil(txs.length * 0.8)) {
-    console.log(`[completeness] per-line balance present — deferring to line chain (no-op)`);
+    console.log(`[completeness] per-line balance present — deferring (no-op)`);
     return { ...merged, transactions: txs };
   }
 
-  const shortDays: string[] = [];
-  for (const [mmdd, decl] of anchors.perDay) {
-    if (decl.entradasCents <= 0 && decl.saidasCents <= 0) continue;
-    if (dayShortfall(txs.filter((t) => txDayKey(t) === mmdd), decl) > COMPLETENESS_TOL_CENTS) shortDays.push(mmdd);
+  // Audita pela âncora declarada: subtotal por dia (por sinal) OU SALDO DO DIA (por líquido).
+  let audit = auditExtratoCompleteness({ ...merged, transactions: txs }, text);
+  if (audit.mode === "none") {
+    console.log(`[completeness] no flow/balance anchors — no-op (removed ${removed} anchor row(s))`);
+    return { ...merged, transactions: txs };
   }
-  console.log(`[completeness] ${anchors.perDay.size} declared day(s), ${shortDays.length} short, removed ${removed} anchor row(s)`);
+  const nTargets = audit.mode === "flow" ? audit.flowTargets.length : audit.balanceTargets.length;
+  console.log(`[completeness] mode=${audit.mode} state=${audit.state} short=${nTargets} removed=${removed}`);
 
+  // Re-extrai SÓ os alvos curtos (dia ou intervalo), bounded; mantém só se melhora.
   const header = text.split("\n").slice(0, 3).join("\n"); // período/banco p/ inferir ano
+  const inTarget = (t: Tx, tgt: ReTarget) =>
+    tgt.mmdd != null ? txDayKey(t) === tgt.mmdd : (tgt.from == null || t.date > tgt.from) && t.date <= (tgt.to as string);
+  const targets: ReTarget[] = audit.mode === "flow"
+    ? audit.flowTargets.map((mmdd) => ({ mmdd }))
+    : audit.balanceTargets.map((iv) => ({ from: iv.fromDate, to: iv.toDate }));
+
   let reextracted = 0;
-  for (const mmdd of shortDays) {
+  for (const tgt of targets) {
     if (reextracted >= MAX_REEXTRACT_DAYS) break;
-    const body = sliceDay(text, mmdd);
+    const body = tgt.mmdd != null ? sliceDay(text, tgt.mmdd) : sliceInterval(text, tgt.from ?? null, tgt.to!);
     if (!body) continue;
     reextracted++;
-    let dayTxs: Tx[];
+    let newTxs: Tx[];
     try {
       const r = await callClaudeExtraction(client, `${header}\n${body}`, "text/plain", filename);
-      dayTxs = stripAnchorTxs(r.transactions ?? []).filter((t) => txDayKey(t) === mmdd);
+      newTxs = stripAnchorTxs(r.transactions ?? []).filter((t) => inTarget(t, tgt));
     } catch { continue; }
-    const decl = anchors.perDay.get(mmdd)!;
-    const orig = txs.filter((t) => txDayKey(t) === mmdd);
-    // Keep whichever day-set is MORE complete (smaller shortfall vs declared).
-    if (dayShortfall(dayTxs, decl) < dayShortfall(orig, decl)) {
-      txs = txs.filter((t) => txDayKey(t) !== mmdd).concat(dayTxs);
-    }
+    const candidate = txs.filter((t) => !inTarget(t, tgt)).concat(newTxs);
+    const reaudit = auditExtratoCompleteness({ ...merged, transactions: candidate }, text);
+    if (reaudit.deltaCents < audit.deltaCents) { txs = candidate; audit = reaudit; }
   }
-  if (reextracted > 0) console.log(`[completeness] re-extracted ${reextracted} day(s)`);
+  if (reextracted > 0) console.log(`[completeness] re-extracted ${reextracted} target(s) → state=${audit.state}`);
   return { ...merged, transactions: txs };
 }
 

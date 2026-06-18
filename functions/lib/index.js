@@ -596,7 +596,6 @@ function assembleMerged(perChunk, headers) {
 // (subtotal de fluxo ≠ saldo corrente). Bounded: 1 re-extraction per short day,
 // max 8 days/job. reconcileLedger and the 3 states are untouched — they run on
 // the completed ledger.
-const COMPLETENESS_TOL_CENTS = 2;
 const MAX_REEXTRACT_DAYS = 8;
 const PT_MONTH = {
     jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
@@ -615,70 +614,20 @@ function dayKeyOf(line) {
     }
     return null;
 }
-const txDayKey = (t) => (t.date ?? "").slice(5); // "YYYY-MM-DD" → "MM-DD"
-// Parse declared flow subtotals. A subtotal counts as PER-DAY only when a date
-// line appeared within the last few lines (fresh context); otherwise it's a
-// document-level total (used only as a backstop). Never touches transactions or
-// balance checkpoints.
-function parseFlowAnchors(text) {
-    const lines = text.split("\n");
-    const perDay = new Map();
-    let curKey = null;
-    let sinceDate = 999;
-    let globalEntradasCents;
-    let globalSaidasCents;
-    for (const raw of lines) {
-        const line = raw.trim();
-        const dk = dayKeyOf(line);
-        if (dk) {
-            curKey = dk;
-            sinceDate = 0;
-        }
-        else {
-            sinceDate++;
-        }
-        const ent = line.match(/total\s+de\s+entradas[^0-9R-]*(R?\$?\s*[\d.,]+)/i);
-        const sai = line.match(/total\s+de\s+sa[ií]das[^0-9R−-]*([-−]?\s*R?\$?\s*[\d.,]+)/i);
-        if (ent || sai) {
-            const fresh = curKey && sinceDate <= 8;
-            if (fresh) {
-                const e = perDay.get(curKey) ?? { entradasCents: 0, saidasCents: 0 };
-                if (ent)
-                    e.entradasCents = Math.abs((0, pdf_core_1.parseBRCentavosSrv)(ent[1]));
-                if (sai)
-                    e.saidasCents = Math.abs((0, pdf_core_1.parseBRCentavosSrv)(sai[1]));
-                perDay.set(curKey, e);
-            }
-            else {
-                if (ent)
-                    globalEntradasCents = Math.abs((0, pdf_core_1.parseBRCentavosSrv)(ent[1]));
-                if (sai)
-                    globalSaidasCents = Math.abs((0, pdf_core_1.parseBRCentavosSrv)(sai[1]));
-            }
-        }
-    }
-    return { perDay, globalEntradasCents, globalSaidasCents };
+// Full ISO date (YYYY-MM-DD) from a DD/MM[/YYYY] line, for interval slicing.
+function lineFullDate(line) {
+    const m = line.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b/);
+    if (!m)
+        return null;
+    const y = m[3].length === 2 ? `20${m[3]}` : m[3];
+    return `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
 }
+const txDayKey = (t) => (t.date ?? "").slice(5); // "YYYY-MM-DD" → "MM-DD"
 // Drop any anchor line that leaked into the ledger (defensive — never a tx).
 function stripAnchorTxs(txs) {
     return txs.filter((t) => !ANCHOR_LINE.test((t.description ?? "").trim()));
 }
-function sumBySign(txs) {
-    let entradasCents = 0, saidasCents = 0;
-    for (const t of txs) {
-        const c = Math.round(Math.abs(t.amount) * 100);
-        if (t.type === "income")
-            entradasCents += c;
-        else
-            saidasCents += c;
-    }
-    return { entradasCents, saidasCents };
-}
-function dayShortfall(dayTxs, decl) {
-    const ext = sumBySign(dayTxs);
-    return Math.max(0, decl.entradasCents - ext.entradasCents) + Math.max(0, decl.saidasCents - ext.saidasCents);
-}
-// Raw text of a single day: from its first date line to the next different-day line.
+// Raw text of a single day (MM-DD): first date line to the next different-day line.
 function sliceDay(text, mmdd) {
     const lines = text.split("\n");
     let start = -1, end = lines.length;
@@ -693,65 +642,74 @@ function sliceDay(text, mmdd) {
     }
     return start === -1 ? null : lines.slice(start, end).join("\n");
 }
+// Raw text of a date interval (fromDate, toDate] — datas ISO; linhas sem data herdam a
+// do dia corrente (descrição multi-linha do Itaú).
+function sliceInterval(text, fromDate, toDate) {
+    const lines = text.split("\n");
+    let cur = null, start = -1, end = lines.length;
+    for (let i = 0; i < lines.length; i++) {
+        const d = lineFullDate(lines[i]);
+        if (d)
+            cur = d;
+        const inRange = cur != null && (fromDate === null || cur > fromDate) && cur <= toDate;
+        if (inRange && start === -1)
+            start = i;
+        else if (start !== -1 && cur != null && cur > toDate) {
+            end = i;
+            break;
+        }
+    }
+    return start === -1 ? null : lines.slice(start, end).join("\n");
+}
 async function recoverCompleteness(client, text, merged, filename) {
     let txs = stripAnchorTxs(merged.transactions ?? []);
     const removed = (merged.transactions?.length ?? 0) - txs.length;
-    const anchors = parseFlowAnchors(text);
-    // No per-day anchors → at most a global backstop (can't target a day; let
-    // reconcileLedger flag it honestly). No anchors at all → pure no-op.
-    if (anchors.perDay.size === 0) {
-        if (anchors.globalEntradasCents != null || anchors.globalSaidasCents != null) {
-            const ext = sumBySign(txs);
-            const short = (anchors.globalEntradasCents != null && ext.entradasCents < anchors.globalEntradasCents - COMPLETENESS_TOL_CENTS) ||
-                (anchors.globalSaidasCents != null && ext.saidasCents < anchors.globalSaidasCents - COMPLETENESS_TOL_CENTS);
-            console.log(`[completeness] global-only anchors, ${short ? "SHORT" : "ok"}, removed ${removed} anchor row(s)`);
-        }
-        else {
-            console.log(`[completeness] no flow anchors found, removed ${removed} anchor row(s) — no-op`);
-        }
-        return { ...merged, transactions: txs };
-    }
     // Per-line-balance statements (Mercado Pago-style) reconcile by line chain —
-    // don't reorder them; defer to that path.
+    // don't reorder them; defer to that path (no-op).
     const withBal = txs.filter((t) => t.balance != null).length;
     if (txs.length > 0 && withBal >= Math.ceil(txs.length * 0.8)) {
-        console.log(`[completeness] per-line balance present — deferring to line chain (no-op)`);
+        console.log(`[completeness] per-line balance present — deferring (no-op)`);
         return { ...merged, transactions: txs };
     }
-    const shortDays = [];
-    for (const [mmdd, decl] of anchors.perDay) {
-        if (decl.entradasCents <= 0 && decl.saidasCents <= 0)
-            continue;
-        if (dayShortfall(txs.filter((t) => txDayKey(t) === mmdd), decl) > COMPLETENESS_TOL_CENTS)
-            shortDays.push(mmdd);
+    // Audita pela âncora declarada: subtotal por dia (por sinal) OU SALDO DO DIA (por líquido).
+    let audit = (0, pdf_core_1.auditExtratoCompleteness)({ ...merged, transactions: txs }, text);
+    if (audit.mode === "none") {
+        console.log(`[completeness] no flow/balance anchors — no-op (removed ${removed} anchor row(s))`);
+        return { ...merged, transactions: txs };
     }
-    console.log(`[completeness] ${anchors.perDay.size} declared day(s), ${shortDays.length} short, removed ${removed} anchor row(s)`);
+    const nTargets = audit.mode === "flow" ? audit.flowTargets.length : audit.balanceTargets.length;
+    console.log(`[completeness] mode=${audit.mode} state=${audit.state} short=${nTargets} removed=${removed}`);
+    // Re-extrai SÓ os alvos curtos (dia ou intervalo), bounded; mantém só se melhora.
     const header = text.split("\n").slice(0, 3).join("\n"); // período/banco p/ inferir ano
+    const inTarget = (t, tgt) => tgt.mmdd != null ? txDayKey(t) === tgt.mmdd : (tgt.from == null || t.date > tgt.from) && t.date <= tgt.to;
+    const targets = audit.mode === "flow"
+        ? audit.flowTargets.map((mmdd) => ({ mmdd }))
+        : audit.balanceTargets.map((iv) => ({ from: iv.fromDate, to: iv.toDate }));
     let reextracted = 0;
-    for (const mmdd of shortDays) {
+    for (const tgt of targets) {
         if (reextracted >= MAX_REEXTRACT_DAYS)
             break;
-        const body = sliceDay(text, mmdd);
+        const body = tgt.mmdd != null ? sliceDay(text, tgt.mmdd) : sliceInterval(text, tgt.from ?? null, tgt.to);
         if (!body)
             continue;
         reextracted++;
-        let dayTxs;
+        let newTxs;
         try {
             const r = await callClaudeExtraction(client, `${header}\n${body}`, "text/plain", filename);
-            dayTxs = stripAnchorTxs(r.transactions ?? []).filter((t) => txDayKey(t) === mmdd);
+            newTxs = stripAnchorTxs(r.transactions ?? []).filter((t) => inTarget(t, tgt));
         }
         catch {
             continue;
         }
-        const decl = anchors.perDay.get(mmdd);
-        const orig = txs.filter((t) => txDayKey(t) === mmdd);
-        // Keep whichever day-set is MORE complete (smaller shortfall vs declared).
-        if (dayShortfall(dayTxs, decl) < dayShortfall(orig, decl)) {
-            txs = txs.filter((t) => txDayKey(t) !== mmdd).concat(dayTxs);
+        const candidate = txs.filter((t) => !inTarget(t, tgt)).concat(newTxs);
+        const reaudit = (0, pdf_core_1.auditExtratoCompleteness)({ ...merged, transactions: candidate }, text);
+        if (reaudit.deltaCents < audit.deltaCents) {
+            txs = candidate;
+            audit = reaudit;
         }
     }
     if (reextracted > 0)
-        console.log(`[completeness] re-extracted ${reextracted} day(s)`);
+        console.log(`[completeness] re-extracted ${reextracted} target(s) → state=${audit.state}`);
     return { ...merged, transactions: txs };
 }
 async function extractTextInChunks(client, text, filename, 
