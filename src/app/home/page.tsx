@@ -512,7 +512,7 @@ type BatchItem = {
 
 type ImportState =
   | { phase: "parsing" }
-  | { phase: "background"; jobId: string; filename: string; stage?: string }
+  | { phase: "background"; jobId: string; filename: string; stage?: string; finishing?: boolean }
   | { phase: "batch"; items: BatchItem[]; accountRows: ParsedWithMeta[] }
   | { phase: "preview"; rows: ParsedWithMeta[]; error?: string; recon?: ReconWarn; recons?: ReconWarn[] }
   | { phase: "saving"; rows: ParsedWithMeta[] };
@@ -633,6 +633,9 @@ function WorkspaceApp({
   const [txFilter, setTxFilter] = useState<"all" | "income" | "expense">("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [importState, setImportState] = useState<ImportState | null>(null);
+  // Handoff diferido: quando o job termina, guardamos a ação de entrega aqui e deixamos o
+  // indicador de etapas pacear até o fim antes de mostrar o resultado (SALVO-13).
+  const finalizeImportRef = useRef<(() => void) | null>(null);
   // Fatura completion is a SEPARATE lens from the account import: a small
   // dedicated confirmation (never the account "Revisar importação" modal).
   const [faturaResult, setFaturaResult] = useState<{ cardLabel: string; comprasCount: number; error?: string } | null>(null);
@@ -958,11 +961,9 @@ function WorkspaceApp({
         // analyzing modal and show a dedicated completion (the modal itself
         // branches on the cards flag for the message / redirect).
         if (data.status === "done" && data.type === "fatura") {
-          setImportState(null);
-          setFaturaResult({
-            cardLabel: data.cardLabel ?? "cartão",
-            comprasCount: data.comprasCount ?? 0,
-          });
+          const fr = { cardLabel: data.cardLabel ?? "cartão", comprasCount: data.comprasCount ?? 0 };
+          finalizeImportRef.current = () => { setImportState(null); setFaturaResult(fr); };
+          setImportState((s) => (s && s.phase === "background" ? { ...s, finishing: true, stage: "organizando" } : s));
           unsub();
           return;
         }
@@ -998,7 +999,8 @@ function WorkspaceApp({
               ? { kind: "delta", readBRL: formatCurrency(data.readBalance), declaredBRL: formatCurrency(data.declaredBalance), deltaBRL: formatCurrency(Math.abs(data.delta)) }
               : { kind: "no-total" };
           }
-          setImportState({ phase: "preview", rows, recon });
+          finalizeImportRef.current = () => setImportState({ phase: "preview", rows, recon });
+          setImportState((s) => (s && s.phase === "background" ? { ...s, finishing: true, stage: "organizando" } : s));
           unsub();
         } else if (data.status === "failed") {
           // A failed fatura shows its honest error in the card lens, never the
@@ -2415,6 +2417,7 @@ function WorkspaceApp({
               )
             })
           }
+          onProgressFinished={() => finalizeImportRef.current?.()}
         />
       )}
 
@@ -4055,17 +4058,32 @@ const IMPORT_STAGES = [
   { key: "conferindo", label: "Conferindo as contas" },
   { key: "organizando", label: "Organizando os gastos" },
 ];
-function StageSteps({ stage }: { stage?: string }) {
+const STAGE_DWELL_MS = 650;
+function StageSteps({ stage, finishing, onFinished }: { stage?: string; finishing?: boolean; onFinished?: () => void }) {
   const found = IMPORT_STAGES.findIndex((s) => s.key === stage);
-  const target = found >= 0 ? found : 0; // sem stage ainda → começa em "lendo"
-  // Duração mínima por etapa: avança uma de cada vez com dwell, pra doc rápido não
-  // estrobar (ex.: "conferindo" é instantâneo). Só anda pra frente.
+  const realIdx = found >= 0 ? found : 0; // sem stage ainda → começa em "lendo"
+  const last = IMPORT_STAGES.length - 1;
+  // Quando o job termina (`finishing`), o pipeline real pode ter passado por
+  // conferindo/organizando num piscar — então PACEAMOS o display por todas as etapas com
+  // duração mínima e só ENTREGAMOS pro resultado quando o indicador chega no fim. Doc
+  // rápido vê as 3 etapas (sem estrobar); doc longo é dirigido pela etapa real. Sem fake.
+  const target = finishing ? last : realIdx;
   const [idx, setIdx] = useState(0);
+  const firedRef = useRef(false);
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
   useEffect(() => {
-    if (target <= idx) return;
-    const t = setTimeout(() => setIdx((s) => Math.min(s + 1, target)), 650);
-    return () => clearTimeout(t);
-  }, [target, idx]);
+    if (idx < target) {
+      const t = setTimeout(() => setIdx((s) => Math.min(s + 1, target)), STAGE_DWELL_MS);
+      return () => clearTimeout(t);
+    }
+    // Chegou no fim do pipeline real: segura a última etapa o dwell mínimo e entrega.
+    if (finishing && idx >= last && !firedRef.current) {
+      firedRef.current = true;
+      const t = setTimeout(() => onFinishedRef.current?.(), STAGE_DWELL_MS);
+      return () => clearTimeout(t);
+    }
+  }, [idx, target, finishing, last]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "40px 0", width: "100%", maxWidth: 280, margin: "0 auto" }}>
       {IMPORT_STAGES.map((s, i) => {
@@ -4100,13 +4118,15 @@ function ImportModal({
   onCancel,
   onConfirm,
   onToggle,
-  onCategoryChange
+  onCategoryChange,
+  onProgressFinished
 }: {
   state: ImportState;
   onCancel: () => void;
   onConfirm: (rows: ParsedWithMeta[]) => void;
   onToggle: (id: string) => void;
   onCategoryChange: (id: string, cat: string) => void;
+  onProgressFinished: () => void;
 }) {
   const isParsing = state.phase === "parsing";
   const isBackground = state.phase === "background";
@@ -4204,7 +4224,11 @@ function ImportModal({
           {isBackground ? (
             // Indicador por ETAPA real (lê `stage` do job em tempo real). Sem spinner mudo.
             <div style={{ padding: "8px 0" }}>
-              <StageSteps stage={state.phase === "background" ? state.stage : undefined} />
+              <StageSteps
+                stage={state.phase === "background" ? state.stage : undefined}
+                finishing={state.phase === "background" ? state.finishing : false}
+                onFinished={onProgressFinished}
+              />
               <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", textAlign: "center", marginTop: 8 }}>
                 Extratos grandes podem levar até um minuto.
               </p>
