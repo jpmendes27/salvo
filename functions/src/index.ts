@@ -1060,6 +1060,140 @@ export const sendInviteEmail = onRequest(
   }
 );
 
+// ─── SALVO-6: recuperação de senha nativa e on-brand (oobCode do Firebase por baixo) ──
+// Anti-enumeração: resposta SEMPRE genérica (exista o e-mail ou não, rate-limit ou erro de
+// envio). Rate-limit por e-mail + IP. O Admin SDK gera o link com o oobCode do Firebase;
+// extraímos o oobCode e montamos a URL da NOSSA tela on-brand — o usuário nunca toca
+// firebaseapp.com. A regra de senha (8 dígitos) é validada na tela, igual ao /login.
+const PASSWORD_RESET_GENERIC = "Se existir uma conta com esse e-mail, enviamos as instruções.";
+const APP_RESET_URL = "https://jpmendes.com/salvo/reset";
+
+// Janela fixa de 15 min: máx 3 por e-mail, 15 por IP. Falha de infra não bloqueia usuário
+// real (deixa passar) — o anti-abuso é best-effort, não um gate de segurança.
+async function passwordResetRateLimited(emailKey: string, ip: string): Promise<boolean> {
+  const db = admin.firestore();
+  const WINDOW_MS = 15 * 60 * 1000;
+  const now = Date.now();
+  const limits = [
+    { key: `email:${emailKey}`, max: 3 },
+    { key: `ip:${ip}`, max: 15 },
+  ];
+  try {
+    for (const { key, max } of limits) {
+      const ref = db.collection("passwordResetRateLimit").doc(encodeURIComponent(key));
+      const limited = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const data = snap.data() as { count?: number; windowStart?: number } | undefined;
+        if (!data || now - (data.windowStart ?? 0) > WINDOW_MS) {
+          tx.set(ref, { count: 1, windowStart: now });
+          return false;
+        }
+        if ((data.count ?? 0) >= max) return true;
+        tx.update(ref, { count: (data.count ?? 0) + 1 });
+        return false;
+      });
+      if (limited) return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("passwordReset rate-limit check failed:", e);
+    return false;
+  }
+}
+
+function passwordResetEmailHtml(resetUrl: string): string {
+  return `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#09090b;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;padding:40px 20px">
+    <tr><td align="center">
+      <table width="100%" style="max-width:520px;background:#111214;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden">
+        <tr><td style="padding:36px 36px 32px">
+          <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,0.28)">SALVÔ!</p>
+          <h1 style="margin:0 0 24px;font-size:24px;font-weight:800;color:#fff;line-height:1.3">Bora criar uma senha nova?</h1>
+          <p style="margin:0 0 12px;font-size:15px;color:rgba(255,255,255,0.75);line-height:1.7">
+            Você pediu pra trocar a senha do Salvô!. É rapidinho: clica no botão e escolhe uma senha nova de <strong style="color:#fff">8 números</strong>.
+          </p>
+          <p style="margin:0 0 28px;font-size:15px;color:rgba(255,255,255,0.55);line-height:1.7">
+            Esse link vale por 1 hora.
+          </p>
+          <a href="${resetUrl}" style="display:inline-block;background:#b8f55a;color:#09090b;font-size:14px;font-weight:800;text-decoration:none;padding:14px 32px;border-radius:10px;letter-spacing:-.01em">Criar senha nova</a>
+        </td></tr>
+        <tr><td style="padding:18px 36px;border-top:1px solid rgba(255,255,255,0.05)">
+          <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);line-height:1.7">Se não foi você que pediu, pode ignorar este e-mail — sua senha continua a mesma.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+export const requestPasswordReset = onRequest(
+  {
+    cors: true,
+    secrets: ["RESEND_API_KEY"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.status(204).send("");
+      return;
+    }
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
+
+    // Resposta genérica reutilizável — o servidor NUNCA diferencia "enviado" de "não existe".
+    const generic = () => res.status(200).json({ ok: true, message: PASSWORD_RESET_GENERIC });
+
+    const email = (req.body?.email ?? "").toString().trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { generic(); return; }
+
+    const ip = (req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim()) || req.ip || "unknown";
+    if (await passwordResetRateLimited(email, ip)) { generic(); return; } // silencioso
+
+    try {
+      // Link do Admin SDK traz o oobCode do Firebase. actionCodeSettings.url = NOSSA tela
+      // (continueUrl); exige jpmendes.com nos authorized domains do Firebase Auth.
+      const link = await admin.auth().generatePasswordResetLink(email, {
+        url: APP_RESET_URL,
+        handleCodeInApp: false,
+      });
+      const oobCode = new URL(link).searchParams.get("oobCode");
+      if (!oobCode) throw new Error("oobCode ausente no link gerado");
+      const resetUrl = `${APP_RESET_URL}?oobCode=${encodeURIComponent(oobCode)}`;
+
+      const apiKey = process.env.RESEND_API_KEY;
+      if (!apiKey) {
+        console.error("requestPasswordReset: RESEND_API_KEY not configured");
+      } else {
+        const resend = new Resend(apiKey);
+        const { error } = await resend.emails.send({
+          from: "Salvô! <salvo@jpmendes.com>",
+          to: [email],
+          subject: "Criar uma senha nova no Salvô!",
+          html: passwordResetEmailHtml(resetUrl),
+        });
+        if (error) console.error("requestPasswordReset Resend error:", error);
+      }
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      // user-not-found NÃO vaza (cai no genérico). Só logamos erros que não sejam enumeração.
+      if (code !== "auth/user-not-found" && code !== "auth/email-not-found") {
+        console.error("requestPasswordReset error:", err);
+      }
+    }
+    generic();
+  }
+);
+
 export const sendVerificationCode = onRequest(
   {
     cors: true,

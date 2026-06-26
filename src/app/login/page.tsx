@@ -5,7 +5,6 @@ import {
   createUserWithEmailAndPassword,
   getRedirectResult,
   onAuthStateChanged,
-  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
@@ -40,6 +39,9 @@ const G_10 = "rgba(184,245,90,0.10)";
 const G_20 = "rgba(184,245,90,0.18)";
 const G_30 = "rgba(184,245,90,0.28)";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const REQUEST_PASSWORD_RESET_URL =
+  process.env.NEXT_PUBLIC_REQUEST_PASSWORD_RESET_URL ||
+  "https://requestpasswordreset-ihalwtxjpq-uc.a.run.app";
 
 // TEMPORARY: Google auth disabled — auth/missing-initial-state on iOS (WebKit/CCT storage
 // partitioning breaks the firebaseapp.com OAuth handler). Re-enable once fixed.
@@ -413,12 +415,20 @@ function AuthScreen() {
     setError("");
     setMessage("");
     setBusy(true);
+    // Anti-enumeração: a mensagem é SEMPRE genérica — exista o e-mail ou não, dê erro ou
+    // não. Quem decide se manda o e-mail é a função (com rate-limit); o cliente nunca
+    // diferencia "enviado" de "não encontrado".
+    const GENERIC = "Se existir uma conta com esse e-mail, enviamos as instruções.";
     try {
-      await sendPasswordResetEmail(auth, email);
-      setMessage("Pronto! Mandamos o link pro teu e-mail.");
-    } catch (err) {
-      setError(getUserFacingError(err, "login"));
+      await fetch(REQUEST_PASSWORD_RESET_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+    } catch {
+      // Falha de rede também colapsa no genérico — não vaza nada.
     } finally {
+      setMessage(GENERIC);
       setBusy(false);
     }
   }
