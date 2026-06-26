@@ -423,7 +423,9 @@ function AuthScreen() {
       await fetch(REQUEST_PASSWORD_RESET_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        // appUrl: a função só aceita hosts nossos (domínio/preview) — faz o link do e-mail
+        // cair na MESMA origem de onde o reset foi pedido (preview testa ponta a ponta).
+        body: JSON.stringify({ email: email.trim().toLowerCase(), appUrl: `${window.location.origin}${BASE}` }),
       });
     } catch {
       // Falha de rede também colapsa no genérico — não vaza nada.

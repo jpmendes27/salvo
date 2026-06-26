@@ -979,7 +979,27 @@ exports.sendInviteEmail = (0, https_1.onRequest)({
 // extraímos o oobCode e montamos a URL da NOSSA tela on-brand — o usuário nunca toca
 // firebaseapp.com. A regra de senha (8 dígitos) é validada na tela, igual ao /login.
 const PASSWORD_RESET_GENERIC = "Se existir uma conta com esse e-mail, enviamos as instruções.";
-const APP_RESET_URL = "https://jpmendes.com/salvo/reset";
+const APP_BASE_URL = "https://jpmendes.com/salvo";
+const APP_RESET_URL = `${APP_BASE_URL}/reset`;
+// O link do e-mail só pode apontar pra um host NOSSO (domínio, hosting, canal de preview).
+// Isso deixa o preview testar ponta a ponta sem nunca permitir open-redirect do oobCode pra
+// fora. Sem appUrl válido → cai no default de produção.
+function resolveResetBase(appUrl) {
+    try {
+        if (typeof appUrl === "string" && appUrl) {
+            const u = new URL(appUrl);
+            const h = u.hostname;
+            const ok = u.protocol === "https:" && (h === "jpmendes.com" ||
+                h === "fincheck-pro.web.app" ||
+                h === "fincheck-pro.firebaseapp.com" ||
+                (h.startsWith("fincheck-pro--") && h.endsWith(".web.app")));
+            if (ok)
+                return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+        }
+    }
+    catch { /* cai no default */ }
+    return APP_BASE_URL;
+}
 // Janela fixa de 15 min: máx 3 por e-mail, 15 por IP. Falha de infra não bloqueia usuário
 // real (deixa passar) — o anti-abuso é best-effort, não um gate de segurança.
 async function passwordResetRateLimited(emailKey, ip) {
@@ -1085,7 +1105,7 @@ exports.requestPasswordReset = (0, https_1.onRequest)({
         const oobCode = new URL(link).searchParams.get("oobCode");
         if (!oobCode)
             throw new Error("oobCode ausente no link gerado");
-        const resetUrl = `${APP_RESET_URL}?oobCode=${encodeURIComponent(oobCode)}`;
+        const resetUrl = `${resolveResetBase(req.body?.appUrl)}/reset?oobCode=${encodeURIComponent(oobCode)}`;
         const apiKey = process.env.RESEND_API_KEY;
         if (!apiKey) {
             console.error("requestPasswordReset: RESEND_API_KEY not configured");
