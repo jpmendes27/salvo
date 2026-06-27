@@ -129,6 +129,11 @@ curto/pessoal; painel mais detalhado.
 - Slider de simulação: tempo real no front, IA só ao parar (debounce 800ms); meta IA após
   interação.
 - Nome **SALVÔ!** (acento + exclamação, gíria carioca).
+- **Recuperação de senha nativa e on-brand** (Cloud Function `requestPasswordReset` + e-mail
+  Resend): regra de senha **só-número espelhada do login** (fecha o lockout), link na tela
+  `/reset` do **nosso domínio** (oobCode do Firebase por baixo — nada de firebaseapp.com),
+  resposta **sempre genérica** (anti-enumeração) e rate-limit por e-mail/IP. O link do e-mail
+  só aponta pra host nosso (allowlist) — anti open-redirect do oobCode.
 
 ## O que NÃO fazer
 - Não misturar lente de conta e cartão em nenhuma agregação.
