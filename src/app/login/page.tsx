@@ -15,7 +15,8 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { auth, db, googleProvider, app } from "@/lib/firebase";
@@ -205,6 +206,13 @@ function AuthScreen() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  // Modal "esqueci minha senha": e-mail próprio, CTA próprio ("recuperar acesso") e copy de
+  // sucesso própria — separado do fluxo de login pra não colidir CTA/estado.
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+  const [resetErr, setResetErr] = useState("");
 
   // Fire sign_up_started when user enters signup mode (not on initial signin mount)
   useEffect(() => {
@@ -407,31 +415,35 @@ function AuthScreen() {
     }
   }
 
-  async function handleReset() {
-    if (!email) {
-      setError("Digita o teu e-mail pra a gente mandar o link de recuperação.");
+  function openReset() {
+    setResetEmail(email);      // prefill com o que já foi digitado, se houver
+    setResetErr("");
+    setResetDone(false);
+    setResetOpen(true);
+  }
+
+  async function submitReset() {
+    const mail = resetEmail.trim().toLowerCase();
+    // E-mail vazio/ inválido → hint claro no próprio modal, nunca deixa dar erro.
+    if (!mail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+      setResetErr("Digita teu e-mail pra a gente te enviar as instruções.");
       return;
     }
-    setError("");
-    setMessage("");
-    setBusy(true);
-    // Anti-enumeração: a mensagem é SEMPRE genérica — exista o e-mail ou não, dê erro ou
-    // não. Quem decide se manda o e-mail é a função (com rate-limit); o cliente nunca
-    // diferencia "enviado" de "não encontrado".
-    const GENERIC = "Se existir uma conta com esse e-mail, enviamos as instruções.";
+    setResetErr("");
+    setResetBusy(true);
     try {
       await fetch(REQUEST_PASSWORD_RESET_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // appUrl: a função só aceita hosts nossos (domínio/preview) — faz o link do e-mail
         // cair na MESMA origem de onde o reset foi pedido (preview testa ponta a ponta).
-        body: JSON.stringify({ email: email.trim().toLowerCase(), appUrl: `${window.location.origin}${BASE}` }),
+        body: JSON.stringify({ email: mail, appUrl: `${window.location.origin}${BASE}` }),
       });
     } catch {
-      // Falha de rede também colapsa no genérico — não vaza nada.
+      // Falha de rede não vaza nada — segue pro mesmo estado de sucesso (anti-enumeração).
     } finally {
-      setMessage(GENERIC);
-      setBusy(false);
+      setResetBusy(false);
+      setResetDone(true); // copy única: "Entre no seu e-mail e siga as instruções..."
     }
   }
 
@@ -643,12 +655,12 @@ function AuthScreen() {
             </button>
             <button
               type="button"
-              onClick={handleReset}
+              onClick={openReset}
               style={{ background: "none", border: "none", color: "rgba(255,255,255,0.33)", fontSize: 12.5, cursor: "pointer", padding: 0, letterSpacing: "-0.01em", transition: "color .2s" }}
               onMouseEnter={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
               onMouseLeave={(event) => { event.currentTarget.style.color = "rgba(255,255,255,0.33)"; }}
             >
-              Recuperar acesso
+              Esqueci minha senha
             </button>
           </div>
 
@@ -665,6 +677,74 @@ function AuthScreen() {
           </p>
         </div>
       </div>
+
+      {/* Modal "esqueci minha senha": overlay cobre o heading; e-mail + CTA próprios;
+          copy de sucesso única. Não colide com o fluxo de login. */}
+      {resetOpen && (
+        <div
+          onClick={() => !resetBusy && setResetOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 380, background: "#0b0b0b", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 16, padding: "28px 26px", position: "relative", animation: "fadeUp .3s ease both" }}
+          >
+            <button
+              type="button"
+              onClick={() => setResetOpen(false)}
+              aria-label="Fechar"
+              style={{ position: "absolute", top: 16, right: 16, background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)", display: "flex" }}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{ marginBottom: 18 }}><Logo /></div>
+
+            {!resetDone ? (
+              <>
+                <h3 style={{ fontSize: 19, fontWeight: 800, letterSpacing: "-0.02em", color: "#fff", marginBottom: 6 }}>Esqueci minha senha</h3>
+                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 20 }}>
+                  Digita teu e-mail que a gente te manda as instruções pra criar uma senha nova.
+                </p>
+
+                <FInput
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={resetEmail}
+                  onChange={(event) => { setResetEmail(event.target.value); if (resetErr) setResetErr(""); }}
+                />
+
+                {resetErr && <p style={{ fontSize: 12.5, color: "#ff8080", marginTop: 10, lineHeight: 1.5 }}>{resetErr}</p>}
+
+                <button
+                  type="button"
+                  onClick={submitReset}
+                  disabled={resetBusy}
+                  style={{ width: "100%", marginTop: 16, padding: "13px 0", borderRadius: 12, background: G, color: "#000", fontSize: 14, fontWeight: 800, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, letterSpacing: "-0.02em", transition: "all .2s" }}
+                >
+                  {resetBusy
+                    ? <div style={{ width: 16, height: 16, border: "2.5px solid rgba(0,0,0,0.35)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+                    : <>Recuperar acesso <ArrowRight size={15} /></>}
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 style={{ fontSize: 19, fontWeight: 800, letterSpacing: "-0.02em", color: "#fff", marginBottom: 6 }}>Prontinho!</h3>
+                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.6)", lineHeight: 1.65, marginBottom: 22 }}>
+                  Entre no seu e-mail e siga as instruções para recuperar sua senha.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setResetOpen(false)}
+                  style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: G, color: "#000", fontSize: 14, fontWeight: 800, border: "none", cursor: "pointer", letterSpacing: "-0.02em" }}
+                >
+                  Entendi
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
