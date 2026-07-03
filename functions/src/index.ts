@@ -4,6 +4,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
 import crypto from "crypto";
 import * as admin from "firebase-admin";
+// WhatsApp chatbot (passada 1 — fundação reply-only)
+import { processInbound } from "./whatsapp/router";
+import { parseInbound, renderReply, sendText } from "./whatsapp/transport";
+import { firestoreStore } from "./whatsapp/store";
 import {
   type ParsedClaudeResponse,
   type ParsedFatura,
@@ -2629,6 +2633,102 @@ export const clientError = onRequest(
       res.json({ ok: true });
     } catch {
       res.json({ ok: false });
+    }
+  }
+);
+
+// ─── WhatsApp chatbot (passada 1 — fundação reply-only) ──────────────────────
+// Duas functions: (1) CALLABLE que o app usa pra gerar o código de vínculo; (2) o
+// WEBHOOK que recebe o inbound do Evolution, roda o roteador e responde (reply-only).
+
+// (1) Gera o código de 6 dígitos de vínculo a partir do usuário LOGADO (uid), não do
+// número — o número só é conhecido quando a mensagem chega. Uso único, expira 10min.
+export const generateWhatsappLinkCode = onCall({ maxInstances: 10 }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Faça login pra continuar.");
+
+  const { workspaceId } = (request.data ?? {}) as { workspaceId?: string };
+  if (!workspaceId) throw new HttpsError("invalid-argument", "Workspace não informado.");
+
+  const db = admin.firestore();
+  // Membership gate: só membro ativo do workspace gera código pra ele.
+  const memberSnap = await db.doc(`workspaces/${workspaceId}/members/${uid}`).get();
+  if (!memberSnap.exists || memberSnap.data()?.status !== "active") {
+    throw new HttpsError("permission-denied", "Você não participa deste workspace.");
+  }
+
+  const TTL_MS = 10 * 60 * 1000;
+  const now = Date.now();
+  // Código único de 6 dígitos (retry em colisão rara). "Livre" = inexistente, usado ou expirado.
+  let code = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+    const ref = db.collection("whatsappVerificationCodes").doc(candidate);
+    const created = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const d = snap.exists ? (snap.data() as { used?: boolean; expiresAt?: number }) : null;
+      const free = !d || d.used === true || (typeof d.expiresAt === "number" && d.expiresAt <= now);
+      if (!free) return false;
+      tx.set(ref, { uid, workspaceId, createdAt: now, expiresAt: now + TTL_MS, used: false });
+      return true;
+    });
+    if (created) { code = candidate; break; }
+  }
+  if (!code) throw new HttpsError("internal", "Não consegui gerar o código agora. Tenta de novo.");
+
+  return { code, expiresInSeconds: TTL_MS / 1000, botNumber: process.env.WHATSAPP_BOT_NUMBER ?? "" };
+});
+
+// (2) Webhook do Evolution (reply-only). Valida origem por token secreto, roda o
+// roteador e responde SÓ em reação ao inbound. Nunca inicia conversa.
+export const whatsappWebhook = onRequest(
+  {
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "WHATSAPP_WEBHOOK_TOKEN"],
+    maxInstances: 10,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
+
+    // Origem: token secreto via ?token= ou header x-webhook-token (não confiar em request aberto).
+    const expected = process.env.WHATSAPP_WEBHOOK_TOKEN;
+    const got = (typeof req.query.token === "string" ? req.query.token : undefined) ?? req.get("x-webhook-token") ?? "";
+    if (!expected || got !== expected) { res.status(403).json({ error: "forbidden" }); return; }
+
+    // Só mensagem de texto de usuário; o resto é ignorado.
+    const inbound = parseInbound(req.body);
+    if (!inbound) { res.status(200).json({ ignored: true }); return; }
+
+    try {
+      const db = admin.firestore();
+      const store = firestoreStore(db);
+      const services = {
+        // AJUDA encaminha o relato por e-mail (Resend, já na stack).
+        sendHelpEmail: async (phone: string, text: string) => {
+          const apiKey = process.env.RESEND_API_KEY;
+          if (!apiKey) { console.error("whatsappWebhook: RESEND_API_KEY not configured"); return; }
+          const resend = new Resend(apiKey);
+          const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          await resend.emails.send({
+            from: "Salvô! <salvo@jpmendes.com>",
+            to: ["salvo@jpmendes.com"],
+            subject: "[Salvô!] Pedido de ajuda pelo WhatsApp",
+            html: `<p><strong>De (WhatsApp):</strong> ${phone}</p><p>${safe}</p>`,
+          });
+        },
+      };
+
+      const result = await processInbound(inbound, { store, services, now: () => Date.now() });
+      const out = renderReply(result); // ÚNICO ponto de renderização (transporte agnóstico)
+      const apiKey = process.env.EVOLUTION_API_KEY;
+      if (out && apiKey) {
+        await sendText(inbound.phone, out, EVOLUTION_URL, EVOLUTION_INSTANCE, apiKey);
+      }
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error("whatsappWebhook error:", err instanceof Error ? err.message : String(err));
+      res.status(200).json({ ok: false }); // 200 pro Evolution não entrar em loop de retry
     }
   }
 );

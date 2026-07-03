@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.helpLeaf = void 0;
+exports.helpLeaf = {
+    mode: "help",
+    inputType: "structured",
+    requiresLink: false,
+    async handle(ctx) {
+        if (ctx.state.mode !== "help_capture") {
+            // Entrada: convida a contar o problema e passa a aguardar a próxima mensagem.
+            return { reply: "Pode mandar. Me conta o que tá pegando.", nextMode: "help_capture" };
+        }
+        // Captura: encaminha o relato por e-mail e encerra o fluxo.
+        await ctx.services.sendHelpEmail(ctx.phone, ctx.text);
+        return { reply: "Recebi! Te respondo em breve por aqui.", nextMode: "idle" };
+    },
+};
+//# sourceMappingURL=help.js.map
