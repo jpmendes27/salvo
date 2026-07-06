@@ -49,6 +49,10 @@ const admin = __importStar(require("firebase-admin"));
 const router_1 = require("./whatsapp/router");
 const transport_1 = require("./whatsapp/transport");
 const store_1 = require("./whatsapp/store");
+const webhookAuth_1 = require("./whatsapp/webhookAuth");
+const params_1 = require("firebase-functions/params");
+// Segredo do webhook do WhatsApp — Secret Manager (nunca env plaintext nem hardcoded).
+const whatsappWebhookSecret = (0, params_1.defineSecret)("WHATSAPP_WEBHOOK_SECRET");
 const pdf_core_1 = require("./pdf-core");
 admin.initializeApp();
 // ─── HMAC helpers for stateless verification (no Firestore needed) ────────────
@@ -2407,7 +2411,7 @@ exports.generateWhatsappLinkCode = (0, https_1.onCall)({ maxInstances: 10 }, asy
 // (2) Webhook do Evolution (reply-only). Valida origem por token secreto, roda o
 // roteador e responde SÓ em reação ao inbound. Nunca inicia conversa.
 exports.whatsappWebhook = (0, https_1.onRequest)({
-    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "WHATSAPP_WEBHOOK_TOKEN"],
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", whatsappWebhookSecret],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB",
@@ -2416,11 +2420,17 @@ exports.whatsappWebhook = (0, https_1.onRequest)({
         res.status(405).json({ error: "Method Not Allowed" });
         return;
     }
-    // Origem: token secreto via ?token= ou header x-webhook-token (não confiar em request aberto).
-    const expected = process.env.WHATSAPP_WEBHOOK_TOKEN;
-    const got = (typeof req.query.token === "string" ? req.query.token : undefined) ?? req.get("x-webhook-token") ?? "";
-    if (!expected || got !== expected) {
-        res.status(403).json({ error: "forbidden" });
+    // AUTH: segredo por HEADER (preferencial) ou SEGMENTO DE PATH (fallback) — NUNCA query.
+    // Comparação em tempo constante. Falha → 401 genérico (não revela qual caminho falhou).
+    const provided = (0, webhookAuth_1.extractWebhookToken)(req.get("x-salvo-webhook-token"), req.path);
+    if (!(0, webhookAuth_1.secretMatches)(provided, whatsappWebhookSecret.value())) {
+        res.status(401).json({ error: "unauthorized" });
+        return;
+    }
+    // Defesa em profundidade: corpo Evolution bem-formado + instância esperada. Body
+    // malformado ou instância errada → 400, sem processar, sem chamar o roteador.
+    if (!(0, webhookAuth_1.isWellFormedEvent)(req.body, EVOLUTION_INSTANCE)) {
+        res.status(400).json({ error: "bad request" });
         return;
     }
     // Só mensagem de texto de usuário; o resto é ignorado.

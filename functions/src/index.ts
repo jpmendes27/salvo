@@ -8,6 +8,11 @@ import * as admin from "firebase-admin";
 import { processInbound } from "./whatsapp/router";
 import { parseInbound, renderReply, sendText } from "./whatsapp/transport";
 import { firestoreStore } from "./whatsapp/store";
+import { extractWebhookToken, secretMatches, isWellFormedEvent } from "./whatsapp/webhookAuth";
+import { defineSecret } from "firebase-functions/params";
+
+// Segredo do webhook do WhatsApp — Secret Manager (nunca env plaintext nem hardcoded).
+const whatsappWebhookSecret = defineSecret("WHATSAPP_WEBHOOK_SECRET");
 import {
   type ParsedClaudeResponse,
   type ParsedFatura,
@@ -2696,7 +2701,7 @@ export const generateWhatsappLinkCode = onCall({ maxInstances: 10 }, async (requ
 // roteador e responde SÓ em reação ao inbound. Nunca inicia conversa.
 export const whatsappWebhook = onRequest(
   {
-    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "WHATSAPP_WEBHOOK_TOKEN"],
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", whatsappWebhookSecret],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB",
@@ -2704,10 +2709,20 @@ export const whatsappWebhook = onRequest(
   async (req, res) => {
     if (req.method !== "POST") { res.status(405).json({ error: "Method Not Allowed" }); return; }
 
-    // Origem: token secreto via ?token= ou header x-webhook-token (não confiar em request aberto).
-    const expected = process.env.WHATSAPP_WEBHOOK_TOKEN;
-    const got = (typeof req.query.token === "string" ? req.query.token : undefined) ?? req.get("x-webhook-token") ?? "";
-    if (!expected || got !== expected) { res.status(403).json({ error: "forbidden" }); return; }
+    // AUTH: segredo por HEADER (preferencial) ou SEGMENTO DE PATH (fallback) — NUNCA query.
+    // Comparação em tempo constante. Falha → 401 genérico (não revela qual caminho falhou).
+    const provided = extractWebhookToken(req.get("x-salvo-webhook-token"), req.path);
+    if (!secretMatches(provided, whatsappWebhookSecret.value())) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+
+    // Defesa em profundidade: corpo Evolution bem-formado + instância esperada. Body
+    // malformado ou instância errada → 400, sem processar, sem chamar o roteador.
+    if (!isWellFormedEvent(req.body, EVOLUTION_INSTANCE)) {
+      res.status(400).json({ error: "bad request" });
+      return;
+    }
 
     // Só mensagem de texto de usuário; o resto é ignorado.
     const inbound = parseInbound(req.body);
