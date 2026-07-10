@@ -52,7 +52,7 @@ export async function sendText(
   const resp = await fetch(`${evolutionUrl}/message/sendText/${instance}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: apiKey },
-    body: JSON.stringify({ number, options: { delay: 400 }, textMessage: { text } }),
+    body: JSON.stringify({ number, text }), // Evolution v2: texto PLANO na raiz (não textMessage)
   });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");

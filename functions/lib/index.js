@@ -885,11 +885,7 @@ exports.sendInviteWhatsApp = (0, https_1.onRequest)({
         const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
             method: "POST",
             headers: { "Content-Type": "application/json", apikey: apiKey },
-            body: JSON.stringify({
-                number: phone,
-                options: { delay: 500 },
-                textMessage: { text: message }
-            })
+            body: JSON.stringify({ number: phone, text: message }) // Evolution v2: texto plano na raiz
         });
         const data = await resp.json();
         if (!resp.ok)
@@ -1174,11 +1170,7 @@ exports.sendVerificationCode = (0, https_1.onRequest)({
             const resp = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", apikey: apiKey },
-                body: JSON.stringify({
-                    number: phone,
-                    options: { delay: 500 },
-                    textMessage: { text: `Seu código de verificação do Salvô!: *${code}*\n\nEle expira em 10 minutos. Não compartilhe com ninguém.` }
-                })
+                body: JSON.stringify({ number: phone, text: `Seu código de verificação do Salvô!: *${code}*\n\nEle expira em 10 minutos. Não compartilhe com ninguém.` }) // Evolution v2: texto plano na raiz
             });
             if (!resp.ok)
                 throw new Error(await resp.text());
