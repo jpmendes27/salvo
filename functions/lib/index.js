@@ -849,7 +849,7 @@ exports.parseBankStatement = (0, https_1.onRequest)({
 // EVOLUTION_URL em functions/.env é a fonte da verdade e sobrescreve. O default
 // abaixo é só o fallback se o env faltar num deploy: HTTPS, nunca o IP em texto
 // puro. Não é credencial (a EVOLUTION_API_KEY vive no Secret Manager).
-const EVOLUTION_URL = process.env.EVOLUTION_URL || "https://wa.jpmendes.com";
+const EVOLUTION_URL = process.env.EVOLUTION_URL || "http://136.248.106.93:8081";
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || "fincheck-pro";
 exports.sendInviteWhatsApp = (0, https_1.onRequest)({
     cors: true,
