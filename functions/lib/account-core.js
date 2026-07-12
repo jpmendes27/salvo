@@ -7,9 +7,13 @@
 //
 // É PURA: recebe dados, devolve agregados. Não lê Firestore, não faz request.
 // Cartão é lente separada — nunca entra aqui (source 'card' é filtrado fora).
+//
+// ÂNCORA DE RENDA: derivada do TRANSACIONAL (soma das entradas 'trabalho' via
+// classifyIncome), não mais a renda declarada digitada no app.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.prevMonthKey = prevMonthKey;
 exports.buildAccountSummary = buildAccountSummary;
+const income_core_1 = require("./income-core");
 // Rótulos humanos — espelho de CATEGORY_LABELS (src/lib/parsers.ts).
 const CATEGORY_LABELS = {
     Alimentacao: "Alimentação", Mercado: "Mercado", Transporte: "Transporte", Carro: "Carro",
@@ -39,18 +43,48 @@ function prevMonthKey(monthKey) {
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 function buildAccountSummary(args) {
-    const { transactions, prevTransactions, monthlyIncome } = args;
+    const { transactions, prevTransactions, userNames } = args;
     // Conta = tudo que NÃO é cartão. Pontuável = conta sem os internos (neutros).
     const accountTx = transactions.filter((t) => resolveSource(t) !== "card");
     const scorable = accountTx.filter((t) => !t.internal);
     const expenses = scorable.filter((t) => t.type === "expense");
     const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
-    const totalEntradas = scorable
-        .filter((t) => t.type === "income")
-        .reduce((s, t) => s + t.amount, 0);
-    // Sem promessa furada: sem base de renda real (renda <= 0 E sem entradas),
-    // rendaRef é null → score null ("Sem dados suficientes"), nunca base fabricada.
-    const rendaRef = monthlyIncome > 0 ? monthlyIncome : totalEntradas > 0 ? totalEntradas : null;
+    const incomeTxs = scorable.filter((t) => t.type === "income");
+    const totalEntradas = incomeTxs.reduce((s, t) => s + t.amount, 0);
+    // ── RENDA DERIVADA DO TRANSACIONAL ─────────────────────────────────────────
+    // A âncora deixou de ser a renda DECLARADA (valor digitado) e passou a ser o que o
+    // dado sustenta: só as entradas classificadas como 'trabalho' (classifyIncome).
+    // 'neutro' (transferência própria, resgate, estorno, rendimento) e 'divida'
+    // (empréstimo recebido) NÃO são renda.
+    const classificadas = incomeTxs.map((t) => ({
+        tx: t,
+        v: (0, income_core_1.classifyIncome)({ type: "income", description: t.description ?? "", amount: t.amount, internal: t.internal }, { userNames }),
+    }));
+    const somaPor = (k) => classificadas.filter((c) => c.v.kind === k).reduce((s, c) => s + c.tx.amount, 0);
+    const breakdown = {
+        trabalho: somaPor("trabalho"),
+        neutro: somaPor("neutro"),
+        divida: somaPor("divida"),
+    };
+    const rendaDerivada = breakdown.trabalho;
+    // CONFIANÇA: quanto da entrada do mês é renda de trabalho CLARA. Alta = a foto é
+    // limpa (a IA pode falar direto). Baixa = boa parte da entrada não é renda clara →
+    // a IA mostra a incerteza em vez de decretar.
+    const parcelaTrabalho = totalEntradas > 0 ? rendaDerivada / totalEntradas : 0;
+    const rendaConfianca = totalEntradas > 0 && parcelaTrabalho >= 0.8 ? "alta" : "baixa";
+    // O que NÃO é renda — pra IA poder APONTAR a incerteza com honestidade (nunca inventar).
+    const itensNaoRenda = classificadas
+        .filter((c) => c.v.kind !== "trabalho")
+        .map((c) => ({
+        descricao: c.tx.description ?? "",
+        valor: c.tx.amount,
+        kind: c.v.kind,
+        motivo: c.v.reason,
+    }))
+        .sort((a, b) => b.valor - a.valor);
+    // Sem promessa furada: sem renda derivada (nada classificado como 'trabalho'),
+    // rendaRef é null → score null → degrada honesto. Nunca base fabricada.
+    const rendaRef = rendaDerivada > 0 ? rendaDerivada : null;
     const comprometimento = rendaRef && totalGasto > 0 ? Math.min(100, Math.round((totalGasto / rendaRef) * 100)) : 0;
     const ratio = rendaRef ? totalGasto / rendaRef : 0;
     const score = expenses.length === 0 || rendaRef === null
@@ -98,6 +132,13 @@ function buildAccountSummary(args) {
         byCategory,
         rendaRef,
         expensesCount: expenses.length,
+        renda: {
+            derivada: rendaDerivada,
+            confianca: rendaConfianca,
+            parcelaTrabalho,
+            breakdown,
+            itensNaoRenda,
+        },
     };
 }
 //# sourceMappingURL=account-core.js.map

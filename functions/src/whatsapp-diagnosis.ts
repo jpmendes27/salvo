@@ -17,6 +17,10 @@ type Firestore = adminType.firestore.Firestore;
 // trocar pra claude-opus-4-x aqui se precisar de mais qualidade
 const WHATSAPP_DIAG_MODEL = "claude-haiku-4-5-20251001";
 
+// Versão da LÓGICA do diagnóstico (âncora de renda + prompt). Faz o cache invalidar
+// sozinho quando a régua muda — senão o texto velho sobreviveria ao carimbo igual.
+const DIAG_VERSION = "v2-renda-derivada";
+
 const BRL = (v: number) =>
   `R$${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -46,12 +50,16 @@ export async function getDataStamp(db: Firestore, workspaceId: string): Promise<
 async function loadAccountLens(db: Firestore, workspaceId: string, monthKey: string) {
   const prevKey = prevMonthKey(monthKey);
   const txCol = db.collection(`workspaces/${workspaceId}/transactions`);
-  const [wsSnap, curSnap, prevSnap] = await Promise.all([
-    db.doc(`workspaces/${workspaceId}`).get(),
+  const [membersSnap, curSnap, prevSnap] = await Promise.all([
+    // Nomes do onboarding (displayName de TODOS os membros ativos) — âncora do match de
+    // PIX próprio. O "domínio" do casal é a unidade: PIX entre cônjuges não é renda nova.
+    db.collection(`workspaces/${workspaceId}/members`).where("status", "==", "active").get(),
     txCol.where("monthKey", "==", monthKey).get(),
     txCol.where("monthKey", "==", prevKey).get(),
   ]);
-  const monthlyIncome = Number(wsSnap.data()?.monthlyIncome ?? 0) || 0;
+  const userNames = membersSnap.docs
+    .map((d) => String(d.data()?.displayName ?? "").trim())
+    .filter(Boolean);
   const toTx = (d: adminType.firestore.QueryDocumentSnapshot): AccountTx => {
     const x = d.data();
     return {
@@ -59,6 +67,7 @@ async function loadAccountLens(db: Firestore, workspaceId: string, monthKey: str
       amount: Number(x.amount ?? 0) || 0,
       category: String(x.category ?? "Outros"),
       date: String(x.date ?? ""),
+      description: String(x.description ?? ""),
       source: typeof x.source === "string" ? x.source : undefined,
       sourceLabel: typeof x.sourceLabel === "string" ? x.sourceLabel : undefined,
       internal: x.internal === true,
@@ -66,7 +75,7 @@ async function loadAccountLens(db: Firestore, workspaceId: string, monthKey: str
   };
   const transactions = curSnap.docs.map(toTx);
   const prevTransactions = prevSnap.docs.map(toTx);
-  const summary = buildAccountSummary({ transactions, prevTransactions, monthlyIncome });
+  const summary = buildAccountSummary({ transactions, prevTransactions, userNames });
 
   // Gasto do mês anterior EM REAIS (a voz mostra valor, não %). Mesmo filtro que o
   // app usa pro mês anterior (só exclui cartão).
@@ -123,9 +132,32 @@ function buildPrompt(args: {
   const resultado = s.net >= 0
     ? `Sobrou ${BRL(s.net)}`
     : `Faltou ${BRL(Math.abs(s.net))} (fechou no vermelho)`;
-  const rendaLine = s.rendaRef != null
-    ? `- Renda de referência: ${BRL(s.rendaRef)}`
-    : `- Renda de referência: NÃO INFORMADA (não afirme nada sobre renda)`;
+  // ── RENDA DERIVADA + honestidade calibrada pela CONFIANÇA ──────────────────
+  const r = s.renda;
+  const naoRendaLinhas = r.itensNaoRenda
+    .map((i) => `  • ${BRL(i.valor)} — "${i.descricao}" → ${i.kind === "divida" ? "parece EMPRÉSTIMO recebido" : "não é renda (transferência própria/resgate/estorno/rendimento)"}`)
+    .join("\n");
+
+  const rendaLine = r.derivada > 0
+    ? `- Renda de trabalho (o que o dado sustenta como renda): ${BRL(r.derivada)}` +
+      (r.itensNaoRenda.length
+        ? `\n- Do que entrou, NÃO é renda:\n${naoRendaLinhas}`
+        : `\n- Todas as entradas do mês são renda de trabalho clara.`)
+    : `- Renda de trabalho: NENHUMA entrada do mês parece renda de trabalho. NÃO afirme renda; diga isso com honestidade.`;
+
+  const confiancaRule = r.confianca === "alta"
+    ? `CONFIANÇA DA RENDA: ALTA — a foto tá limpa (quase tudo que entrou é renda de trabalho).
+Pode FALAR DIRETO, com segurança: "entrou X, sobrou Y, tá tranquilo/tá apertado".`
+    : `CONFIANÇA DA RENDA: BAIXA — boa parte do que entrou NÃO é renda de trabalho clara.
+NÃO DECRETE. MOSTRE a incerteza e APONTE de onde ela vem, usando os itens listados acima.
+Estrutura obrigatória: diga quanto entrou no total, quanto disso PARECE renda recorrente, e o que
+o resto parece ser. Depois abra os dois cenários ("se isso for renda, sua situação é assim; se foi
+pontual, é assim") e devolva a escolha: "você que sabe". NUNCA finja certeza que o dado não dá.`;
+
+  const emprestimoRule = r.breakdown.divida > 0
+    ? `EMPRÉSTIMO: uma das entradas parece empréstimo recebido. Dê um aceno HONESTO — isso não é
+renda, e volta como parcela depois. NÃO invente valor de parcela, número de parcelas, juros nem prazo.`
+    : "";
   const topLine = s.topCat
     ? `- Onde mais pesou: ${s.topCat.nome} — ${BRL(s.topCat.valor)}`
     : `- Onde mais pesou: sem dados`;
@@ -157,12 +189,19 @@ REGRAS DE VOZ (obrigatórias):
 - Todo conselho vem com o PORQUÊ, ligado ao dado real (ex.: "segura o parcelamento essa semana porque
   você fechou no vermelho e o cartão já tá puxado"). Explique o risco e deixe a escolha com a pessoa —
   não proíba, não mande.
+- NUNCA dê veredito categórico de decisão ("não pode gastar 500", "cancele isso"). Você MOSTRA o risco
+  com o porquê e devolve a escolha pra pessoa.
 - Feche com a data da última atualização dos dados e um gancho curto pra alimentar dados novos no app.
+
+${confiancaRule}
+${emprestimoRule}
 
 GUARDRAILS (invioláveis):
 - Use APENAS os números abaixo. NUNCA invente ou estime um número que não está aqui.
 - NUNCA aconselhe algo que o dado não sustenta.
 - Se um dado não existe, diga com honestidade em vez de inventar.
+- RENDA é só o que está marcado como renda de trabalho. Transferência própria, resgate, estorno,
+  rendimento e empréstimo NÃO são renda — nunca os some como se fossem.
 
 DADOS REAIS (${mesLabel(monthKey)}):
 
@@ -200,8 +239,8 @@ export async function generateWhatsappDiagnosis(
   // Cache carimbado: mesmo mês E mesmo carimbo → dados não mudaram → zero IA.
   const cached = await cacheRef.get();
   if (cached.exists) {
-    const c = cached.data() as { monthKey?: string; stamp?: number | null; texto?: string };
-    if (c.monthKey === monthKey && (c.stamp ?? null) === stamp && c.texto) {
+    const c = cached.data() as { monthKey?: string; stamp?: number | null; texto?: string; version?: string };
+    if (c.version === DIAG_VERSION && c.monthKey === monthKey && (c.stamp ?? null) === stamp && c.texto) {
       return { texto: c.texto, cached: true };
     }
   }
@@ -216,7 +255,7 @@ export async function generateWhatsappDiagnosis(
     const texto =
       "Ainda não tenho dado nenhum pra olhar aqui. 🤷\n\n" +
       "Sobe um extrato ou uma fatura no app que eu te conto na hora como tá a sua situação.";
-    await cacheRef.set({ monthKey, stamp, texto, updatedAt: new Date() }, { merge: true });
+    await cacheRef.set({ version: DIAG_VERSION, monthKey, stamp, texto, updatedAt: new Date() }, { merge: true });
     return { texto, cached: false };
   }
 
@@ -235,6 +274,6 @@ export async function generateWhatsappDiagnosis(
   const texto = (m ? (JSON.parse(m[0]) as { texto?: string }).texto : null) ?? "";
   if (!texto) throw new Error("diagnóstico do WhatsApp veio vazio");
 
-  await cacheRef.set({ monthKey, stamp, texto, updatedAt: new Date() }, { merge: true });
+  await cacheRef.set({ version: DIAG_VERSION, monthKey, stamp, texto, updatedAt: new Date() }, { merge: true });
   return { texto, cached: false };
 }
