@@ -56,7 +56,8 @@ import {
   X
 } from "lucide-react";
 import { CSSProperties, DragEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { auth, db, googleProvider, storage } from "@/lib/firebase";
+import { app, auth, db, googleProvider, storage } from "@/lib/firebase";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { useAuthUser } from "@/app/auth-provider";
@@ -74,7 +75,7 @@ import { InternoChip } from "@/components/TxRow";
 import { ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
 import { track } from "@/lib/analytics";
 import { getUserFacingError } from "@/lib/errors";
-import { buildDiagFingerprint, readDiagCache, writeDiagCache, type DiagPayload, type DiagResult } from "@/lib/claude-cache";
+import { type DiagResult } from "@/lib/claude-cache";
 
 type Profile = {
   uid: string;
@@ -99,6 +100,23 @@ const G_20 = "rgba(184,245,90,0.18)";
 const G_30 = "rgba(184,245,90,0.28)";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
+// Resposta do motor server-side (fonte de verdade única: home + WhatsApp).
+type ServerDiag = {
+  monthKey: string;
+  summary: {
+    totalGasto: number; totalEntradas: number; comprometimento: number; net: number;
+    score: number | null; rendaRef: number | null; expensesCount: number;
+    topCat: { nome: string; valor: number; percentual: number } | null;
+    expenseChange: number | null;
+    byCategory: Array<{ nome: string; valor: number }>;
+    renda: { derivada: number; confianca: "alta" | "baixa"; parcelaTrabalho: number };
+  };
+  byCategoryCodes: Array<[string, number]>;
+  diag: { narrativa: string | null; bullet1: string | null; bullet2: string | null; scoreLabel: string | null };
+  stale: boolean;
+  stampLabel: string;
+};
 
 export default function HomePage() {
   const { user, authLoading } = useAuthUser();
@@ -473,8 +491,6 @@ const SEND_WA_FUNCTION_URL =
   process.env.NEXT_PUBLIC_SEND_WA_URL ||
   "https://sendinvitewhatsapp-ihalwtxjpq-uc.a.run.app";
 
-const GENERATE_DIAGNOSIS_URL =
-  process.env.NEXT_PUBLIC_GENERATE_DIAGNOSIS_URL ||
   "https://generatediagnosis-ihalwtxjpq-uc.a.run.app";
 
 type ParsedWithMeta = ParsedTransaction & {
@@ -649,8 +665,6 @@ function WorkspaceApp({
   const [reconcilePrompt, setReconcilePrompt] = useState<
     { sourceLabel: string; monthKey: string; amount: number; include: boolean }[]
   >([]);
-  const [editingRendaMob, setEditingRendaMob] = useState(false);
-  const [rendaMobText, setRendaMobText] = useState("");
   const [emBrevePos, setEmBrevePos] = useState<{ bottom: number; centerX: number } | null>(null);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [renameWsOpen, setRenameWsOpen] = useState(false);
@@ -676,16 +690,8 @@ function WorkspaceApp({
   const member = activeEntry.member;
   const isOwner = member.role === "owner";
 
-  const [monthlyIncome, setMonthlyIncome] = useState<number>(workspace.monthlyIncome ?? 0);
-
-  useEffect(() => {
-    setMonthlyIncome(workspace.monthlyIncome ?? 0);
-  }, [workspace.monthlyIncome]);
-
-  const handleRendaChange = async (v: number) => {
-    setMonthlyIncome(v);
-    await updateDoc(doc(db, "workspaces", workspace.id), { monthlyIncome: v });
-  };
+  // FONTE DE VERDADE: agregados + diagnóstico vêm do motor server-side (renda derivada).
+  const [srvDiag, setSrvDiag] = useState<ServerDiag | null>(null);
 
   const showDemo = false;
   const visibleTx = showDemo ? demoTransactions : transactions;
@@ -1338,29 +1344,42 @@ function WorkspaceApp({
   // Score/diagnóstico ignora movimentos internos (cofrinho/CDB); a lista os mantém.
   const mobScorable = useMemo(() => mobAccountTx.filter(t => !t.internal), [mobAccountTx]);
   const mobExpenses = useMemo(() => mobScorable.filter(t => t.type === "expense"), [mobScorable]);
-  const mobTotalGasto = useMemo(() => mobExpenses.reduce((s, t) => s + t.amount, 0), [mobExpenses]);
-  const mobTotalEntradas = useMemo(() => mobScorable.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [mobScorable]);
-  const mobDaysWithExpenses = useMemo(() => new Set(mobExpenses.map(t => t.date)).size, [mobExpenses]);
-  const mobMediaDia = mobDaysWithExpenses > 0 ? mobTotalGasto / mobDaysWithExpenses : 0;
+  const cliTotalGasto = useMemo(() => mobExpenses.reduce((s, t) => s + t.amount, 0), [mobExpenses]);
+  const cliTotalEntradas = useMemo(() => mobScorable.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0), [mobScorable]);
   // Sem promessa furada: sem base de renda real (renda <= 0 E sem entradas), NÃO
   // pontuar contra base fabricada — rendaRef null → score null → "Sem dados suficientes".
-  const mobRendaRef = monthlyIncome > 0 ? monthlyIncome : (mobTotalEntradas > 0 ? mobTotalEntradas : null);
-  const mobComprometimento = (mobRendaRef && mobTotalGasto > 0) ? Math.min(100, Math.round((mobTotalGasto / mobRendaRef) * 100)) : 0;
-  const mobRatio = mobRendaRef ? mobTotalGasto / mobRendaRef : 0;
-  const mobScore: number | null = (mobExpenses.length === 0 || mobRendaRef === null) ? null : (() => {
-    if (mobRatio >= 2.0) return 0;
-    if (mobRatio >= 1.5) return 1;
-    if (mobRatio >= 1.0) return 2.5;
-    if (mobRatio >= 0.90) return 4.5;
-    if (mobRatio >= 0.75) return 6.5;
-    if (mobRatio >= 0.50) return 8.5;
+  const cliRendaRef = cliTotalEntradas > 0 ? cliTotalEntradas : null; // demo: sem renda declarada
+  const cliComprometimento = (cliRendaRef && cliTotalGasto > 0) ? Math.min(100, Math.round((cliTotalGasto / cliRendaRef) * 100)) : 0;
+  const cliRatio = cliRendaRef ? cliTotalGasto / cliRendaRef : 0;
+  const cliScore: number | null = (mobExpenses.length === 0 || cliRendaRef === null) ? null : (() => {
+    if (cliRatio >= 2.0) return 0;
+    if (cliRatio >= 1.5) return 1;
+    if (cliRatio >= 1.0) return 2.5;
+    if (cliRatio >= 0.90) return 4.5;
+    if (cliRatio >= 0.75) return 6.5;
+    if (cliRatio >= 0.50) return 8.5;
     return 10;
   })();
-  const mobByCategory = useMemo(() => {
+  const cliByCategory = useMemo(() => {
     const m: Record<string, number> = {};
     for (const tx of mobExpenses) m[tx.category] = (m[tx.category] ?? 0) + tx.amount;
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   }, [mobExpenses]);
+
+  // ── FONTE DE VERDADE ÚNICA: o motor server-side (renda DERIVADA do transacional).
+  // A home não calcula mais renda/agregados no browser — só o modo DEMO (dados fake,
+  // que o servidor não conhece) cai no cálculo client `cli*` acima.
+  const srvOk = !showDemo && srvDiag != null;
+  const mobTotalGasto = srvOk ? srvDiag!.summary.totalGasto : cliTotalGasto;
+  const mobTotalEntradas = srvOk ? srvDiag!.summary.totalEntradas : cliTotalEntradas;
+  const mobRendaRef = srvOk ? srvDiag!.summary.rendaRef : cliRendaRef;
+  const mobComprometimento = srvOk ? srvDiag!.summary.comprometimento : cliComprometimento;
+  const mobScore = srvOk ? srvDiag!.summary.score : cliScore;
+  const mobByCategory: Array<[string, number]> = srvOk
+    ? (srvDiag!.byCategoryCodes as Array<[string, number]>)
+    : cliByCategory;
+  const mobDaysWithExpenses = useMemo(() => new Set(mobExpenses.map(t => t.date)).size, [mobExpenses]);
+  const mobMediaDia = mobDaysWithExpenses > 0 ? mobTotalGasto / mobDaysWithExpenses : 0;
   const mobMaxCategory = mobByCategory[0]?.[1] ?? 1;
   const mobPrevByCategory = useMemo(() => {
     const m: Record<string, number> = {};
@@ -1414,61 +1433,29 @@ function WorkspaceApp({
       : `Você cortou ${Math.abs(mobExpenseChange)}% dos gastos vs mês passado — continua assim`
     : null;
 
+  // Um único fetch: o servidor calcula os agregados (renda derivada) E o diagnóstico.
+  // Cache carimbado vive no servidor — sem localStorage, sem cálculo no browser.
   useEffect(() => {
-    if (!mobExpenses.length || mobScore === null) return;
-    const effectiveMonthKey = showDemo ? "2026-04" : monthKey;
-    const payload: DiagPayload = {
-      totalGasto: mobTotalGasto,
-      totalEntradas: mobTotalEntradas,
-      comprometimento: mobComprometimento,
-      net: mobNet,
-      score: mobScore,
-      topCat: mobTopCat ? {
-        nome: CATEGORY_LABELS[mobTopCat[0] as keyof typeof CATEGORY_LABELS] ?? mobTopCat[0],
-        valor: mobTopCat[1],
-        percentual: Math.round((mobTopCat[1] / mobTotalGasto) * 100)
-      } : null,
-      expenseChange: mobExpenseChange,
-      byCategory: mobByCategory.slice(0, 5).map(([cat, val]) => ({
-        nome: CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS] ?? cat,
-        valor: val
-      })),
-    };
-    const fp = buildDiagFingerprint(payload);
-    const cached = readDiagCache(workspace.id, effectiveMonthKey, fp);
-    if (cached) {
-      setSharedAiDiag(cached);
-      setSharedDiagLoading(false);
-      return;
-    }
+    if (showDemo) return; // modo demo usa dados fake locais
     let cancelled = false;
     setSharedDiagLoading(true);
-    setSharedAiDiag(null);
     setSharedDiagError(false);
-    fetch(GENERATE_DIAGNOSIS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, monthLabel: monthLabel(effectiveMonthKey) })
-    })
-      .then(async (r) => {
-        if (!r.ok) { const t = await r.text().catch(() => r.statusText); throw new Error(t); }
-        return r.json();
+    const fn = httpsCallable<{ workspaceId: string; monthKey: string }, ServerDiag>(
+      getFunctions(app, "us-central1"), "getAccountDiagnosis"
+    );
+    fn({ workspaceId: workspace.id, monthKey })
+      .then(({ data }: { data: ServerDiag }) => {
+        if (cancelled) return;
+        setSrvDiag(data);
+        setSharedAiDiag(data.diag as DiagResult);
       })
-      .then((data: DiagResult) => {
-        if (!cancelled) {
-          setSharedAiDiag(data);
-          writeDiagCache(workspace.id, effectiveMonthKey, fp, data);
-        }
-      })
-      .catch((err) => {
-        // Graceful degradation: log technical error, show soft state in UI — home stays usable
-        getUserFacingError(err, "diagnosis"); // triggers console.error + admin alert if operational
+      .catch((err: unknown) => {
+        getUserFacingError(err, "diagnosis");
         if (!cancelled) setSharedDiagError(true);
       })
       .finally(() => { if (!cancelled) setSharedDiagLoading(false); });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthKey, mobTotalGasto, mobTotalEntradas, mobScore, workspace.id]);
+  }, [monthKey, workspace.id, showDemo]);
 
   const D = {
     shell: {
@@ -1865,8 +1852,7 @@ function WorkspaceApp({
                   prevTransactions={showDemo ? [] : prevTransactions}
                   monthKey={showDemo ? "2026-04" : monthKey}
                   workspaceId={workspace.id}
-                  renda={monthlyIncome}
-                  onRendaChange={handleRendaChange}
+                  srvDiag={srvDiag}
                   aiDiag={sharedAiDiag}
                   diagLoading={sharedDiagLoading}
                   diagError={sharedDiagError}
@@ -2131,26 +2117,15 @@ function WorkspaceApp({
           </div>
         )}
 
-        {/* 3. Renda mensal */}
+        {/* 3. Renda mensal — DERIVADA do transacional (não se declara mais; a coleta
+             de renda ficou só no onboarding). Mesmo card, mesmo estilo, só read-only. */}
         <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>Renda mensal</p>
-            <button onClick={() => { setRendaMobText(monthlyIncome > 0 ? maskBRL(String(monthlyIncome * 100)) : ""); setEditingRendaMob(true); }} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}><Pencil size={13} /></button>
           </div>
-          {editingRendaMob ? (
-            <input type="text" inputMode="numeric" autoFocus
-              value={rendaMobText}
-              placeholder="R$ 0,00"
-              onChange={(e) => setRendaMobText(maskBRL(e.target.value))}
-              onBlur={() => { handleRendaChange(parseBRL(rendaMobText)); setEditingRendaMob(false); }}
-              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, outline: "none", color: "#fff", fontSize: 18, fontWeight: 800, width: "100%", padding: "6px 10px", marginBottom: 10 }}
-            />
-          ) : (
-            <p onClick={() => { setRendaMobText(monthlyIncome > 0 ? maskBRL(String(monthlyIncome * 100)) : ""); setEditingRendaMob(true); }} style={{ fontSize: 18, fontWeight: 800, color: monthlyIncome > 0 ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", cursor: "pointer", marginBottom: 10 }}>
-              {monthlyIncome > 0 ? formatCurrency(monthlyIncome) : "Declarar renda"}
-            </p>
-          )}
+          <p style={{ fontSize: 18, fontWeight: 800, color: mobRendaRef ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", marginBottom: 10 }}>
+            {mobRendaRef ? formatCurrency(mobRendaRef) : "Sem renda identificada"}
+          </p>
           <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginBottom: 6 }}>
             <div style={{ height: "100%", borderRadius: 2, width: `${Math.min(100, mobComprometimento)}%`, background: mobComprometimento > 90 ? "#ff8080" : mobComprometimento > 75 ? "#facc15" : G, transition: "width .5s cubic-bezier(.4,0,.2,1)" }} />
           </div>
@@ -3178,8 +3153,7 @@ function InsightsView({
   prevTransactions,
   monthKey,
   workspaceId,
-  renda,
-  onRendaChange,
+  srvDiag,
   aiDiag,
   diagLoading,
   diagError = false,
@@ -3188,23 +3162,24 @@ function InsightsView({
   prevTransactions: Transaction[];
   monthKey: string;
   workspaceId: string;
-  renda: number;
-  onRendaChange: (v: number) => void;
+  srvDiag: ServerDiag | null;
   aiDiag: DiagResult | null;
   diagLoading: boolean;
   diagError?: boolean;
 }) {
   const router = useRouter();
-  const [editingRenda, setEditingRenda] = useState(false);
-  const [rendaText, setRendaText] = useState("");
 
   // Bug 3: the cash-flow diagnosis uses ONLY account transactions. Card
   // purchases (source='card') are a separate lens and never counted here.
   // Internal investment moves (cofrinho/CDB) stay in the ledger but are neutral here.
   const accountTx = transactions.filter((t) => t.source !== "card" && !t.internal);
   const expenses = accountTx.filter((t) => t.type === "expense");
-  const totalGasto = expenses.reduce((s, t) => s + t.amount, 0);
-  const totalEntradas = accountTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  // FONTE DE VERDADE: o motor server-side (renda DERIVADA). O cálculo local só serve de
+  // fallback enquanto a resposta não chega — nunca como régua de renda.
+  const totalGasto = srvDiag ? srvDiag.summary.totalGasto : expenses.reduce((s, t) => s + t.amount, 0);
+  const totalEntradas = srvDiag
+    ? srvDiag.summary.totalEntradas
+    : accountTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
 
   const prevExpenses = prevTransactions.filter((t) => t.type === "expense");
   const prevTotalGasto = prevExpenses.reduce((s, t) => s + t.amount, 0);
@@ -3220,21 +3195,10 @@ function InsightsView({
 
   // Sem promessa furada: sem base de renda real (renda <= 0 E sem entradas), NÃO
   // pontuar contra base fabricada — rendaRef null → score null → "Sem dados suficientes".
-  const rendaRef = renda > 0 ? renda : (totalEntradas > 0 ? totalEntradas : null);
-  const comprometimento = (rendaRef && totalGasto > 0) ? Math.min(100, Math.round((totalGasto / rendaRef) * 100)) : 0;
-
-  // ratio sem cap — score e comprometimento usam a mesma base para serem consistentes
-  const ratio = rendaRef ? totalGasto / rendaRef : 0;
-
-  const score = (expenses.length === 0 || rendaRef === null) ? null : (() => {
-    if (ratio >= 2.0)  return 0;
-    if (ratio >= 1.5)  return 1;
-    if (ratio >= 1.0)  return 2.5;
-    if (ratio >= 0.90) return 4.5;
-    if (ratio >= 0.75) return 6.5;
-    if (ratio >= 0.50) return 8.5;
-    return 10;
-  })();
+  // Renda DERIVADA do transacional (server). Sem base → null → degrada honesto.
+  const rendaRef = srvDiag ? srvDiag.summary.rendaRef : null;
+  const comprometimento = srvDiag ? srvDiag.summary.comprometimento : 0;
+  const score = srvDiag ? srvDiag.summary.score : null;
   const scoreColor = score === null ? G : score >= 8 ? G : score >= 6 ? "#facc15" : "#ff8080";
   const scoreLabel = score === null ? "Sem dados suficientes" : score >= 8 ? "Arrasando 💪" : score >= 6 ? "Dá pra melhorar" : "Tá pesado.";
 
@@ -3356,34 +3320,15 @@ function InsightsView({
         ))}
       </div>
 
-      {/* Renda + barra comprometimento */}
+      {/* Renda + barra comprometimento — renda DERIVADA do transacional (read-only;
+          declarar renda saiu da home, a coleta ficou só no onboarding) */}
       <div className="ins-card" style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
         <div style={{ minWidth: 160 }}>
           <p style={INS_LABEL}>Renda mensal</p>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {editingRenda ? (
-              <input
-                type="text" inputMode="numeric" autoFocus
-                value={rendaText}
-                placeholder="R$ 0,00"
-                onChange={(e) => setRendaText(maskBRL(e.target.value))}
-                onBlur={() => { onRendaChange(parseBRL(rendaText)); setEditingRenda(false); }}
-                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, outline: "none", color: "#fff", fontSize: 18, fontWeight: 800, width: 140, letterSpacing: "-0.03em", padding: "4px 8px" }}
-              />
-            ) : (
-              <span
-                onClick={() => { setRendaText(renda > 0 ? maskBRL(String(renda * 100)) : ""); setEditingRenda(true); }}
-                style={{ fontSize: 20, fontWeight: 800, color: renda > 0 ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", cursor: "pointer" }}
-              >
-                {renda > 0 ? formatCurrency(renda) : "Declarar renda"}
-              </span>
-            )}
-            {!editingRenda && (
-              <button onClick={() => { setRendaText(renda > 0 ? maskBRL(String(renda * 100)) : ""); setEditingRenda(true); }} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}>
-                <Pencil size={13} />
-              </button>
-            )}
+            <span style={{ fontSize: 20, fontWeight: 800, color: rendaRef ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em" }}>
+              {rendaRef ? formatCurrency(rendaRef) : "Sem renda identificada"}
+            </span>
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 160 }}>

@@ -8,6 +8,7 @@ import * as admin from "firebase-admin";
 import { processInbound } from "./whatsapp/router";
 import { parseInbound, renderReply, sendText } from "./whatsapp/transport";
 import { firestoreStore } from "./whatsapp/store";
+import { generateWhatsappDiagnosis, generateHomeDiagnosis } from "./diagnosis-core";
 import { extractWebhookToken, secretMatches, isWellFormedEvent } from "./whatsapp/webhookAuth";
 import { defineSecret } from "firebase-functions/params";
 
@@ -2693,7 +2694,7 @@ export const generateWhatsappLinkCode = onCall({ maxInstances: 10 }, async (requ
 // roteador e responde SÓ em reação ao inbound. Nunca inicia conversa.
 export const whatsappWebhook = onRequest(
   {
-    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", whatsappWebhookSecret],
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "ANTHROPIC_API_KEY", whatsappWebhookSecret],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB",
@@ -2734,6 +2735,18 @@ export const whatsappWebhook = onRequest(
       const db = admin.firestore();
       const store = firestoreStore(db);
       const services = {
+        // DIAGNÓSTICO REAL — mesmo motor que alimenta a home (renda derivada).
+        getDiagnosis: async (account: { uid: string; workspaceId: string }) => {
+          const anthropicKey = process.env.ANTHROPIC_API_KEY;
+          if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY not configured");
+          const out = await generateWhatsappDiagnosis(
+            db,
+            new Anthropic({ apiKey: anthropicKey, maxRetries: 3 }),
+            account.workspaceId,
+            currentMonthKey()
+          );
+          return out.texto;
+        },
         // AJUDA encaminha o relato por e-mail (Resend, já na stack).
         sendHelpEmail: async (phone: string, text: string) => {
           const apiKey = process.env.RESEND_API_KEY;
@@ -2760,5 +2773,53 @@ export const whatsappWebhook = onRequest(
       console.error("whatsappWebhook error:", err instanceof Error ? err.message : String(err));
       res.status(200).json({ ok: false }); // 200 pro Evolution não entrar em loop de retry
     }
+  }
+);
+
+// ─── Diagnóstico: fonte de verdade ÚNICA (home + WhatsApp) ───────────────────
+// Mês corrente no fuso de São Paulo (o mesmo pros dois canais).
+function currentMonthKey(): string {
+  const f = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit",
+  });
+  const p = f.formatToParts(new Date());
+  const y = p.find((x) => x.type === "year")!.value;
+  const m = p.find((x) => x.type === "month")!.value;
+  return `${y}-${m}`;
+}
+
+// A HOME consome ESTE motor (não calcula mais renda/agregados no browser).
+// Devolve os agregados (renda DERIVADA) + o texto do diagnóstico + o sinal de dado velho.
+export const getAccountDiagnosis = onCall(
+  { secrets: ["ANTHROPIC_API_KEY"], maxInstances: 10, timeoutSeconds: 60, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Faça login pra continuar.");
+
+    const { workspaceId, monthKey } = (request.data ?? {}) as { workspaceId?: string; monthKey?: string };
+    if (!workspaceId) throw new HttpsError("invalid-argument", "Workspace não informado.");
+    const mk = typeof monthKey === "string" && /^\d{4}-\d{2}$/.test(monthKey) ? monthKey : currentMonthKey();
+
+    const db = admin.firestore();
+    const member = await db.doc(`workspaces/${workspaceId}/members/${uid}`).get();
+    if (!member.exists || member.data()?.status !== "active") {
+      throw new HttpsError("permission-denied", "Você não participa deste workspace.");
+    }
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new HttpsError("internal", "Configuração ausente.");
+
+    const out = await generateHomeDiagnosis(
+      db, new Anthropic({ apiKey, maxRetries: 3 }), workspaceId, mk
+    );
+    return {
+      monthKey: mk,
+      summary: out.summary,
+      byCategoryCodes: out.byCategoryCodes,
+      diag: out.diag,
+      stale: out.stale,
+      stampLabel: out.stampLabel,
+      cached: out.cached,
+    };
   }
 );

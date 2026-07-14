@@ -10,7 +10,8 @@ const { processInbound, REGISTRY } = require(path.join(FUNC, "lib", "whatsapp", 
 const { renderOptions, renderReply } = require(path.join(FUNC, "lib", "whatsapp", "transport.js"));
 
 const GENERIC_PREFIX = "Pra isso eu preciso te reconhecer";
-const STUB = "Já já tô montando essa parte, tá quase pronta.";
+const DIAG = "📊 Teu panorama real (fake do teste).";
+const STUB = "Já já tô montando essa parte, tá quase pronta."; // ainda usado pela folha de LEMBRETE
 const HELP_ENTRY = "Pode mandar. Me conta o que tá pegando.";
 const HELP_DONE = "Recebi! Te respondo em breve por aqui.";
 
@@ -38,7 +39,13 @@ function makeStore() {
 }
 function makeServices() {
   const emails = [];
-  return { emails, sendHelpEmail: async (phone, text) => { emails.push({ phone, text }); } };
+  const diagCalls = [];
+  return {
+    emails, diagCalls,
+    sendHelpEmail: async (phone, text) => { emails.push({ phone, text }); },
+    // Diagnóstico REAL é injetado — a folha só pede o texto pronto.
+    getDiagnosis: async (account) => { diagCalls.push(account); return DIAG; },
+  };
 }
 function scenario() {
   const store = makeStore();
@@ -113,8 +120,8 @@ function check(label, cond) { results.push({ label, pass: !!cond }); }
     const r = await say(P, "meu código é 123456");
     const link = await store.getLink(P);
     const st = await store.loadState(P);
-    check("5. Código válido → vincula, queima, retoma diagnóstico (stub)",
-      (r.reply || "").includes(STUB) &&
+    check("5. Código válido → vincula, queima, retoma diagnóstico (REAL)",
+      (r.reply || "").includes(DIAG) &&
       link && link.uid === "uid-A" && link.workspaceId === "ws-A" &&
       store._codes.get("123456").used === true &&
       st.mode === "idle" && (st.context === null || st.context === undefined));
@@ -122,11 +129,12 @@ function check(label, cond) { results.push({ label, pass: !!cond }); }
 
   // 6) Número JÁ vinculado toca opção 1 → NÃO pede código, responde direto (stub).
   {
-    const { say, store } = scenario();
+    const { say, store, services } = scenario();
     store.seedLink(P, "uid-A", "ws-A");
     const r = await say(P, "1");
-    check("6. Já vinculado (1) → não pede código, responde stub direto",
-      (r.reply || "").includes(STUB) && !(r.reply || "").startsWith(GENERIC_PREFIX));
+    check("6. Já vinculado (1) → não pede código, responde diagnóstico REAL direto",
+      (r.reply || "").includes(DIAG) && !(r.reply || "").startsWith(GENERIC_PREFIX) &&
+      services.diagCalls.length === 1 && services.diagCalls[0].workspaceId === "ws-A");
   }
 
   // 7) "menu"/"voltar" no meio de qualquer fluxo (inclusive aguardando código) → menu.
@@ -170,7 +178,7 @@ function check(label, cond) { results.push({ label, pass: !!cond }); }
     // opção 2 registrada responde stub (já vinculado, pra não cair no portão)
     store.seedLink(P, "u", "w");
     const r2 = await say(P, "2");
-    check("9. Opções semânticas → transporte renderiza numerado; 1 e 2 registradas (stub)",
+    check("9. Opções semânticas → transporte renderiza numerado; 1 e 2 registradas",
       semantic && numbered && registered && (r2.reply || "").includes(STUB));
   }
 

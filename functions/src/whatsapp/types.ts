@@ -19,6 +19,9 @@ export type ConversationState = {
 // Serviços que uma folha pode acionar (ações, nunca apresentação).
 export type LeafServices = {
   sendHelpEmail: (phone: string, text: string) => Promise<void>;
+  // Diagnóstico REAL (conta + cartão, renda derivada). A folha não sabe de IA/Firestore —
+  // só pede o texto pronto pro serviço injetado.
+  getDiagnosis: (account: LinkedAccount) => Promise<string>;
 };
 
 export type LeafContext = {

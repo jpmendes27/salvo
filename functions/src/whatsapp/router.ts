@@ -6,7 +6,7 @@ import { applyTimeout, idleState, MAX_TURNS, normalize } from "./state";
 import { tryVerifyAndLink } from "./verification";
 import { menuLeaf, MENU_OPTIONS } from "./leaves/menu";
 import { helpLeaf } from "./leaves/help";
-import { diagnosisStubLeaf } from "./leaves/diagnosisStub";
+import { diagnosisLeaf } from "./leaves/diagnosis";
 import { reminderStubLeaf } from "./leaves/reminderStub";
 
 // REGISTRO de folhas: mode → folha. NÃO é um switch cravado — folha nova é uma linha.
@@ -14,7 +14,7 @@ export const REGISTRY: Record<string, Leaf> = {
   idle: menuLeaf,
   help: helpLeaf,
   help_capture: helpLeaf, // mesma folha, 2ª etapa (captura o relato)
-  diagnosis: diagnosisStubLeaf,
+  diagnosis: diagnosisLeaf,
   reminder: reminderStubLeaf,
 };
 

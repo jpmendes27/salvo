@@ -6,14 +6,14 @@ const state_1 = require("./state");
 const verification_1 = require("./verification");
 const menu_1 = require("./leaves/menu");
 const help_1 = require("./leaves/help");
-const diagnosisStub_1 = require("./leaves/diagnosisStub");
+const diagnosis_1 = require("./leaves/diagnosis");
 const reminderStub_1 = require("./leaves/reminderStub");
 // REGISTRO de folhas: mode → folha. NÃO é um switch cravado — folha nova é uma linha.
 exports.REGISTRY = {
     idle: menu_1.menuLeaf,
     help: help_1.helpLeaf,
     help_capture: help_1.helpLeaf, // mesma folha, 2ª etapa (captura o relato)
-    diagnosis: diagnosisStub_1.diagnosisStubLeaf,
+    diagnosis: diagnosis_1.diagnosisLeaf,
     reminder: reminderStub_1.reminderStubLeaf,
 };
 // Porta do oráculo (dormível): se um dia existir uma folha 'raw' registrada como

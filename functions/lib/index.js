@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.whatsappWebhook = exports.generateWhatsappLinkCode = exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateCardDiagnosis = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.requestPasswordReset = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = exports.recategorize = void 0;
+exports.getAccountDiagnosis = exports.whatsappWebhook = exports.generateWhatsappLinkCode = exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateCardDiagnosis = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.requestPasswordReset = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = exports.recategorize = void 0;
 exports.buildSystemPrompt = buildSystemPrompt;
 exports.extractTextInChunks = extractTextInChunks;
 const https_1 = require("firebase-functions/v2/https");
@@ -49,6 +49,7 @@ const admin = __importStar(require("firebase-admin"));
 const router_1 = require("./whatsapp/router");
 const transport_1 = require("./whatsapp/transport");
 const store_1 = require("./whatsapp/store");
+const diagnosis_core_1 = require("./diagnosis-core");
 const webhookAuth_1 = require("./whatsapp/webhookAuth");
 const params_1 = require("firebase-functions/params");
 // Segredo do webhook do WhatsApp — Secret Manager (nunca env plaintext nem hardcoded).
@@ -2403,7 +2404,7 @@ exports.generateWhatsappLinkCode = (0, https_1.onCall)({ maxInstances: 10 }, asy
 // (2) Webhook do Evolution (reply-only). Valida origem por token secreto, roda o
 // roteador e responde SÓ em reação ao inbound. Nunca inicia conversa.
 exports.whatsappWebhook = (0, https_1.onRequest)({
-    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", whatsappWebhookSecret],
+    secrets: ["EVOLUTION_API_KEY", "RESEND_API_KEY", "ANTHROPIC_API_KEY", whatsappWebhookSecret],
     maxInstances: 10,
     timeoutSeconds: 30,
     memory: "256MiB",
@@ -2444,6 +2445,14 @@ exports.whatsappWebhook = (0, https_1.onRequest)({
         const db = admin.firestore();
         const store = (0, store_1.firestoreStore)(db);
         const services = {
+            // DIAGNÓSTICO REAL — mesmo motor que alimenta a home (renda derivada).
+            getDiagnosis: async (account) => {
+                const anthropicKey = process.env.ANTHROPIC_API_KEY;
+                if (!anthropicKey)
+                    throw new Error("ANTHROPIC_API_KEY not configured");
+                const out = await (0, diagnosis_core_1.generateWhatsappDiagnosis)(db, new sdk_1.default({ apiKey: anthropicKey, maxRetries: 3 }), account.workspaceId, currentMonthKey());
+                return out.texto;
+            },
             // AJUDA encaminha o relato por e-mail (Resend, já na stack).
             sendHelpEmail: async (phone, text) => {
                 const apiKey = process.env.RESEND_API_KEY;
@@ -2473,5 +2482,45 @@ exports.whatsappWebhook = (0, https_1.onRequest)({
         console.error("whatsappWebhook error:", err instanceof Error ? err.message : String(err));
         res.status(200).json({ ok: false }); // 200 pro Evolution não entrar em loop de retry
     }
+});
+// ─── Diagnóstico: fonte de verdade ÚNICA (home + WhatsApp) ───────────────────
+// Mês corrente no fuso de São Paulo (o mesmo pros dois canais).
+function currentMonthKey() {
+    const f = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit",
+    });
+    const p = f.formatToParts(new Date());
+    const y = p.find((x) => x.type === "year").value;
+    const m = p.find((x) => x.type === "month").value;
+    return `${y}-${m}`;
+}
+// A HOME consome ESTE motor (não calcula mais renda/agregados no browser).
+// Devolve os agregados (renda DERIVADA) + o texto do diagnóstico + o sinal de dado velho.
+exports.getAccountDiagnosis = (0, https_1.onCall)({ secrets: ["ANTHROPIC_API_KEY"], maxInstances: 10, timeoutSeconds: 60, memory: "256MiB" }, async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid)
+        throw new https_1.HttpsError("unauthenticated", "Faça login pra continuar.");
+    const { workspaceId, monthKey } = (request.data ?? {});
+    if (!workspaceId)
+        throw new https_1.HttpsError("invalid-argument", "Workspace não informado.");
+    const mk = typeof monthKey === "string" && /^\d{4}-\d{2}$/.test(monthKey) ? monthKey : currentMonthKey();
+    const db = admin.firestore();
+    const member = await db.doc(`workspaces/${workspaceId}/members/${uid}`).get();
+    if (!member.exists || member.data()?.status !== "active") {
+        throw new https_1.HttpsError("permission-denied", "Você não participa deste workspace.");
+    }
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey)
+        throw new https_1.HttpsError("internal", "Configuração ausente.");
+    const out = await (0, diagnosis_core_1.generateHomeDiagnosis)(db, new sdk_1.default({ apiKey, maxRetries: 3 }), workspaceId, mk);
+    return {
+        monthKey: mk,
+        summary: out.summary,
+        byCategoryCodes: out.byCategoryCodes,
+        diag: out.diag,
+        stale: out.stale,
+        stampLabel: out.stampLabel,
+        cached: out.cached,
+    };
 });
 //# sourceMappingURL=index.js.map
