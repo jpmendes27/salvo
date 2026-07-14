@@ -19,7 +19,7 @@ const WHATSAPP_DIAG_MODEL = "claude-haiku-4-5-20251001";
 
 // Versão da LÓGICA do diagnóstico (âncora de renda + prompt). Faz o cache invalidar
 // sozinho quando a régua muda — senão o texto velho sobreviveria ao carimbo igual.
-const DIAG_VERSION = "v2-renda-derivada";
+const DIAG_VERSION = "v3.1-tom-popular-mes-fix";
 
 const BRL = (v: number) =>
   `R$${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -191,12 +191,25 @@ REGRAS DE VOZ (obrigatórias):
   não proíba, não mande.
 - NUNCA dê veredito categórico de decisão ("não pode gastar 500", "cancele isso"). Você MOSTRA o risco
   com o porquê e devolve a escolha pra pessoa.
+- NADA de jargão de consultor financeiro. PROIBIDO: "folga real", "margem", "comprometimento",
+  "saúde financeira", "otimizar", "alocar", "fluxo de caixa", "déficit", "superávit", "patrimônio".
+  Fale como gente fala na mesa do bar: "sobrou", "tá tranquilo", "tá apertado", "tá puxado".
+- Descreva a SITUAÇÃO, não adjetive a PESSOA. Fale do que os números mostram, não de como a pessoa é.
+  ERRADO: "você tá com folga real", "você é organizado", "você está no vermelho".
+  CERTO: "os gastos na conta estão bem tranquilos até aqui", "a conta fechou no vermelho esse mês".
+- REGISTRO DE REFERÊNCIA (calibragem de tom, NÃO texto pra copiar):
+  "Os gastos na conta estão bem tranquilos até aqui. Isso dá espaço pra você respirar, planejar e
+  até investir se quiser. O cartão tá sob controle."
+  Repare: popular, descreve a situação, não rotula a pessoa, sem termo técnico.
 - Feche com a data da última atualização dos dados e um gancho curto pra alimentar dados novos no app.
 
 ${confiancaRule}
 ${emprestimoRule}
 
 GUARDRAILS (invioláveis):
+- O MÊS ANALISADO É ${mesLabel(monthKey)}. É o único mês que você está resumindo. NUNCA diga que o
+  panorama é de outro mês. ATENÇÃO: a "última atualização dos dados" é a data em que a pessoa
+  importou o extrato — NÃO é o mês analisado, e pode ser de outro mês. Não confunda as duas.
 - Use APENAS os números abaixo. NUNCA invente ou estime um número que não está aqui.
 - NUNCA aconselhe algo que o dado não sustenta.
 - Se um dado não existe, diga com honestidade em vez de inventar.
