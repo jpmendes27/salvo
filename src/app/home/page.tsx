@@ -1678,7 +1678,7 @@ function WorkspaceApp({
                     <WhatsAppIcon />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>{waLink?.linked ? "WhatsApp vinculado" : "Vincular WhatsApp"}</div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1, lineHeight: 1.4 }}>
                         {waLink?.linked ? `Recebe teu resumo por lá${waLink.phoneMasked ? " · " + waLink.phoneMasked : ""}` : "Receba teu resumo por lá"}
                       </div>
                     </div>
