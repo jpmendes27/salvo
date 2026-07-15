@@ -2,7 +2,7 @@
 
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { MessageCircle } from "lucide-react";
+import { ArrowLeft, MessageCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { app, auth } from "@/lib/firebase";
 import { colors, radius, typography } from "@/lib/design-system";
@@ -46,6 +46,7 @@ function LinkFlow({ workspaceId }: { workspaceId: string | null }) {
   const [remaining, setRemaining] = useState(0);
   // Estado do vínculo: undefined = checando, {linked} = já sei.
   const [status, setStatus] = useState<{ linked: boolean; phoneMasked?: string } | undefined>(undefined);
+  const [confirmUnlink, setConfirmUnlink] = useState(false);
 
   useEffect(() => {
     if (!workspaceId) { setStatus({ linked: false }); return; }
@@ -86,7 +87,22 @@ function LinkFlow({ workspaceId }: { workspaceId: string | null }) {
 
   if (status === undefined) return <Loader />;
 
-  // JÁ VINCULADO → mostra o estado, não gera código (vínculo é único).
+  async function unlink() {
+    if (!workspaceId) return;
+    setBusy(true); setError("");
+    try {
+      const fn = httpsCallable<{ workspaceId: string }, { unlinked: boolean }>(
+        getFunctions(app, "us-central1"), "unlinkWhatsapp"
+      );
+      await fn({ workspaceId });
+      setStatus({ linked: false });   // volta pro gerador → vincular o número novo
+      setConfirmUnlink(false);
+    } catch {
+      setError("Não consegui desvincular agora. Tenta de novo daqui a pouco.");
+    } finally { setBusy(false); }
+  }
+
+  // JÁ VINCULADO → mostra o estado; trocar número = desvincular + vincular de novo.
   if (status.linked) {
     return (
       <Shell>
@@ -95,17 +111,32 @@ function LinkFlow({ workspaceId }: { workspaceId: string | null }) {
         <p style={SUB}>
           Seu número já tá conectado{status.phoneMasked ? ` (${status.phoneMasked})` : ""}. Manda um oi pra gente no WhatsApp que a gente te responde na hora.
         </p>
-        <div style={{ ...CARD, display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-          <div style={{ width: 40, height: 40, borderRadius: radius.button, background: colors.accentMuted, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <MessageCircle size={20} color={G} />
-          </div>
-          <p style={{ fontSize: 13.5, color: colors.textSecondary, lineHeight: 1.6 }}>
-            É pra sempre — não precisa vincular de novo. Pra desvincular, fala com a gente.
-          </p>
-        </div>
-        <a href="https://wa.me/5521966939829" target="_blank" rel="noopener noreferrer" style={{ ...CTA(false), textDecoration: "none" }}>
+        <a href="https://wa.me/5521966939829" target="_blank" rel="noopener noreferrer" style={{ ...CTA(false), textDecoration: "none", marginBottom: 12 }}>
           Abrir conversa no WhatsApp
         </a>
+
+        {error && <div style={{ ...ERRBOX, marginTop: 4 }}>{error}</div>}
+
+        {/* Trocar número — desvincula o atual e volta pro fluxo de código. Confirmação leve. */}
+        {!confirmUnlink ? (
+          <button onClick={() => setConfirmUnlink(true)} style={GHOST}>
+            Trocar de número
+          </button>
+        ) : (
+          <div style={{ ...CARD, marginTop: 4 }}>
+            <p style={{ fontSize: 13.5, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
+              Isso desconecta o número atual. Pra usar outro, você gera um código novo e manda pelo WhatsApp do novo número.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={unlink} disabled={busy} style={{ ...CTA(busy), flex: 1 }}>
+                {busy ? <span style={SPINNER} /> : "Desvincular"}
+              </button>
+              <button onClick={() => setConfirmUnlink(false)} disabled={busy} style={{ ...GHOST, flex: 1, marginTop: 0 }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
       </Shell>
     );
   }
@@ -182,6 +213,9 @@ function Shell({ children }: { children: React.ReactNode }) {
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
       <div style={{ width: "100%", maxWidth: 420, animation: "fadeUp .4s ease both" }}>
+        <a href={`${BASE}/home`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: colors.textSecondary, textDecoration: "none", marginBottom: 24 }}>
+          <ArrowLeft size={15} /> Voltar
+        </a>
         <div style={{ display: "flex", alignItems: "baseline", gap: 0, marginBottom: 40 }}>
           <span style={{ fontFamily: typography.fontDisplay, fontWeight: 700, fontSize: "1.15rem", color: G, letterSpacing: "-0.02em" }}>Salvô</span>
           <span style={{ fontFamily: typography.fontDisplay, fontWeight: 700, fontSize: "1.15rem", color: "#fff", letterSpacing: "-0.02em" }}>!</span>
@@ -208,6 +242,11 @@ const SUB: React.CSSProperties = { fontSize: 14, color: colors.textSecondary, li
 const CARD: React.CSSProperties = { background: colors.card, border: `1px solid ${colors.border}`, borderRadius: radius.card, padding: "16px 18px" };
 const ERRBOX: React.CSSProperties = { background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.2)", borderRadius: radius.button, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#ff8080" };
 const SPINNER: React.CSSProperties = { width: 16, height: 16, border: "2.5px solid rgba(0,0,0,0.3)", borderTopColor: "#000", borderRadius: "50%", animation: "spin .7s linear infinite", display: "inline-block" };
+const GHOST: React.CSSProperties = {
+  width: "100%", marginTop: 12, padding: "13px", borderRadius: radius.button,
+  background: "transparent", color: colors.textSecondary, fontSize: 13.5, fontWeight: 600,
+  border: `1px solid ${colors.border}`, cursor: "pointer", textAlign: "center",
+};
 const CTA = (busy: boolean): React.CSSProperties => ({
   width: "100%", padding: "14px", borderRadius: radius.button, background: G, color: colors.bg,
   fontSize: 14, fontWeight: 800, border: "none", cursor: busy ? "default" : "pointer",

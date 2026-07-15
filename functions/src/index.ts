@@ -2842,3 +2842,29 @@ export const whatsappLinkStatus = onCall({ maxInstances: 10 }, async (request) =
   const masked = phone.length >= 4 ? `••••${phone.slice(-4)}` : "••••";
   return { linked: true as const, phoneMasked: masked };
 });
+
+// Desvincular o WhatsApp do usuário logado (trocar número = desvincular + vincular de novo).
+// Apaga o doc de vínculo E o estado de conversa daquele número (Admin SDK; client-deny).
+export const unlinkWhatsapp = onCall({ maxInstances: 10 }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Faça login pra continuar.");
+  const { workspaceId } = (request.data ?? {}) as { workspaceId?: string };
+  if (!workspaceId) throw new HttpsError("invalid-argument", "Workspace não informado.");
+
+  const db = admin.firestore();
+  const member = await db.doc(`workspaces/${workspaceId}/members/${uid}`).get();
+  if (!member.exists || member.data()?.status !== "active") {
+    throw new HttpsError("permission-denied", "Você não participa deste workspace.");
+  }
+
+  const snap = await db.collection("whatsappLinks").where("uid", "==", uid).get();
+  const doc = snap.docs.find((d) => d.data()?.workspaceId === workspaceId);
+  if (!doc) return { unlinked: false as const }; // já não tinha vínculo
+
+  const phone = doc.id;
+  const batch = db.batch();
+  batch.delete(doc.ref);                                        // vínculo
+  batch.delete(db.doc(`whatsappConversations/${phone}`));       // estado de conversa (não quebra se não existir)
+  await batch.commit();
+  return { unlinked: true as const };
+});
