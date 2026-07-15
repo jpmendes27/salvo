@@ -2641,22 +2641,11 @@ export const clientError = onRequest(
 
 // (1) Gera o código de 6 dígitos de vínculo a partir do usuário LOGADO (uid), não do
 // número — o número só é conhecido quando a mensagem chega. Uso único, expira 10min.
-// FLAG de rollout fechado: só e-mails allowlistados (WHATSAPP_ALLOWED_EMAILS, separados
-// por vírgula) geram código → só essas contas conseguem vincular. Vazio = ninguém (fail-closed).
-function whatsappEmailAllowed(email: string | undefined): boolean {
-  const allowed = (process.env.WHATSAPP_ALLOWED_EMAILS ?? "")
-    .toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
-  return allowed.length > 0 && allowed.includes((email ?? "").toLowerCase());
-}
-
+// Aberto a qualquer usuário logado; a segurança é a membership gate abaixo (só membro
+// ativo do workspace gera código pra ele).
 export const generateWhatsappLinkCode = onCall({ maxInstances: 10 }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Faça login pra continuar.");
-
-  // Gate de teste fechado (flag por e-mail).
-  if (!whatsappEmailAllowed(request.auth?.token?.email as string | undefined)) {
-    throw new HttpsError("permission-denied", "Esse recurso ainda tá em teste fechado.");
-  }
 
   const { workspaceId } = (request.data ?? {}) as { workspaceId?: string };
   if (!workspaceId) throw new HttpsError("invalid-argument", "Workspace não informado.");
@@ -2721,16 +2710,8 @@ export const whatsappWebhook = onRequest(
     const inbound = parseInbound(req.body);
     if (!inbound) { res.status(200).json({ ignored: true }); return; }
 
-    // FLAG de rollout fechado: só números allowlistados (WHATSAPP_ALLOWED_NUMBERS,
-    // separados por vírgula) recebem QUALQUER resposta. Vazio = bot mudo pra todos
-    // (fail-closed) — nada engaja estranho durante o teste.
-    const allowedNumbers = (process.env.WHATSAPP_ALLOWED_NUMBERS ?? "")
-      .split(",").map((s) => s.replace(/\D/g, "")).filter(Boolean);
-    if (!allowedNumbers.includes(inbound.phone.replace(/\D/g, ""))) {
-      res.status(200).json({ gated: true });
-      return;
-    }
-
+    // Chatbot ABERTO a qualquer número. A segurança fica onde importa: o PORTÃO DE VÍNCULO
+    // (número não vinculado só vê menu/ajuda, nunca dado financeiro) + anti-enumeração.
     try {
       const db = admin.firestore();
       const store = firestoreStore(db);
