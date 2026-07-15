@@ -26,11 +26,13 @@ const RAW_FALLBACK: Leaf | null = null;
 // Mensagem genérica de convite — MESMA no portão (1ª vez) e em QUALQUER falha de
 // código. Anti-enumeração: nunca revela se um código existe, de quem é, ou se há conta.
 const GENERIC_LINK_MSG =
-  "Pra isso eu preciso te reconhecer aqui primeiro. Abre o Salvô!, entra em " +
-  "\"Vincular WhatsApp\" e me manda o código que aparecer lá. Aí a gente destrava.";
+  "Pra isso eu preciso te reconhecer aqui primeiro. 🔒\n\n" +
+  "Abre este link, gera o código e me manda aqui:\n" +
+  "*https://jpmendes.com/salvo/vincular-whatsapp*\n\n" +
+  "_Pra voltar, é só mandar *menu*._";
 
 const WELCOME_LINKED = "Boa, tá tudo certo por aqui! 👊";
-const RESTART_MSG = "Deixa a gente começar de novo, tranquilo.";
+const RESTART_MSG = "Deixa a gente começar de novo, tranquilo. 🙂";
 
 function ctxFor(base: Omit<LeafContext, "state">, state: ConversationState): LeafContext {
   return { ...base, state };

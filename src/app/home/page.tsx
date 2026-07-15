@@ -695,6 +695,16 @@ function WorkspaceApp({
 
   const showDemo = false;
   const visibleTx = showDemo ? demoTransactions : transactions;
+  // Vínculo do WhatsApp (leitura leve p/ refletir no menu do avatar).
+  const [waLink, setWaLink] = useState<{ linked: boolean; phoneMasked?: string } | null>(null);
+  useEffect(() => {
+    if (showDemo) return;
+    const fn = httpsCallable<{ workspaceId: string }, { linked: boolean; phoneMasked?: string }>(
+      getFunctions(app, "us-central1"), "whatsappLinkStatus"
+    );
+    fn({ workspaceId: workspace.id }).then(({ data }) => setWaLink(data)).catch(() => {});
+  }, [workspace.id, showDemo]);
+
 
   // Imports that didn't reconcile carry verification="nao_conferido" until the
   // user attests. The badge persists while the month has any; attesting flips
@@ -1657,6 +1667,25 @@ function WorkspaceApp({
                       )}
                     </button>
                   ))}
+
+                  <button
+                    type="button"
+                    onClick={() => { setAvatarOpen(false); router.push(`${BASE}/vincular-whatsapp?workspace=${workspace.id}`); }}
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 10, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", transition: "background .15s" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <WhatsAppIcon />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>{waLink?.linked ? "WhatsApp vinculado" : "Vincular WhatsApp"}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {waLink?.linked ? `Recebe teu resumo por lá${waLink.phoneMasked ? " · " + waLink.phoneMasked : ""}` : "Receba teu resumo por lá"}
+                      </div>
+                    </div>
+                    {waLink?.linked && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(184,245,90,0.12)", color: G, border: "1px solid rgba(184,245,90,0.2)", padding: "2px 7px", borderRadius: 6, letterSpacing: "0.04em", flexShrink: 0 }}>ATIVO</span>
+                    )}
+                  </button>
 
                   <a
                     href="https://wa.me/5521966939829"

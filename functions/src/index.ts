@@ -2823,3 +2823,22 @@ export const getAccountDiagnosis = onCall(
     };
   }
 );
+
+// Estado do vínculo do WhatsApp pro usuário logado (menu do avatar + tela de vínculo).
+// Leitura leve via Admin SDK — as coleções whatsapp* são client-deny nas regras.
+export const whatsappLinkStatus = onCall({ maxInstances: 10 }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Faça login pra continuar.");
+  const { workspaceId } = (request.data ?? {}) as { workspaceId?: string };
+  if (!workspaceId) throw new HttpsError("invalid-argument", "Workspace não informado.");
+
+  const db = admin.firestore();
+  // uid tem poucos vínculos → filtra o workspace em memória (evita índice composto).
+  const snap = await db.collection("whatsappLinks").where("uid", "==", uid).get();
+  const doc = snap.docs.find((d) => d.data()?.workspaceId === workspaceId);
+  if (!doc) return { linked: false as const };
+  // Máscara do número (só os últimos 4) — nunca devolve o E.164 inteiro.
+  const phone = String(doc.id).replace(/\D/g, "");
+  const masked = phone.length >= 4 ? `••••${phone.slice(-4)}` : "••••";
+  return { linked: true as const, phoneMasked: masked };
+});

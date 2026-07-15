@@ -6,8 +6,8 @@ exports.parseInbound = parseInbound;
 exports.sendText = sendText;
 // ÚNICO ponto de renderização de opções (v1: texto numerado).
 function renderOptions(header, options) {
-    const lines = options.map((o, i) => `${i + 1}. ${o.label}`);
-    const foot = "Manda só o número.";
+    const lines = options.map((o, i) => `*${i + 1}.* ${o.label}`);
+    const foot = "_Manda só o número da opção._";
     return [header, ...lines, "", foot].filter((l) => l !== undefined).join("\n");
 }
 // Converte o resultado semântico de uma folha no texto final a enviar.

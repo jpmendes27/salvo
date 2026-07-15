@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAccountDiagnosis = exports.whatsappWebhook = exports.generateWhatsappLinkCode = exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateCardDiagnosis = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.requestPasswordReset = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = exports.recategorize = void 0;
+exports.whatsappLinkStatus = exports.getAccountDiagnosis = exports.whatsappWebhook = exports.generateWhatsappLinkCode = exports.clientError = exports.processImportJob = exports.sendAdminAlert = exports.requestAccountDeletion = exports.suggestGoal = exports.generateCardDiagnosis = exports.generateDiagnosis = exports.relinkGoogleAccount = exports.verifyCode = exports.sendVerificationCode = exports.requestPasswordReset = exports.sendInviteEmail = exports.sendInviteWhatsApp = exports.parseBankStatement = exports.recategorize = void 0;
 exports.buildSystemPrompt = buildSystemPrompt;
 exports.extractTextInChunks = extractTextInChunks;
 const https_1 = require("firebase-functions/v2/https");
@@ -2522,5 +2522,25 @@ exports.getAccountDiagnosis = (0, https_1.onCall)({ secrets: ["ANTHROPIC_API_KEY
         stampLabel: out.stampLabel,
         cached: out.cached,
     };
+});
+// Estado do vínculo do WhatsApp pro usuário logado (menu do avatar + tela de vínculo).
+// Leitura leve via Admin SDK — as coleções whatsapp* são client-deny nas regras.
+exports.whatsappLinkStatus = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid)
+        throw new https_1.HttpsError("unauthenticated", "Faça login pra continuar.");
+    const { workspaceId } = (request.data ?? {});
+    if (!workspaceId)
+        throw new https_1.HttpsError("invalid-argument", "Workspace não informado.");
+    const db = admin.firestore();
+    // uid tem poucos vínculos → filtra o workspace em memória (evita índice composto).
+    const snap = await db.collection("whatsappLinks").where("uid", "==", uid).get();
+    const doc = snap.docs.find((d) => d.data()?.workspaceId === workspaceId);
+    if (!doc)
+        return { linked: false };
+    // Máscara do número (só os últimos 4) — nunca devolve o E.164 inteiro.
+    const phone = String(doc.id).replace(/\D/g, "");
+    const masked = phone.length >= 4 ? `••••${phone.slice(-4)}` : "••••";
+    return { linked: true, phoneMasked: masked };
 });
 //# sourceMappingURL=index.js.map

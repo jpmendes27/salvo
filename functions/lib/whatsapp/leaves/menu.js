@@ -8,7 +8,7 @@ exports.MENU_OPTIONS = [
     { id: "reminder", label: "Criar lembrete pra mandar mais dados" },
     { id: "help", label: "Preciso de ajuda" },
 ];
-const MENU_HEADER = "E aí! O que você quer ver?";
+const MENU_HEADER = "E aí! 👋 O que você quer ver?";
 exports.menuLeaf = {
     mode: "idle",
     inputType: "structured",

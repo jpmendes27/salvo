@@ -12,8 +12,8 @@ const { renderOptions, renderReply } = require(path.join(FUNC, "lib", "whatsapp"
 const GENERIC_PREFIX = "Pra isso eu preciso te reconhecer";
 const DIAG = "📊 Teu panorama real (fake do teste).";
 const STUB = "Já já tô montando essa parte, tá quase pronta."; // ainda usado pela folha de LEMBRETE
-const HELP_ENTRY = "Pode mandar. Me conta o que tá pegando.";
-const HELP_DONE = "Recebi! Te respondo em breve por aqui.";
+const HELP_ENTRY = "Pode mandar. 👂 Me conta o que tá pegando.\n\n_Se mudou de ideia, manda *menu* pra voltar._";
+const HELP_DONE = "Recebi! ✅ Te respondo em breve por aqui.";
 
 // ── Fakes injetáveis ─────────────────────────────────────────────────────────
 function makeStore() {
@@ -171,9 +171,9 @@ function check(label, cond) { results.push({ label, pass: !!cond }); }
     const menu = await say(P, "oi");
     const semantic = Array.isArray(menu.options) && menu.options.every((o) => o.id && o.label);
     const rendered = renderOptions(menu.optionsHeader, menu.options);
-    const numbered = rendered.includes("1. Como tá financeiramente?") &&
-                     rendered.includes("2. Criar lembrete pra mandar mais dados") &&
-                     rendered.includes("3. Preciso de ajuda");
+    const numbered = rendered.includes("*1.* Como tá financeiramente?") &&
+                     rendered.includes("*2.* Criar lembrete pra mandar mais dados") &&
+                     rendered.includes("*3.* Preciso de ajuda");
     const registered = !!REGISTRY.diagnosis && !!REGISTRY.reminder && !!REGISTRY.help && !!REGISTRY.idle;
     // opção 2 registrada responde stub (já vinculado, pra não cair no portão)
     store.seedLink(P, "u", "w");

@@ -11,7 +11,7 @@ export const MENU_OPTIONS: Option[] = [
   { id: "help", label: "Preciso de ajuda" },
 ];
 
-const MENU_HEADER = "E aí! O que você quer ver?";
+const MENU_HEADER = "E aí! 👋 O que você quer ver?";
 
 export const menuLeaf: Leaf = {
   mode: "idle",

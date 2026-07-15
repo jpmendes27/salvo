@@ -44,6 +44,16 @@ function LinkFlow({ workspaceId }: { workspaceId: string | null }) {
   const [error, setError] = useState("");
   const [result, setResult] = useState<CodeResult | null>(null);
   const [remaining, setRemaining] = useState(0);
+  // Estado do vínculo: undefined = checando, {linked} = já sei.
+  const [status, setStatus] = useState<{ linked: boolean; phoneMasked?: string } | undefined>(undefined);
+
+  useEffect(() => {
+    if (!workspaceId) { setStatus({ linked: false }); return; }
+    const fn = httpsCallable<{ workspaceId: string }, { linked: boolean; phoneMasked?: string }>(
+      getFunctions(app, "us-central1"), "whatsappLinkStatus"
+    );
+    fn({ workspaceId }).then(({ data }) => setStatus(data)).catch(() => setStatus({ linked: false }));
+  }, [workspaceId]);
 
   // Contagem regressiva SÓ cosmética (charme iToken). A validade real é server-side.
   useEffect(() => {
@@ -73,6 +83,32 @@ function LinkFlow({ workspaceId }: { workspaceId: string | null }) {
 
   const pct = result && result.expiresInSeconds > 0 ? Math.max(0, (remaining / result.expiresInSeconds) * 100) : 0;
   const expired = !!result && remaining <= 0;
+
+  if (status === undefined) return <Loader />;
+
+  // JÁ VINCULADO → mostra o estado, não gera código (vínculo é único).
+  if (status.linked) {
+    return (
+      <Shell>
+        <p style={LABEL}>WhatsApp</p>
+        <h1 style={H1}>WhatsApp vinculado</h1>
+        <p style={SUB}>
+          Seu número já tá conectado{status.phoneMasked ? ` (${status.phoneMasked})` : ""}. Manda um oi pra gente no WhatsApp que a gente te responde na hora.
+        </p>
+        <div style={{ ...CARD, display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+          <div style={{ width: 40, height: 40, borderRadius: radius.button, background: colors.accentMuted, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <MessageCircle size={20} color={G} />
+          </div>
+          <p style={{ fontSize: 13.5, color: colors.textSecondary, lineHeight: 1.6 }}>
+            É pra sempre — não precisa vincular de novo. Pra desvincular, fala com a gente.
+          </p>
+        </div>
+        <a href="https://wa.me/5521966939829" target="_blank" rel="noopener noreferrer" style={{ ...CTA(false), textDecoration: "none" }}>
+          Abrir conversa no WhatsApp
+        </a>
+      </Shell>
+    );
+  }
 
   return (
     <Shell>

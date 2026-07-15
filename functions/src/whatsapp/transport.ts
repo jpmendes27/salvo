@@ -6,8 +6,8 @@ import type { LeafResult, Option, Inbound } from "./types";
 
 // ÚNICO ponto de renderização de opções (v1: texto numerado).
 export function renderOptions(header: string | undefined, options: Option[]): string {
-  const lines = options.map((o, i) => `${i + 1}. ${o.label}`);
-  const foot = "Manda só o número.";
+  const lines = options.map((o, i) => `*${i + 1}.* ${o.label}`);
+  const foot = "_Manda só o número da opção._";
   return [header, ...lines, "", foot].filter((l) => l !== undefined).join("\n");
 }
 
