@@ -1670,7 +1670,7 @@ function WorkspaceApp({
 
                   <button
                     type="button"
-                    onClick={() => { setAvatarOpen(false); router.push(`${BASE}/vincular-whatsapp?workspace=${workspace.id}`); }}
+                    onClick={() => { setAvatarOpen(false); router.push(`/vincular-whatsapp?workspace=${workspace.id}`); }}
                     style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 10, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", transition: "background .15s" }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
