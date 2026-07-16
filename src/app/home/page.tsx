@@ -994,7 +994,11 @@ function WorkspaceApp({
               return raw ?? `${t.date}|${t.description.toLowerCase().trim()}|${t.amount.toFixed(2)}`;
             })
           );
-          const unverified = data.verification === "nao_conferido";
+          // Delta EXATAMENTE zero = as pontas bateram = conferido. Nunca mostrar
+          // "faltou R$ 0,00" (alarme falso): trata como verificado — sem selo, sem
+          // aviso — mesmo que o servidor tenha carimbado "nao_conferido".
+          const deltaZero = data.delta != null && Math.abs(data.delta) < 0.005;
+          const unverified = data.verification === "nao_conferido" && !deltaZero;
           const rows: ParsedWithMeta[] = (data.transactions ?? []).map(
             (t: ParsedTransaction) => ({
               ...t,

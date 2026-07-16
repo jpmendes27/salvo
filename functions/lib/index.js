@@ -398,6 +398,16 @@ async function categorizeCascade(client, db, descriptions) {
     // Layers 1 & 2 — direction rule + merchant seed (free, local).
     const needCache = [];
     for (let i = 0; i < n; i++) {
+        // Camada 0 — movimento interno (cofrinho/caixinha/CDB/RDB/aplicação/resgate):
+        // rótulo NEUTRO e determinístico ("Transferências", categoria já existente).
+        // Essas linhas já entram como internal:true (neutras no diagnóstico); aqui só
+        // garantimos que o rótulo VISÍVEL não engane — resgate NUNCA pode aparecer como
+        // "Recebimentos" (renda). Também impede que o palpite da IA envenene o cache de
+        // merchant compartilhado. Roda antes de tudo (a IA não sabe o que é RDB).
+        if ((0, pdf_core_1.isInternalTransfer)(descriptions[i])) {
+            results[i] = "Transferencias";
+            continue;
+        }
         const dir = (0, pdf_core_1.directionRule)(descriptions[i]);
         if (dir) {
             results[i] = dir;

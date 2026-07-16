@@ -435,11 +435,14 @@ export function reconcileLedger(
     }
   }
 
-  // 3 — TOTALS (header only): initial + Σ == final.
-  if (initialBalanceCents !== undefined && finalBalanceCents !== undefined) {
-    if (Math.abs(initialBalanceCents + readTotal - finalBalanceCents) <= EXACT) {
-      return { mode: "totals", ok: true, ...base };
-    }
+  // 3 — TOTALS: as pontas batem EXATAMENTE. Compara o saldo declarado (final do
+  // cabeçalho, ou o último checkpoint quando não há cabeçalho) com o saldo lido
+  // (inicial + Σ). Delta zero = a conta fecha de ponta a ponta = conferido — mesmo
+  // que um checkpoint de dia intermediário não tenha encadeado (linha com data
+  // trocada, dia partido). A cadeia por dia acima é o passe mais rígido; este é o
+  // piso honesto. Delta zero NUNCA é falha (senão vira "faltou R$ 0,00").
+  if (deltaCents !== undefined && Math.abs(deltaCents) <= EXACT) {
+    return { mode: "totals", ok: true, ...base };
   }
 
   return { mode: "none", ok: false, ...base };
