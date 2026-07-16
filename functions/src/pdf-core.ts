@@ -721,21 +721,45 @@ export function parseFaturaJson(rawText: string): ParsedFatura | null {
 // SaldoAnterior + TotalDespesas − TotalPagamentos − TotalCreditos = SaldoDestaFatura.
 // All four are printed on the statement. Doesn't reconcile → blocked (failed),
 // never a partial import. Does NOT reuse the account extrato's balance chain.
+// Conserto 2: SINAL, não veredito. Devolve se os totais impressos fecham entre si e o
+// diff em centavos. NÃO bloqueia mais a importação — o processFatura usa isso só pra
+// calibrar a nota de conferência (verificado / nao_conferido). diffCents = null quando
+// nem dá pra montar a identidade (falta total).
 export function reconcileFatura(
   totals: ParsedFatura["totals"],
   toleranceCents = 2
-): { ok: boolean; reason?: string } {
+): { ok: boolean; reason?: string; diffCents: number | null } {
   const { saldoAnterior, totalDespesas, totalPagamentos, totalCreditos, totalAPagar } = totals;
   if (totalAPagar === undefined)
-    return { ok: false, reason: "saldo desta fatura não encontrado" };
+    return { ok: false, reason: "saldo desta fatura não encontrado", diffCents: null };
   if (saldoAnterior === undefined && totalDespesas === undefined)
-    return { ok: false, reason: "totais insuficientes para validar a fatura" };
+    return { ok: false, reason: "totais insuficientes para validar a fatura", diffCents: null };
   const c = (v: number | undefined) => Math.round((v ?? 0) * 100);
   const expected = c(saldoAnterior) + c(totalDespesas) - c(totalPagamentos) - c(totalCreditos);
   const diff = Math.abs(expected - c(totalAPagar));
   return diff <= toleranceCents
-    ? { ok: true }
-    : { ok: false, reason: `totais não fecham (diferença de ${(diff / 100).toFixed(2)})` };
+    ? { ok: true, diffCents: diff }
+    : { ok: false, reason: `totais não fecham (diferença de ${(diff / 100).toFixed(2)})`, diffCents: diff };
+}
+
+// Conserto 2 — a nota FINAL de conferência da fatura (pura, testável). NUNCA bloqueia:
+// a completude/atraso é o veredito principal; o desencontro dos totais impressos só
+// rebaixa 'verificado' → 'nao_conferido' quando passa de arredondamento (≤ R$2,00). O
+// total IMPRESSO segue sendo a fonte de verdade — não recalculamos das linhas.
+export function faturaVerification(
+  completenessState: "verificado" | "nao_conferido" | "nao_verificavel",
+  completenessDeltaCents: number | null,
+  gateOk: boolean,
+  gateDiffCents: number | null,
+  roundingTolCents = 200
+): { verification: "verificado" | "nao_conferido" | "nao_verificavel"; deltaCents: number | null } {
+  let verification = completenessState;
+  let deltaCents = completenessState === "nao_conferido" ? completenessDeltaCents : null;
+  if (!gateOk && gateDiffCents != null && gateDiffCents > roundingTolCents && verification === "verificado") {
+    verification = "nao_conferido";
+    deltaCents = gateDiffCents;
+  }
+  return { verification, deltaCents };
 }
 
 // ─── Fatura completeness by VALUE (not line count) ───────────────────────────

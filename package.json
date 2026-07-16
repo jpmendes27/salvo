@@ -16,6 +16,7 @@
     "test:whatsapp": "node tests/whatsapp.test.js",
     "whatsapp:sim": "node tests/whatsapp.sim.js",
     "test:whatsapp-auth": "node tests/whatsapp-webhook-auth.test.js",
+    "test:fatura-conferencia": "node tests/fatura-conferencia.test.js",
     "deploy:demo": "npm run build:demo && firebase deploy --only hosting",
     "firebase:deploy": "firebase deploy"
   },

@@ -82,9 +82,11 @@ function buildAccountSummary(args) {
         motivo: c.v.reason,
     }))
         .sort((a, b) => b.valor - a.valor);
-    // Sem promessa furada: sem renda derivada (nada classificado como 'trabalho'),
-    // rendaRef é null → score null → degrada honesto. Nunca base fabricada.
-    const rendaRef = rendaDerivada > 0 ? rendaDerivada : null;
+    // Conserto 1: a âncora do veredito é a RÉGUA LARGA (tudo que entrou na conta), pra
+    // bater com a manchete (entrou vs saiu vs sobrou) e ter UM número só na tela. A
+    // classificação de renda (trabalho/neutro/divida) vira EXPLICAÇÃO no texto, não muda
+    // o número. Sem entrada real (totalEntradas 0) → null → degrada honesto.
+    const rendaRef = totalEntradas > 0 ? totalEntradas : null;
     const comprometimento = rendaRef && totalGasto > 0 ? Math.min(100, Math.round((totalGasto / rendaRef) * 100)) : 0;
     const ratio = rendaRef ? totalGasto / rendaRef : 0;
     const score = expenses.length === 0 || rendaRef === null

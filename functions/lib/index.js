@@ -1896,29 +1896,19 @@ async function processFatura(client, db, jobRef, workspaceId, statementText, fil
         }).catch(() => { });
         return;
     }
-    // 2 ─ THE GATE — reconcile by totals. Doesn't close → failed, never partial.
-    const gate = (0, pdf_core_1.reconcileFatura)(fatura.totals);
-    if (!gate.ok) {
-        console.error(`[fatura-job] BLOCKED by totals: ${gate.reason}`);
-        await jobRef.update({
-            status: "failed",
-            type: "fatura",
-            error: "Não consegui bater os totais dessa fatura. Pra não importar nada errado, parei aqui — confere se o PDF tá completo e tenta de novo.",
-            failedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }).catch(() => { });
-        if (resendKey) {
-            await alertJobFailure(resendKey, `Fatura blocked: ${gate.reason}. bank=${fatura.card.bank}`, jobId, workspaceId);
-        }
-        return;
-    }
     await jobRef.update({ stage: "conferindo" }).catch(() => { }); // SALVO-13: etapa real
-    // 2b ─ COMPLETENESS by value (não bloqueia). Os totais impressos sempre fecham
-    // entre si; aqui conferimos se a soma dos débitos extraídos bate com o total de
-    // novas despesas IMPRESSO. Soma abaixo → faltou lançamento (nao_conferido); sem
-    // total impresso → nao_verificavel (sem alarme). Verificado quando bate.
+    // 2 ─ CONFERÊNCIA (Conserto 2 — NUNCA bloqueia; sempre persiste). A ordem é:
+    //   (a) COMPLETUDE por valor + atraso/rotativo → veredito principal (verificado /
+    //       nao_conferido / nao_verificavel). Rotativo/atraso já vira nao_verificavel.
+    //   (b) totais impressos (reconcileFatura) viram SINAL: se não fecham por mais que
+    //       arredondamento E a completude estava 'verificado', rebaixa pra nao_conferido
+    //       e grava o delta — aviso honesto, sem abortar. O total IMPRESSO segue sendo a
+    //       fonte de verdade (não recalculamos das linhas).
     const atraso = (0, pdf_core_1.detectFaturaAtraso)(fatura.lancamentos, fatura.totals, statementText);
     const completeness = (0, pdf_core_1.checkFaturaCompleteness)(fatura.lancamentos, (0, pdf_core_1.parseFaturaNovasDespesas)(statementText), atraso);
-    console.log(`[fatura-job] completeness: ${completeness.state} (atraso=${atraso}, anchor=${completeness.anchorCents}, sum=${completeness.sumCents}, delta=${completeness.deltaCents})`);
+    const gate = (0, pdf_core_1.reconcileFatura)(fatura.totals);
+    const { verification, deltaCents } = (0, pdf_core_1.faturaVerification)(completeness.state, completeness.deltaCents, gate.ok, gate.diffCents);
+    console.log(`[fatura-job] conferência: ${verification} (completeness=${completeness.state}, atraso=${atraso}, totaisDiff=${gate.diffCents}, delta=${deltaCents})`);
     // 3 ─ Identity & period.
     const cardId = cardIdFor(fatura.card);
     const period = fatura.period ??
@@ -1971,11 +1961,11 @@ async function processFatura(client, db, jobRef, workspaceId, statementText, fil
         totalPagamentos: t.totalPagamentos ?? 0,
         totalCreditos: t.totalCreditos ?? 0,
         totalAPagar: t.totalAPagar ?? 0,
-        // Completude por valor (lente de cartão). 'verificado' | 'nao_conferido' |
-        // 'nao_verificavel'. delta (R$) só quando nao_conferido → quanto pode faltar.
-        verification: completeness.state,
-        ...(completeness.state === "nao_conferido" && completeness.deltaCents != null
-            ? { completenessDelta: completeness.deltaCents / 100 }
+        // Conferência (lente de cartão). 'verificado' | 'nao_conferido' | 'nao_verificavel'.
+        // delta (R$) só quando nao_conferido → quanto pode faltar (não fechou por isso).
+        verification,
+        ...(verification === "nao_conferido" && deltaCents != null
+            ? { completenessDelta: deltaCents / 100 }
             : {}),
         ...(fatura.vencimento ? { vencimento: fatura.vencimento } : {}),
         ...(fatura.historico?.length ? { historico: fatura.historico } : {}),

@@ -19,7 +19,7 @@ type Firestore = adminType.firestore.Firestore;
 const DIAG_MODEL = "claude-haiku-4-5-20251001";
 
 // Versão da LÓGICA (âncora + prompts). Bumpar invalida o cache dos dois canais.
-const DIAG_VERSION = "v4-fonte-unica";
+const DIAG_VERSION = "v5-manchete-larga";
 
 // Dado com mais de 10 dias → o texto REFORÇA que pode estar desatualizado. Não trava nada.
 const STALE_DAYS = 10;
@@ -66,16 +66,27 @@ export type DiagContext = {
   dadoMagro: boolean;           // sem gasto OU sem renda derivada → não force veredito
 };
 
-// ── CARIMBO: quando os dados deste workspace mudaram pela última vez ─────────
+// ── CARIMBO: quando os DADOS deste workspace mudaram pela última vez ─────────
+// Conserto 3: mede o DADO, não o job. Existem caminhos que criam transação SEM gerar
+// importJob (import síncrono de preview, lançamento manual). O carimbo = o mais recente
+// entre: processedAt dos importJobs 'done', createdAt da transação mais nova, e updatedAt
+// da transação editada mais recente. Assim uma pessoa que tem dados nunca vê "sem import".
 export async function getDataStamp(db: Firestore, workspaceId: string): Promise<number | null> {
-  const snap = await db.collection(`workspaces/${workspaceId}/importJobs`)
-    .where("status", "==", "done").get();
+  const txCol = db.collection(`workspaces/${workspaceId}/transactions`);
+  const [jobsSnap, byCreated, byUpdated] = await Promise.all([
+    db.collection(`workspaces/${workspaceId}/importJobs`).where("status", "==", "done").get(),
+    txCol.orderBy("createdAt", "desc").limit(1).get(),   // createdAt existe em TODO caminho
+    txCol.orderBy("updatedAt", "desc").limit(1).get(),   // updatedAt só em alguns (recat/manual)
+  ]);
   let max: number | null = null;
-  for (const d of snap.docs) {
-    const p = d.data()?.processedAt;
-    const ms = p && typeof p.toMillis === "function" ? p.toMillis() : null;
+  const consider = (ts: unknown) => {
+    const ms = ts && typeof (ts as { toMillis?: () => number }).toMillis === "function"
+      ? (ts as { toMillis: () => number }).toMillis() : null;
     if (ms != null && (max == null || ms > max)) max = ms;
-  }
+  };
+  for (const d of jobsSnap.docs) consider(d.data()?.processedAt);
+  if (!byCreated.empty) consider(byCreated.docs[0].data()?.createdAt);
+  if (!byUpdated.empty) consider(byUpdated.docs[0].data()?.updatedAt);
   return max;
 }
 
@@ -179,20 +190,22 @@ function dadosBlock(ctx: DiagContext): string {
     : `Faltou ${BRL(Math.abs(s.net))} (a conta fechou no vermelho)`;
 
   const naoRendaLinhas = r.itensNaoRenda
-    .map((i) => `  • ${BRL(i.valor)} — "${i.descricao}" → ${i.kind === "divida" ? "parece EMPRÉSTIMO recebido" : "NÃO é renda (transferência própria/resgate/estorno/rendimento)"}`)
+    .map((i) => `    • ${BRL(i.valor)} — "${i.descricao}" → ${i.kind === "divida" ? "parece EMPRÉSTIMO recebido (não é renda; volta como parcela)" : "não é renda nova (transferência própria/resgate/estorno/rendimento)"}`)
     .join("\n");
+  const naoRendaTotal = r.breakdown.neutro + r.breakdown.divida;
 
-  const rendaLine = r.derivada > 0
-    ? `- Renda de trabalho (o que o dado sustenta como renda): ${BRL(r.derivada)}` +
-      (r.itensNaoRenda.length ? `\n- Do que entrou, NÃO é renda:\n${naoRendaLinhas}` : `\n- Todas as entradas do mês são renda de trabalho clara.`)
-    : `- Renda de trabalho: NENHUMA entrada do mês parece renda de trabalho. NÃO afirme renda.`;
+  // A CLASSIFICAÇÃO de renda é EXPLICAÇÃO, não muda a manchete (entrou/saiu/sobrou).
+  const rendaLine = naoRendaTotal > 0.005
+    ? `- EXPLICAÇÃO da entrada (NÃO recalcule a manchete com isto): dos ${BRL(s.totalEntradas)} que entraram, ${BRL(r.derivada)} é dinheiro de TRABALHO; ${BRL(naoRendaTotal)} veio de outra fonte:\n${naoRendaLinhas}`
+    : `- Toda a entrada do mês (${BRL(s.totalEntradas)}) é dinheiro de trabalho.`;
 
   const contaBlock = !ctx.temMovimentoConta
     ? `- AINDA NÃO VI MOVIMENTO DA CONTA neste mês. Diga isso com honestidade e convide a subir o extrato. NÃO invente números de conta.`
     : [
-        `- Entrou: ${BRL(s.totalEntradas)}`,
-        `- Saiu: ${BRL(s.totalGasto)}`,
-        `- Resultado: ${resultado}`,
+        `- MANCHETE (a conta TEM que fechar: Entrou − Saiu = Resultado):`,
+        `  Entrou: ${BRL(s.totalEntradas)}  (TUDO que entrou na conta — use ESTE número no "entrou")`,
+        `  Saiu: ${BRL(s.totalGasto)}`,
+        `  Resultado: ${resultado}`,
         rendaLine,
         s.topCat ? `- Onde mais pesou: ${s.topCat.nome} — ${BRL(s.topCat.valor)}` : `- Onde mais pesou: sem dados`,
         ctx.prevGasto > 0
@@ -221,12 +234,12 @@ function regrasBlock(ctx: DiagContext): string {
     ? `DADO MAGRO: não dá pra fechar um veredito de verdade com o que tem aqui. NÃO force diagnóstico,
 NÃO invente. Diga honestamente o que falta e convide a alimentar os dados no app.`
     : r.confianca === "alta"
-      ? `CONFIANÇA DA RENDA: ALTA — a foto tá limpa (quase tudo que entrou é renda de trabalho).
-Pode FALAR DIRETO: "entrou X, sobrou Y, tá tranquilo/tá apertado".`
-      : `CONFIANÇA DA RENDA: BAIXA — boa parte do que entrou NÃO é renda de trabalho clara.
-NÃO DECRETE. MOSTRE a incerteza e APONTE de onde ela vem. Diga quanto entrou, quanto disso PARECE
-renda recorrente, e o que o resto parece ser. Abra os dois cenários ("se isso for renda, é assim;
-se foi pontual, é assim") e devolva a escolha: "você que sabe".`;
+      ? `CONFIANÇA DA RENDA: ALTA — quase tudo que entrou é renda de trabalho.
+Pode FALAR DIRETO: "entrou {total que entrou}, saiu {total}, sobrou {resultado}, tá tranquilo/tá apertado".`
+      : `CONFIANÇA DA RENDA: BAIXA — boa parte do que entrou NÃO é renda de trabalho.
+A MANCHETE continua na régua larga (entrou = TUDO que entrou), mas EXPLIQUE de onde veio: diga que
+do total que entrou, só uma parte é dinheiro de trabalho e o resto veio de outra fonte (ex.: resgate
+de investimento guardado). Não trate esse resto como renda recorrente — mas NÃO tire ele do "entrou".`;
 
   const emprestimo = r.breakdown.divida > 0
     ? `\nEMPRÉSTIMO: uma das entradas parece empréstimo recebido. Aceno HONESTO — não é renda e volta
@@ -264,8 +277,11 @@ function guardrails(ctx: DiagContext): string {
   é de outro mês. A "última atualização dos dados" é a data do IMPORT — NÃO é o mês, e pode ser de outro.
 - Use APENAS os números fornecidos. NUNCA invente ou estime número que não está aqui.
 - NUNCA aconselhe algo que o dado não sustenta. Dado ausente → diga com honestidade.
-- RENDA é só o que está marcado como renda de trabalho. Transferência própria, resgate, estorno,
-  rendimento e empréstimo NÃO são renda — nunca os some como se fossem.`;
+- A CONTA DA MANCHETE FECHA: o "entrou" é o TOTAL que entrou na conta; "entrou − saiu = sobrou".
+  NUNCA troque o "entrou" pela renda de trabalho — a renda de trabalho é EXPLICAÇÃO no meio do texto,
+  não a manchete. Se a manchete não fechar na conta, você errou.
+- Transferência própria, resgate, estorno, rendimento e empréstimo entraram na conta (contam no
+  "entrou"), mas NÃO são renda recorrente — trate isso como explicação, nunca como renda de trabalho.`;
 }
 
 async function askModel(client: Anthropic, prompt: string, maxTokens: number): Promise<Record<string, unknown>> {
