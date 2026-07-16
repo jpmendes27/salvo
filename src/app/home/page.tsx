@@ -2146,14 +2146,14 @@ function WorkspaceApp({
           </div>
         )}
 
-        {/* 3. Renda mensal — DERIVADA do transacional (não se declara mais; a coleta
-             de renda ficou só no onboarding). Mesmo card, mesmo estilo, só read-only. */}
+        {/* 3. Entrou no mês — TUDO que entrou na conta (régua larga; a renda não se
+             declara mais — a coleta ficou só no onboarding). Mesmo card, mesmo estilo. */}
         <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>Renda mensal</p>
+            <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.36)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>Entrou no mês</p>
           </div>
           <p style={{ fontSize: 18, fontWeight: 800, color: mobRendaRef ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em", marginBottom: 10 }}>
-            {mobRendaRef ? formatCurrency(mobRendaRef) : "Sem renda identificada"}
+            {mobRendaRef ? formatCurrency(mobRendaRef) : "Sem entradas no mês"}
           </p>
           <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginBottom: 6 }}>
             <div style={{ height: "100%", borderRadius: 2, width: `${Math.min(100, mobComprometimento)}%`, background: mobComprometimento > 90 ? "#ff8080" : mobComprometimento > 75 ? "#facc15" : G, transition: "width .5s cubic-bezier(.4,0,.2,1)" }} />
@@ -3340,7 +3340,7 @@ function InsightsView({
           { label: "Gastos no mês anterior", value: prevTotalGasto > 0 ? formatCurrency(prevTotalGasto) : "—", accent: false },
           { label: "Transações", value: String(expenses.length), accent: false },
           { label: "Média de gastos/dia", value: formatCurrency(mediaGastoPorDia), accent: false },
-          { label: "% Renda comprometida", value: `${comprometimento}%`, accent: comprometimento > 75 }
+          { label: "% do que entrou, gasto", value: `${comprometimento}%`, accent: comprometimento > 75 }
         ] as { label: string; value: string; accent: boolean }[]).map(({ label, value, accent }) => (
           <div key={label} className={`ins-card${accent ? " ins-card-accent" : ""}`}>
             <p style={INS_LABEL}>{label}</p>
@@ -3353,10 +3353,10 @@ function InsightsView({
           declarar renda saiu da home, a coleta ficou só no onboarding) */}
       <div className="ins-card" style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
         <div style={{ minWidth: 160 }}>
-          <p style={INS_LABEL}>Renda mensal</p>
+          <p style={INS_LABEL}>Entrou no mês</p>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 20, fontWeight: 800, color: rendaRef ? "#fff" : "rgba(255,255,255,0.3)", letterSpacing: "-0.03em" }}>
-              {rendaRef ? formatCurrency(rendaRef) : "Sem renda identificada"}
+              {rendaRef ? formatCurrency(rendaRef) : "Sem entradas no mês"}
             </span>
           </div>
         </div>
