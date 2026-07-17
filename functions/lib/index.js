@@ -2037,7 +2037,7 @@ async function processFatura(client, db, jobRef, workspaceId, statementText, fil
 //   2. Download file; LGPD delete immediately after reading
 //   3. ONE Claude Sonnet call: extraction + category + classification + balance
 //   4. Server-side reconciliation (balance-column or totals strategy)
-//   5. Server-side IGNORAR override (KEEP IN SYNC with classify.ts)
+//   5. Server-side IGNORAR override (MP_IGNORE_PATTERNS de src/lib/shared/mp-ignore.ts)
 //   6. Write results; partial if reconciliation fails; failed on errors
 //   On any error: mark status=failed, send alert email, do NOT loop/retry.
 exports.processImportJob = (0, storage_1.onObjectFinalized)({

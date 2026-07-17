@@ -46,6 +46,7 @@ Object.defineProperty(exports, "reconcileLedger", { enumerable: true, get: funct
 const categorize_direction_seed_1 = require("./shared/categorize-direction-seed");
 Object.defineProperty(exports, "directionRule", { enumerable: true, get: function () { return categorize_direction_seed_1.directionRule; } });
 Object.defineProperty(exports, "seedLookup", { enumerable: true, get: function () { return categorize_direction_seed_1.seedLookup; } });
+const mp_ignore_1 = require("./shared/mp-ignore");
 // ─── Prompt-injection hardening (SALVO-11) ───────────────────────────────────
 // O documento do usuário vai DIRETO pro modelo; texto malicioso embutido pode tentar
 // sequestrar a instrução. Defesa em camadas:
@@ -296,14 +297,7 @@ function reconcileParsed(parsed) {
 // LedgerVerification + reconcileLedger → src/lib/shared/reconcile-ledger.ts
 // (importado/re-exportado no topo). Cascata linha/dia/totais, delta-zero = conferido.
 // ─── Server-side classification ───────────────────────────────────────────────
-// KEEP IN SYNC with src/lib/import/classify.ts
-const MP_IGNORE_PATTERNS = [
-    /dinheiro\s+reservado/i,
-    /dinheiro\s+retirado/i,
-    /^reembolso\b/i,
-    /^estorno\b/i,
-];
-// isInternalTransfer → src/lib/shared/internal-transfer.ts (importado/re-exportado no topo).
+// MP_IGNORE_PATTERNS + isInternalTransfer → src/lib/shared/ (importados no topo).
 function classifyServer(description, signedCents, bankSlug, claudeClassification) {
     if (signedCents === 0)
         return "IGNORAR";
@@ -312,7 +306,7 @@ function classifyServer(description, signedCents, bankSlug, claudeClassification
     // Direction comes from the sign; neutrality in the score is a separate flag.
     if ((0, internal_transfer_1.isInternalTransfer)(norm))
         return signedCents > 0 ? "ENTRADA" : "SAIDA";
-    if (bankSlug === "mercado-pago" && MP_IGNORE_PATTERNS.some((p) => p.test(norm))) {
+    if (bankSlug === "mercado-pago" && mp_ignore_1.MP_IGNORE_PATTERNS.some((p) => p.test(norm))) {
         return "IGNORAR";
     }
     if (claudeClassification === "IGNORAR")

@@ -15,6 +15,7 @@
     "test:injection": "node tests/injection.test.js",
     "test:whatsapp": "node tests/whatsapp.test.js",
     "test:income": "node tests/income-pix.test.js",
+    "test:rdb-client": "node tests/rdb-client.test.js",
     "whatsapp:sim": "node tests/whatsapp.sim.js",
     "test:whatsapp-auth": "node tests/whatsapp-webhook-auth.test.js",
     "test:fatura-conferencia": "node tests/fatura-conferencia.test.js",

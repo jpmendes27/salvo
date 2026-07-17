@@ -15,6 +15,7 @@ import { isInternalTransfer } from "./shared/internal-transfer";
 import { reconcileServer, reconcileLedger } from "./shared/reconcile-ledger";
 import type { LedgerVerification } from "./shared/reconcile-ledger";
 import { normDesc, directionRule, seedLookup } from "./shared/categorize-direction-seed";
+import { MP_IGNORE_PATTERNS } from "./shared/mp-ignore";
 export { isInternalTransfer, reconcileServer, reconcileLedger, directionRule, seedLookup };
 export type { LedgerVerification };
 
@@ -340,15 +341,7 @@ export function reconcileParsed(parsed: ParsedClaudeResponse): { ok: boolean; va
 // (importado/re-exportado no topo). Cascata linha/dia/totais, delta-zero = conferido.
 
 // ─── Server-side classification ───────────────────────────────────────────────
-// KEEP IN SYNC with src/lib/import/classify.ts
-const MP_IGNORE_PATTERNS = [
-  /dinheiro\s+reservado/i,
-  /dinheiro\s+retirado/i,
-  /^reembolso\b/i,
-  /^estorno\b/i,
-];
-
-// isInternalTransfer → src/lib/shared/internal-transfer.ts (importado/re-exportado no topo).
+// MP_IGNORE_PATTERNS + isInternalTransfer → src/lib/shared/ (importados no topo).
 
 export function classifyServer(
   description: string,

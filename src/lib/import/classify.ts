@@ -17,16 +17,13 @@
 //   new real income. Mark as IGNORAR so they don't inflate the balance.
 
 import type { NormalizedLine, ClassifiedLine, Classification } from "./types";
+import { MP_IGNORE_PATTERNS } from "../shared/mp-ignore";
 
 // Patterns keyed by bank slug. Applied to the normalised description
-// (lowercase, NFD-stripped) BEFORE the sign-based default.
+// (lowercase, NFD-stripped) BEFORE the sign-based default. Fonte da verdade
+// compartilhada com o servidor (classifyServer) — ver src/lib/shared/mp-ignore.ts.
 const IGNORE_PATTERNS: Record<string, RegExp[]> = {
-  "mercado-pago": [
-    /dinheiro\s+reservado/i,
-    /dinheiro\s+retirado/i,
-    /^reembolso\b/i,
-    /^estorno\b/i,
-  ],
+  "mercado-pago": MP_IGNORE_PATTERNS,
 };
 
 // Common zero-value patterns (all banks)
