@@ -268,10 +268,34 @@ const FORCE_OUTROS: RegExp[] = [
   /ALUGUEL\s+DE\s+PARC/,
 ];
 
+// Movimento interno (cofrinho/caixinha/CDB/RDB/aplicação/resgate/poupança): dinheiro
+// do próprio dono mudando de bolso — real no ledger, NEUTRO no score, rótulo
+// "Transferencias" (nunca "Recebimentos"/"Outros"). ESPELHO FIEL do isInternalTransfer
+// do servidor (functions/src/pdf-core.ts) — os dois TÊM que andar juntos.
+const INTERNAL_TRANSFER_PATTERNS: RegExp[] = [
+  /cofrinho/,
+  /caixinha/,
+  /dinheiro\s+(reservado|retirado)/,
+  /\bcdb\b/,
+  /\brdb\b/,
+  /(aplicac\w*|resgate)\s*(de\s+)?(cofrinho|caixinha|cdb|rdb|poupan|tesouro|investiment|fundo|reserva)/,
+  /(aplicac\w*|resgate)\s+(automat\w*|program\w*)/,
+  /poupan\w*\s+(aplicac|resgate)/,
+];
+
+export function isInternalTransfer(description: string): boolean {
+  const n = (description ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  return INTERNAL_TRANSFER_PATTERNS.some((p) => p.test(n));
+}
+
 export function categorizeTransaction(
   description: string,
   type: "income" | "expense"
 ): string {
+  // Movimento interno (RDB/CDB/cofrinho/aplicação/resgate) → SEMPRE "Transferencias",
+  // antes de tudo. Resgate NUNCA pode virar "Recebimentos" (renda) nem "Outros".
+  if (isInternalTransfer(description)) return "Transferencias";
+
   // Regra 1: entradas → Recebimentos
   if (type === "income") return "Recebimentos";
 
@@ -498,7 +522,9 @@ export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
       monthKey: monthKeyFromDate(date),
       category: categorizeTransaction(rawDesc, type),
       dedupKey: makeDedupKey(date, rawDesc, amount),
-      sourceLabel: sourceLabelFromFilename(filename)
+      sourceLabel: sourceLabelFromFilename(filename),
+      // Movimento interno: real no ledger, mas neutro no score (igual ao servidor).
+      ...(isInternalTransfer(rawDesc) ? { internal: true } : {})
     });
   }
 
@@ -560,7 +586,8 @@ export function parseOFX(text: string, filename = ""): ParsedTransaction[] {
         monthKey: monthKeyFromDate(date),
         category: categorizeTransaction(description, type),
         dedupKey: makeDedupKey(date, description, amount),
-        sourceLabel: ofxSourceLabel
+        sourceLabel: ofxSourceLabel,
+        ...(isInternalTransfer(description) ? { internal: true } : {})
       });
     }
     return result;
@@ -588,7 +615,8 @@ export function parseOFX(text: string, filename = ""): ParsedTransaction[] {
       monthKey: monthKeyFromDate(date),
       category: categorizeTransaction(description, type),
       dedupKey: makeDedupKey(date, description, amount),
-      sourceLabel: ofxSourceLabel
+      sourceLabel: ofxSourceLabel,
+      ...(isInternalTransfer(description) ? { internal: true } : {})
     });
   }
 

@@ -67,7 +67,7 @@ import { buildMonthlyPlanSummary } from "@/lib/planning";
 import { buildMonthlySummary } from "@/lib/summary";
 import type { Member, PlannedItem, PlannedItemStatus, RecurringItem, Transaction, TransactionType, Workspace } from "@/lib/types";
 import { defaultCategories, demoTransactions } from "@/lib/demo";
-import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, normalizeSourceLabel, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
+import { categorizeTransaction, CATEGORIES, CATEGORY_COLORS, CATEGORY_LABELS, fileToBase64, guessCategory, isInternalTransfer, normalizeSourceLabel, parseCSV, parseOFX, sourceLabelFromFilename, type ParsedTransaction } from "@/lib/parsers";
 import { isStopDescription } from "@/lib/bank-parsers";
 import { CategoryAvatar } from "@/components/CategoryAvatar";
 import { CardHomeSummary } from "@/components/CardHomeSummary";
@@ -572,7 +572,7 @@ async function parseClientFile(file: File): Promise<ParsedWithMeta[]> {
         if (Math.abs(t.amount ?? 0) === 0) return;
         if (isStopDescription(t.description ?? "")) return;
         const type = t.type ?? (t.amount < 0 ? "expense" : "income");
-        out.push({ ...t, type, amount: Math.abs(t.amount ?? 0), category: categorizeTransaction(t.description ?? "", type), sourceLabel: csvLabel, source: inferSource(csvLabel), _id: crypto.randomUUID(), selected: true });
+        out.push({ ...t, type, amount: Math.abs(t.amount ?? 0), category: categorizeTransaction(t.description ?? "", type), sourceLabel: csvLabel, source: inferSource(csvLabel), _id: crypto.randomUUID(), selected: true, ...(isInternalTransfer(t.description ?? "") ? { internal: true } : {}) });
       });
     }
   } else if (ext === "ofx" || ext === "qfx" || mime.includes("ofx")) {
@@ -594,7 +594,7 @@ async function parseClientFile(file: File): Promise<ParsedWithMeta[]> {
       if (Math.abs(t.amount ?? 0) === 0) return;
       if (isStopDescription(t.description ?? "")) return;
       const type = t.type ?? (t.amount < 0 ? "expense" : "income");
-      out.push({ ...t, type, amount: Math.abs(t.amount ?? 0), category: categorizeTransaction(t.description ?? "", type), sourceLabel: imageLabel, source: inferSource(imageLabel), _id: crypto.randomUUID(), selected: true });
+      out.push({ ...t, type, amount: Math.abs(t.amount ?? 0), category: categorizeTransaction(t.description ?? "", type), sourceLabel: imageLabel, source: inferSource(imageLabel), _id: crypto.randomUUID(), selected: true, ...(isInternalTransfer(t.description ?? "") ? { internal: true } : {}) });
     });
   }
   return out;
@@ -1077,7 +1077,10 @@ function WorkspaceApp({
           if (d.type === "fatura") {
             settleBatchItem(id, { status: "done", kind: "fatura", cardLabel: d.cardLabel ?? "cartão", comprasCount: d.comprasCount ?? 0 }, []);
           } else {
-            const unverified = d.verification === "nao_conferido";
+            // Delta EXATAMENTE zero = as pontas bateram = conferido (espelha a rota
+            // única): não marca selo nem alimenta aviso, mesmo se vier "nao_conferido".
+            const deltaZero = d.delta != null && Math.abs(d.delta) < 0.005;
+            const unverified = d.verification === "nao_conferido" && !deltaZero;
             const recon = unverified ? { verification: "nao_conferido" as const, importId: id } : undefined;
             const rows = jobTxToRows(d.transactions ?? [], recon);
             autoDeselectDuplicates(rows);
@@ -2383,13 +2386,15 @@ function WorkspaceApp({
             const multi = accountItems.length > 1;
             const recons: ReconWarn[] = accountItems.flatMap((it, i): ReconWarn[] => {
               const label = multi ? `Extrato ${i + 1}` : undefined;
-              // Gate = delta numérico presente (mesma condição/forma da rota única).
+              // Gate = a CONFERÊNCIA falhou (não a mera presença dos números). Arquivo
+              // que reconciliou — inclusive delta zero, já normalizado pra !unverified
+              // no snapshot — não gera aviso nenhum.
+              if (!it.unverified) return [];
+              // Delta numérico presente → mostra quanto faltou; senão, "não achei o total".
               if (it.delta != null && it.readBalance != null && it.declaredBalance != null) {
                 return [{ kind: "delta" as const, label, readBRL: formatCurrency(it.readBalance), declaredBRL: formatCurrency(it.declaredBalance), deltaBRL: formatCurrency(Math.abs(it.delta)) }];
               }
-              // Só "no-total" quando não há delta nem saldo declarado pra conferir.
-              if (it.unverified) return [{ kind: "no-total" as const, label }];
-              return [];
+              return [{ kind: "no-total" as const, label }];
             });
             setImportState({
               phase: "preview",
