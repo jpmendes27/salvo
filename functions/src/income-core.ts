@@ -133,18 +133,38 @@ function isSameHolder(sender: string, userNames: string[]): boolean {
   });
 }
 
-// Tira os prefixos do banco e o lixo (CPF, datas, números) → sobra o nome do remetente.
-export function extractSenderName(description: string): string | null {
-  let s = norm(description);
-  s = s
-    .replace(/\bPIX\b|\bTED\b|\bDOC\b|\bRECEBIDA?O?\b|\bTRANSFERENCIA\b|\bDEPOSITO\b|\bPELO\b|\bDE\b/g, " ")
-    .replace(/\d/g, " ")                    // CPF, datas, valores
-    .replace(/[^A-Z\s]/g, " ")
+// Reduz um trecho a tokens de nome limpos (sem dígitos, sem lixo). null se sobrar < 2
+// tokens alfabéticos (o extrato não trouxe um nome de remetente utilizável).
+function cleanNameTokens(s: string): string | null {
+  const toks = s
+    .replace(/\d/g, " ")                    // CPF/CNPJ, datas, valores
+    .replace(/[^A-Z\s]/g, " ")              // bullets, pontos, barras, parênteses
     .replace(/\s+/g, " ")
-    .trim();
-  const toks = s.split(" ").filter((t) => t.length > 1 && !STOP.has(t) && !NOISE.has(t));
-  // Menos de 2 tokens alfabéticos → o extrato não trouxe nome de remetente.
+    .trim()
+    .split(" ")
+    .filter((t) => t.length > 1 && !STOP.has(t) && !NOISE.has(t));
   return toks.length >= 2 ? toks.join(" ") : null;
+}
+
+// Tira os prefixos do banco e o lixo → sobra só o nome do remetente.
+// Formato Nubank/afins delimitado por " - ": "[prefixo] - NOME - CPF/CNPJ - INSTITUIÇÃO".
+// O NOME é o segmento IMEDIATAMENTE ANTES do documento (CPF ou CNPJ), seja PF ou PJ —
+// isolar só ele evita que a instituição ("MERCADO PAGO IP LTDA") entre como parte do
+// nome e dilua o match do titular abaixo do limiar. Sem separadores/documento (nome
+// inline, sem CPF), varre a linha inteira como antes.
+export function extractSenderName(description: string): string | null {
+  const raw = norm(description);
+  const segments = raw.split(/\s+-\s+/).map((x) => x.trim()).filter(Boolean);
+  if (segments.length >= 2) {
+    // Documento = segmento formado só por dígitos/bullets/pontuação (CPF mascarado
+    // "•••.307.547-••" ou CNPJ "46.992.102/0001-31"). O nome vem logo antes dele.
+    const isDoc = (s: string) => /[\d*•]/.test(s) && /^[\d*•.\-\/\s]+$/.test(s);
+    const docIdx = segments.findIndex(isDoc);
+    if (docIdx >= 1) return cleanNameTokens(segments[docIdx - 1]);
+  }
+  return cleanNameTokens(
+    raw.replace(/\bPIX\b|\bTED\b|\bDOC\b|\bRECEBIDA?O?\b|\bENVIADA?O?\b|\bTRANSFERENCIA\b|\bDEPOSITO\b|\bPELO\b|\bDE\b/g, " ")
+  );
 }
 
 // ── Classificador ────────────────────────────────────────────────────────────
