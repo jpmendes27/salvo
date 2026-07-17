@@ -38,9 +38,20 @@ de lista em /transactions e /cards usam Plus Jakarta).
 a tela/resumo aparecem quando há ≥1 cartão, descobertos ao importar uma fatura).
 
 ## Arquitetura — Pipeline de importação
-Caminho **único server-side** pra todo arquivo (cliente sobe o arquivo cru; sem pdfjs no
-cliente — evita OOM em aparelho fraco). Servidor: extrai texto → adapter determinístico
-por banco quando existe → Claude em lotes só como fallback.
+Dois caminhos por formato: **PDF/imagem** → job assíncrono no servidor
+(`processImportJob`: sobe o cru, extrai texto → adapter determinístico por banco quando
+existe → Claude em lotes só como fallback; sem pdfjs no cliente, evita OOM). **CSV/OFX** →
+parser determinístico **no cliente** (`parseClientFile`/`parseCSV`/`parseOFX`) — instantâneo
+e sem custo de IA, já que é colunado/tagueado. Multi-arquivo com ≥1 PDF → lote (cada um se
+autodetecta e roteia sozinho).
+
+**Fonte da verdade ÚNICA do núcleo puro:** `src/lib/shared/` (isInternalTransfer,
+reconcileLedger, direction/seed + keyword categorizer, classifyIncome, MP_IGNORE_PATTERNS).
+Cliente importa direto; as functions (deploy isolado, não veem `../src`) recebem uma cópia
+gerada em `functions/src/shared/` via prebuild `scripts/sync-shared.mjs` — **não editar o
+mirror**. Regra: nenhuma cópia paralela dessas funções. *Ainda separado (mapeado):* o
+`parseBRCentavos` do servidor (só BR) vs cliente (BR+US+inteiro) e o adapter MP geométrico
+(servidor) vs anchor-line (cliente) — unificar muda output, exige validação própria.
 
 **Gate de reconciliação** universal e não-bypassável:
 - Extrato ancora no **saldo final declarado** no cabeçalho (contagem + cadeia de saldo).
