@@ -7,7 +7,7 @@
 // effects, the validator can import the COMPILED version and run the exact same
 // code processImportJob runs. No re-implementation, no drift.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IMPORT_CATEGORIES = exports.EXTRACTION_SECURITY_NOTE = void 0;
+exports.IMPORT_CATEGORIES = exports.EXTRACTION_SECURITY_NOTE = exports.seedLookup = exports.directionRule = exports.reconcileLedger = exports.reconcileServer = exports.isInternalTransfer = void 0;
 exports.newExtractionNonce = newExtractionNonce;
 exports.wrapDelimited = wrapDelimited;
 exports.looksLikeInjection = looksLikeInjection;
@@ -16,16 +16,11 @@ exports.extractPdfTextServer = extractPdfTextServer;
 exports.parseBRCentavosSrv = parseBRCentavosSrv;
 exports.parseBRDateSrv = parseBRDateSrv;
 exports.tryMercadoPagoGeometric = tryMercadoPagoGeometric;
-exports.reconcileServer = reconcileServer;
 exports.reconcileParsed = reconcileParsed;
-exports.reconcileLedger = reconcileLedger;
-exports.isInternalTransfer = isInternalTransfer;
 exports.classifyServer = classifyServer;
 exports.buildCategorySystemPrompt = buildCategorySystemPrompt;
 exports.buildCategoryUserMessage = buildCategoryUserMessage;
 exports.parseCategoryCodes = parseCategoryCodes;
-exports.directionRule = directionRule;
-exports.seedLookup = seedLookup;
 exports.normalizeMerchantKey = normalizeMerchantKey;
 exports.isCreditCardStatement = isCreditCardStatement;
 exports.buildFaturaSystemPrompt = buildFaturaSystemPrompt;
@@ -40,6 +35,17 @@ exports.auditByBalance = auditByBalance;
 exports.auditExtratoCompleteness = auditExtratoCompleteness;
 exports.checkFaturaCompleteness = checkFaturaCompleteness;
 const node_crypto_1 = require("node:crypto");
+// Núcleo puro compartilhado (fonte da verdade: src/lib/shared/, copiado pra
+// functions/src/shared/ pelo prebuild). Importado pra uso local + re-exportado pra
+// manter a API deste módulo (callers em index.ts seguem importando daqui).
+const internal_transfer_1 = require("./shared/internal-transfer");
+Object.defineProperty(exports, "isInternalTransfer", { enumerable: true, get: function () { return internal_transfer_1.isInternalTransfer; } });
+const reconcile_ledger_1 = require("./shared/reconcile-ledger");
+Object.defineProperty(exports, "reconcileServer", { enumerable: true, get: function () { return reconcile_ledger_1.reconcileServer; } });
+Object.defineProperty(exports, "reconcileLedger", { enumerable: true, get: function () { return reconcile_ledger_1.reconcileLedger; } });
+const categorize_direction_seed_1 = require("./shared/categorize-direction-seed");
+Object.defineProperty(exports, "directionRule", { enumerable: true, get: function () { return categorize_direction_seed_1.directionRule; } });
+Object.defineProperty(exports, "seedLookup", { enumerable: true, get: function () { return categorize_direction_seed_1.seedLookup; } });
 // ─── Prompt-injection hardening (SALVO-11) ───────────────────────────────────
 // O documento do usuário vai DIRETO pro modelo; texto malicioso embutido pode tentar
 // sequestrar a instrução. Defesa em camadas:
@@ -269,37 +275,7 @@ async function tryMercadoPagoGeometric(buffer) {
 // ─── Reconciliation gate ──────────────────────────────────────────────────────
 // Passes ONLY when it actually validated completeness (txs present, final
 // balance known, chain/sum closes at final). Anything it can't validate → ok:false.
-function reconcileServer(txs, initialBalanceCents, finalBalanceCents, toleranceCents = 2) {
-    if (txs.length === 0)
-        return { ok: false, validated: false, suspectIndices: [], reason: "nenhuma transação extraída" };
-    if (finalBalanceCents === undefined)
-        return { ok: false, validated: false, suspectIndices: [], reason: "saldo final não encontrado no documento" };
-    const hasBalance = txs.some((t) => t.balanceCents !== undefined);
-    if (!hasBalance) {
-        if (initialBalanceCents === undefined)
-            return { ok: false, validated: false, suspectIndices: [], reason: "saldo inicial não encontrado" };
-        const sumCents = txs.reduce((s, t) => s + t.signedCents, 0);
-        const ok = Math.abs(sumCents - (finalBalanceCents - initialBalanceCents)) <= toleranceCents;
-        return { ok, validated: true, suspectIndices: ok ? [] : [-1], reason: ok ? undefined : "soma dos valores não bate com os saldos" };
-    }
-    const inferredInitial = txs[0].balanceCents !== undefined ? txs[0].balanceCents - txs[0].signedCents : undefined;
-    const initial = initialBalanceCents ?? inferredInitial;
-    if (initial === undefined)
-        return { ok: false, validated: false, suspectIndices: [], reason: "saldo inicial não encontrado" };
-    let running = initial;
-    const suspectIndices = [];
-    for (let i = 0; i < txs.length; i++) {
-        running += txs[i].signedCents;
-        const bc = txs[i].balanceCents;
-        if (bc !== undefined && Math.abs(running - bc) > toleranceCents) {
-            suspectIndices.push(i);
-            running = bc;
-        }
-    }
-    const finalOk = Math.abs(running - finalBalanceCents) <= toleranceCents;
-    const ok = suspectIndices.length === 0 && finalOk;
-    return { ok, validated: true, suspectIndices, reason: ok ? undefined : "cadeia de saldo não fecha no saldo final" };
-}
+// reconcileServer → src/lib/shared/reconcile-ledger.ts (importado/re-exportado no topo).
 function reconcileParsed(parsed) {
     const txs = (parsed.transactions ?? []).map((t) => ({
         signedCents: Math.round((t.type === "income" ? t.amount : -t.amount) * 100),
@@ -307,74 +283,18 @@ function reconcileParsed(parsed) {
     }));
     const initC = parsed.initialBalance != null ? Math.round(parsed.initialBalance * 100) : undefined;
     const finC = parsed.finalBalance != null ? Math.round(parsed.finalBalance * 100) : undefined;
-    return reconcileServer(txs, initC, finC);
+    return (0, reconcile_ledger_1.reconcileServer)(txs, initC, finC);
 }
-function reconcileLedger(txs, checkpoints, initialBalanceCents, finalBalanceCents) {
-    const EXACT = 0; // checkpoint sums are computed — devem bater ao centavo
-    const readTotal = txs.reduce((s, t) => s + t.signedCents, 0);
-    const readBalanceCents = initialBalanceCents !== undefined ? initialBalanceCents + readTotal : undefined;
-    const declaredBalanceCents = finalBalanceCents !== undefined
-        ? finalBalanceCents
-        : checkpoints.length
-            ? [...checkpoints].sort((a, b) => a.date.localeCompare(b.date))[checkpoints.length - 1].balanceCents
-            : undefined;
-    const deltaCents = declaredBalanceCents !== undefined && readBalanceCents !== undefined
-        ? declaredBalanceCents - readBalanceCents
-        : undefined;
-    const base = { readBalanceCents, declaredBalanceCents, deltaCents };
-    // 1 — LINE chain (MP). Reuse the strict per-line reconciler (unchanged).
-    const withBalance = txs.filter((t) => t.balanceCents !== undefined).length;
-    if (txs.length > 0 && withBalance >= Math.ceil(txs.length * 0.8)) {
-        const r = reconcileServer(txs.map((t) => ({ signedCents: t.signedCents, balanceCents: t.balanceCents })), initialBalanceCents, finalBalanceCents);
-        if (r.ok)
-            return { mode: "line", ok: true, ...base };
-    }
-    // 2 — DAY chain. Walk checkpoints chronologically; running balance after each
-    // day's transactions must equal that day's declared balance.
-    if (checkpoints.length > 0) {
-        const cps = [...checkpoints].sort((a, b) => a.date.localeCompare(b.date));
-        const sortedTx = [...txs].sort((a, b) => a.date.localeCompare(b.date));
-        let start = initialBalanceCents;
-        if (start === undefined) {
-            // No header anchor: infer the opening from the first checkpoint minus its
-            // day's transactions (the first checkpoint then sets the baseline).
-            const firstDaySum = sortedTx.filter((t) => t.date <= cps[0].date).reduce((s, t) => s + t.signedCents, 0);
-            start = cps[0].balanceCents - firstDaySum;
-        }
-        let running = start;
-        let ti = 0;
-        let dayOk = true;
-        for (const cp of cps) {
-            while (ti < sortedTx.length && sortedTx[ti].date <= cp.date) {
-                running += sortedTx[ti].signedCents;
-                ti++;
-            }
-            if (Math.abs(running - cp.balanceCents) > EXACT) {
-                dayOk = false;
-                break;
-            }
-        }
-        if (dayOk) {
-            while (ti < sortedTx.length) {
-                running += sortedTx[ti].signedCents;
-                ti++;
-            }
-            const finalOk = finalBalanceCents === undefined || Math.abs(running - finalBalanceCents) <= EXACT;
-            if (finalOk)
-                return { mode: "day", ok: true, ...base };
-        }
-    }
-    // 3 — TOTALS: as pontas batem EXATAMENTE. Compara o saldo declarado (final do
-    // cabeçalho, ou o último checkpoint quando não há cabeçalho) com o saldo lido
-    // (inicial + Σ). Delta zero = a conta fecha de ponta a ponta = conferido — mesmo
-    // que um checkpoint de dia intermediário não tenha encadeado (linha com data
-    // trocada, dia partido). A cadeia por dia acima é o passe mais rígido; este é o
-    // piso honesto. Delta zero NUNCA é falha (senão vira "faltou R$ 0,00").
-    if (deltaCents !== undefined && Math.abs(deltaCents) <= EXACT) {
-        return { mode: "totals", ok: true, ...base };
-    }
-    return { mode: "none", ok: false, ...base };
-}
+// ─── Reconciliation CASCADE (by checkpoint granularity) ───────────────────────
+// Reconcile against whatever granularity the document itself declares, in
+// integer cents. Passes if ANY applicable granularity closes:
+//   1. line   — balance on (almost) every tx line (Mercado Pago). Strict.
+//   2. day    — balance only on day checkpoints (e.g. Itaú "SALDO DO DIA").
+//   3. totals — balance only in the header (initial + Σ = final).
+// "none" only when nothing applicable closes (or there's no balance to anchor).
+// Never blocks — the caller decides verificado vs nao_conferido from `ok`.
+// LedgerVerification + reconcileLedger → src/lib/shared/reconcile-ledger.ts
+// (importado/re-exportado no topo). Cascata linha/dia/totais, delta-zero = conferido.
 // ─── Server-side classification ───────────────────────────────────────────────
 // KEEP IN SYNC with src/lib/import/classify.ts
 const MP_IGNORE_PATTERNS = [
@@ -383,35 +303,14 @@ const MP_IGNORE_PATTERNS = [
     /^reembolso\b/i,
     /^estorno\b/i,
 ];
-// Internal investment moves — aplicação/resgate de cofrinho/CDB/RDB/poupança/
-// tesouro. São TRANSAÇÕES REAIS (mexem no saldo, entram no ledger e na
-// reconciliação), mas NEUTRAS no diagnóstico (dinheiro do próprio dono mudando
-// de bolso — nem gasto nem receita). NÃO confundir com PIX/transferência a
-// terceiro (essas continuam entrada/saída normal).
-// Bank-agnostic por CONCEITO (não por banco): reserva/poupança do próprio dono mudando
-// de bolso. Cobre as features nomeadas (Cofrinho/PicPay, Caixinha/Nubank, "Dinheiro
-// reservado/retirado"/MP) + aplicação/resgate de investimento/reserva de qualquer banco.
-const INTERNAL_TRANSFER_PATTERNS = [
-    /cofrinho/,
-    /caixinha/,
-    /dinheiro\s+(reservado|retirado)/,
-    /\bcdb\b/,
-    /\brdb\b/,
-    /(aplicac\w*|resgate)\s*(de\s+)?(cofrinho|caixinha|cdb|rdb|poupan|tesouro|investiment|fundo|reserva)/,
-    /(aplicac\w*|resgate)\s+(automat\w*|program\w*)/,
-    /poupan\w*\s+(aplicac|resgate)/,
-];
-function isInternalTransfer(description) {
-    const n = description.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
-    return INTERNAL_TRANSFER_PATTERNS.some((p) => p.test(n));
-}
+// isInternalTransfer → src/lib/shared/internal-transfer.ts (importado/re-exportado no topo).
 function classifyServer(description, signedCents, bankSlug, claudeClassification) {
     if (signedCents === 0)
         return "IGNORAR";
     const norm = description.normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
     // Investment moves are REAL transactions — never dropped from the ledger.
     // Direction comes from the sign; neutrality in the score is a separate flag.
-    if (isInternalTransfer(norm))
+    if ((0, internal_transfer_1.isInternalTransfer)(norm))
         return signedCents > 0 ? "ENTRADA" : "SAIDA";
     if (bankSlug === "mercado-pago" && MP_IGNORE_PATTERNS.some((p) => p.test(norm))) {
         return "IGNORAR";
@@ -476,56 +375,15 @@ function parseCategoryCodes(rawText, count) {
     return out;
 }
 // ─── Deterministic-first categorization (free layers before Claude) ──────────
-function normDesc(d) {
-    return d.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
-// Layer 1 — direction rule (free): the transaction TYPE decides the category,
-// regardless of the counterparty's name. Person-to-person Pix is resolved here,
-// so it never hits the merchant cache.
-function directionRule(description) {
-    const n = normDesc(description);
-    if (/\brendimento/.test(n))
-        return "Recebimentos";
-    if (/pix\s+recebido|transferencia\s+recebida|dep[oó]sito\s+recebido|ted\s+recebid|doc\s+recebid|sal[aá]rio/.test(n))
-        return "Recebimentos";
-    if (/pix\s+enviado|transferencia\s+enviada|ted\s+enviad|doc\s+enviad/.test(n))
-        return "Transferencias";
-    return null;
-}
-// Layer 2 — hardcoded BR merchant seed (free): substring match over the
-// normalized description. Covers the common merchants so the first import of a
-// new user already resolves most rows without Claude.
-const MERCHANT_SEED = [
-    [/\bifood\b|\brappi\b|\baiqfome\b|\buber\s?eats\b|\bjames delivery\b/, "Alimentacao"],
-    [/\bmc\s?donalds?\b|\bburger king\b|\bbk\b|\bsubway\b|\bhabib|\bbobs\b|\boutback\b|\bspoleto\b|\bgiraffas\b|\bkfc\b|\bpizza hut\b|\bdivino fogao\b|\bmadero\b/, "Alimentacao"],
-    [/\bstarbucks\b|\bcacau show\b|\bkopenhagen\b|\bsorveteria\b|\bpadaria\b|\bconfeitaria\b|\bcafeteria\b|\bcafe\b|\bacai\b/, "Alimentacao"],
-    [/\batacadao\b|\bassai\b|\bcarrefour\b|\bpao de acucar\b|\bwalmart\b|\bmakro\b|\bsam.?s club\b|\btenda atacado\b|\bbig bompreco\b|\bsupermercado\b|\bhortifruti\b|\bmercado\b|\bmercearia\b|\bsacolao\b/, "Mercado"],
-    [/\bdia\b|\bextra\b|\bguanabara\b|\bprezunic\b|\bzona sul\b|\bmundial\b|\bsonda\b|\bcondor\b|\bmuffato\b|\bangeloni\b/, "Mercado"],
-    [/\btim\b|\bvivo\b|\bclaro\b|\boi\b|\bnextel\b/, "Contas"],
-    [/\benel\b|\bcpfl\b|\bcemig\b|\bcoelba\b|\blight\b|\bsabesp\b|\bcomgas\b|\bcedae\b|\bcopasa\b|\bsaneago\b|\benergisa\b|\bequatorial\b|\bneoenergia\b/, "Contas"],
-    [/\bshell\b|\bipiranga\b|\bpetrobras\b|\bbr distribuidora\b|\bauto posto\b|\bposto\b|\bcombustivel\b|\bgasolina\b|\bsem parar\b|\bveloe\b|\bconectcar\b|\bpedagio\b|\bestacionamento\b/, "Carro"],
-    [/\buber\b|\b99\s?(pop|taxi)?\b|\bcabify\b|\btaxi\b|\bmetro\b|\bonibus\b|\bbilhete unico\b|\bbom\b/, "Transporte"],
-    [/\bnetflix\b|\bspotify\b|\bdisney\b|\bhbo\b|\bmax\b|\bamazon prime\b|\byoutube premium\b|\bdeezer\b|\bgloboplay\b|\bparamount\b|\bapple\.?com\b|\bgoogle\b|\bchatgpt\b|\bopenai\b|\badobe\b|\bcanva\b/, "Assinaturas"],
-    [/\bgympass\b|\bwellhub\b|\btotalpass\b|\bsmart\s?fit\b|\bacademia\b|\bcinema\b|\bcinemark\b|\bsympla\b|\beventim\b|\bingresso\b/, "Lazer"],
-    [/\bamazon\b|\bmercado livre\b|\bmercadolivre\b|\bmercado pago\b|\bshopee\b|\baliexpress\b|\bshein\b|\bmagazine luiza\b|\bmagalu\b|\bcasas bahia\b|\bamericanas\b|\brenner\b|\briachuelo\b|\bcentauro\b|\bnetshoes\b|\bleroy\b|\bkalunga\b/, "Varejo"],
-    [/\bdrogaria\b|\bdroga raia\b|\bdrogasil\b|\bpacheco\b|\bpague menos\b|\bfarmacia\b|\bultrafarma\b|\bpanvel\b|\bhospital\b|\bclinica\b|\blaboratorio\b|\bunimed\b|\bhapvida\b|\bamil\b/, "Saude"],
-    [/\biof\b|\btarifa\b|\banuidade\b|\bjuros\b|\bmulta\b|\bencargo\b/, "Taxas"],
-    [/\baluguel\b|\bcondominio\b|\biptu\b|\bimobiliaria\b/, "Moradia"],
-];
-function seedLookup(description) {
-    const n = normDesc(description);
-    for (const [re, cat] of MERCHANT_SEED)
-        if (re.test(n))
-            return cat;
-    return null;
-}
+// normDesc + directionRule + MERCHANT_SEED + seedLookup →
+// src/lib/shared/categorize-direction-seed.ts (importado/re-exportado no topo).
 // Cache key — the normalized merchant "core". Strips transaction-type prefixes,
 // corporate suffixes, domains, IDs/CNPJ and digits, then keeps the first few
 // significant words. "Pagamento com QR Pix IFOOD.COM AGENCIA 123456" and
 // "IFOOD.COM 789" both reduce to "ifood". Returns "" when nothing meaningful
 // remains (e.g. a bare number) — caller skips caching those.
 function normalizeMerchantKey(description) {
-    let s = " " + normDesc(description) + " ";
+    let s = " " + (0, categorize_direction_seed_1.normDesc)(description) + " ";
     s = s.replace(/\b(pagamento com qr pix|pagamento com pix|compra no debito|compra no credito|compra com cartao|pagamento de boleto|pagamento|compra|pix|transferencia|ted|doc|qr|debito|credito|recarga de celular|recarga|saque|deposito)\b/g, " ");
     s = s.replace(/\b(ltda|me|eireli|s\/?a|epp|mei|comercio|servicos|tecnologia|industria)\b/g, " ");
     s = s.replace(/\.com(\.br)?|www\.?/g, " ");

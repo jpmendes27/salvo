@@ -2,6 +2,7 @@
   "name": "fincheck-pro-functions",
   "private": true,
   "scripts": {
+    "prebuild": "node ../scripts/sync-shared.mjs",
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions"
