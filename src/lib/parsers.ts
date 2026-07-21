@@ -178,14 +178,38 @@ export function sourceLabelFromFilename(filename: string): string {
   return normalizeSourceLabel(base) || "Importação";
 }
 
+// Split de uma linha CSV que RESPEITA aspas (RFC 4180). Sem isso, um campo citado
+// que contém o próprio delimitador — ex.: o Valor BR `"R$ 17.995,78"` num arquivo
+// separado por vírgula — é partido no meio ("R$ 17.995" | "78"), e o valor chega
+// mutilado no parseBRNumber (17.995 em vez de 17995,78). Aspas duplas escapadas ("")
+// viram uma aspa literal. Preserva sinal e NBSP dentro do campo.
+function splitCsvLine(line: string, delimiter: string): string[] {
+  const out: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { field += '"'; i++; } // "" escapado
+      else inQuotes = !inQuotes;
+    } else if (ch === delimiter && !inQuotes) {
+      out.push(field);
+      field = "";
+    } else {
+      field += ch;
+    }
+  }
+  out.push(field);
+  // trim + tira aspas simples residuais (as duplas já foram consumidas pelo parser).
+  return out.map((c) => c.trim().replace(/^'|'$/g, ""));
+}
+
 export function parseCSV(text: string, filename = ""): ParsedTransaction[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return [];
 
   const delimiter = lines[0].includes(";") ? ";" : ",";
-  const rows = lines.map((l) =>
-    l.split(delimiter).map((c) => c.trim().replace(/^["']|["']$/g, ""))
-  );
+  const rows = lines.map((l) => splitCsvLine(l, delimiter));
 
   const norm = (s: string) =>
     s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
