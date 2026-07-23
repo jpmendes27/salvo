@@ -1436,19 +1436,43 @@ function WorkspaceApp({
   const mobNet = mobTotalEntradas - mobTotalGasto;
   const mobTopCat = mobByCategory[0] ?? null;
   const mobExpenseChange = mobPrevExpense > 0 && summary.expense > 0 ? Math.round(((summary.expense - mobPrevExpense) / mobPrevExpense) * 100) : null;
-  const mobNarrativa = (mobScore ?? 0) >= 8
+  // COERÊNCIA: narrativa e bullets saem do MESMO snapshot do veredito (srvDiag no real,
+  // cli no demo) — nunca live-transactions ao lado de um veredito stale. Sem dado suficiente
+  // (score null) → mensagem honesta, sem número e sem elogio. percentual já guardado contra /0.
+  const mobHasData = mobScore !== null;
+  const mobTop = !mobHasData ? null : srvOk
+    ? srvDiag!.summary.topCat
+    : (mobTopCat ? { nome: mobTopCat[0], valor: mobTopCat[1], percentual: mobTotalGasto > 0 ? Math.round((mobTopCat[1] / mobTotalGasto) * 100) : 0 } : null);
+  const mobChange = !mobHasData ? null : srvOk ? srvDiag!.summary.expenseChange : mobExpenseChange;
+  const mobNarrativa = !mobHasData
+    ? "Ainda não consigo fechar um diagnóstico deste mês."
+    : (mobScore ?? 0) >= 8
     ? `Fechou o mês no positivo em ${formatCurrency(mobNet)}. Só ${mobComprometimento}% da renda foi embora — isso é disciplina de verdade.`
     : (mobScore ?? 0) >= 6
     ? `Mês fechou ${mobNet >= 0 ? "positivo" : "no vermelho"} em ${formatCurrency(Math.abs(mobNet))}, mas ${mobComprometimento}% da renda já era. Dá pra apertar mais.`
     : `${mobComprometimento}% da renda foi embora esse mês. Sobrou ${formatCurrency(Math.abs(mobNet))}${mobNet < 0 ? " no negativo" : ""} — isso precisa mudar.`;
-  const mobBullet1 = mobTopCat ? `${mobTopCat[0]} engoliu ${formatCurrency(mobTopCat[1])} — ${Math.round((mobTopCat[1] / mobTotalGasto) * 100)}% de tudo que saiu` : null;
-  const mobBullet2 = mobExpenseChange !== null
-    ? mobExpenseChange > 100
-      ? `Gastos explodiram ${Math.abs(mobExpenseChange)}% vs mês passado — o que mudou?`
-      : mobExpenseChange > 0
-      ? `Gastos ${Math.abs(mobExpenseChange)}% maiores que o mês passado`
-      : `Você cortou ${Math.abs(mobExpenseChange)}% dos gastos vs mês passado — continua assim`
+  const mobBullet1 = mobTop ? `${mobTop.nome} engoliu ${formatCurrency(mobTop.valor)} — ${mobTop.percentual}% de tudo que saiu` : null;
+  const mobBullet2 = mobChange !== null
+    ? mobChange > 100
+      ? `Gastos explodiram ${Math.abs(mobChange)}% vs mês passado — o que mudou?`
+      : mobChange > 0
+      ? `Gastos ${Math.abs(mobChange)}% maiores que o mês passado`
+      : `Você cortou ${Math.abs(mobChange)}% dos gastos vs mês passado — continua assim`
     : null;
+
+  // Carimbo do CONJUNTO de transações do mês: muda em import (add), deleção (remove) e
+  // edição (updatedAt). Memoizado sobre a referência de `transactions` → estável entre
+  // renders (não recalcula toda render), então não gera loop de re-fetch. É o gatilho que
+  // faltava: o fetch do diagnóstico não dependia das transações e ficava stale.
+  const txSignature = useMemo(() => {
+    let maxMs = 0;
+    for (const t of visibleTx) {
+      const ts = t as unknown as { updatedAt?: { toMillis?: () => number }; createdAt?: { toMillis?: () => number } };
+      const ms = ts.updatedAt?.toMillis?.() ?? ts.createdAt?.toMillis?.() ?? 0;
+      if (ms > maxMs) maxMs = ms;
+    }
+    return `${visibleTx.length}:${maxMs}`;
+  }, [visibleTx]);
 
   // Um único fetch: o servidor calcula os agregados (renda derivada) E o diagnóstico.
   // Cache carimbado vive no servidor — sem localStorage, sem cálculo no browser.
@@ -1472,7 +1496,7 @@ function WorkspaceApp({
       })
       .finally(() => { if (!cancelled) setSharedDiagLoading(false); });
     return () => { cancelled = true; };
-  }, [monthKey, workspace.id, showDemo]);
+  }, [monthKey, workspace.id, showDemo, txSignature]);
 
   const D = {
     shell: {
@@ -2079,8 +2103,8 @@ function WorkspaceApp({
                   } : null
                 },
                 {
-                  label: "Média de gastos/dia", value: formatCurrency(mobMediaDia), color: "rgba(255,255,255,0.75)",
-                  badge: null, plain: `${mobExpenses.length} transações`
+                  label: "Média de gastos/dia", value: mobHasData ? formatCurrency(mobMediaDia) : "—", color: "rgba(255,255,255,0.75)",
+                  badge: null, plain: mobHasData ? `${mobExpenses.length} transações` : undefined
                 }
               ];
               return cells.map(({ label, value, color, badge, plain }) => (
@@ -2129,7 +2153,7 @@ function WorkspaceApp({
                     )}
                     {(sharedAiDiag?.bullet2 ?? mobBullet2) && (
                       <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: `rgba(${mobScoreRgb},0.55)`, transition: "opacity .4s", opacity: sharedDiagLoading ? 0.5 : 1 }}>
-                        <span style={{ flexShrink: 0, marginTop: 1 }}>{mobExpenseChange !== null && mobExpenseChange < 0 ? "↘" : "↗"}</span>{sharedAiDiag?.bullet2 ?? mobBullet2}
+                        <span style={{ flexShrink: 0, marginTop: 1 }}>{mobChange !== null && mobChange < 0 ? "↘" : "↗"}</span>{sharedAiDiag?.bullet2 ?? mobBullet2}
                       </div>
                     )}
                   </div>
@@ -2204,7 +2228,7 @@ function WorkspaceApp({
             <div style={{ display: "grid", gap: 10 }}>
               {mobByCategory.slice(0, 3).map(([cat, total]) => {
                 const color = (CATEGORY_COLORS as Record<string, string>)[cat] ?? "#888";
-                const pct = Math.round((total / mobTotalGasto) * 100);
+                const pct = mobTotalGasto > 0 ? Math.round((total / mobTotalGasto) * 100) : 0;
                 return (
                   <div key={cat} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <CategoryAvatar categoria={cat} size={28} radius={8} />
@@ -3277,8 +3301,9 @@ function InsightsView({
   }, [transactions]);
 
   const maxCategory = byCategory[0]?.[1] ?? 1;
-  const expenseChange = prevTotalGasto > 0 ? Math.round(((totalGasto - prevTotalGasto) / prevTotalGasto) * 100) : null;
-  const topCat = byCategory[0] ?? null;
+  // COERÊNCIA: variação vem do MESMO snapshot do veredito (srvDiag), não do cálculo local
+  // (que dividia gasto do srvDiag por prev das live transactions e podia divergir/dar 0).
+  const expenseChange = srvDiag ? srvDiag.summary.expenseChange : null;
   const net = totalEntradas - totalGasto;
 
   if (!expenses.length) {
@@ -3292,13 +3317,20 @@ function InsightsView({
   const INS_LABEL: CSSProperties = { fontSize: 11, color: "rgba(255,255,255,0.32)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10, fontWeight: 700 };
   const scoreRgb = scoreColor === G ? "184,245,90" : scoreColor === "#facc15" ? "250,204,21" : "255,128,128";
 
-  const narrativa = (score ?? 0) >= 8
+  // COERÊNCIA: veredito, narrativa, bullets e métricas vêm do MESMO snapshot (srvDiag).
+  // Sem dado suficiente (score null) → mensagem honesta, sem número e sem julgamento/elogio.
+  const hasData = score !== null;
+  const narrativa = !hasData
+    ? "Ainda não consigo fechar um diagnóstico deste mês."
+    : (score ?? 0) >= 8
     ? `Fechou o mês no positivo em ${formatCurrency(net)}. Só ${comprometimento}% da renda foi embora — isso é disciplina de verdade.`
     : (score ?? 0) >= 6
     ? `Mês fechou ${net >= 0 ? "positivo" : "no vermelho"} em ${formatCurrency(Math.abs(net))}, mas ${comprometimento}% da renda já era. Dá pra apertar mais.`
     : `${comprometimento}% da renda foi embora esse mês. Sobrou ${formatCurrency(Math.abs(net))}${net < 0 ? " no negativo" : ""} — isso precisa mudar.`;
-  const bullet1 = topCat ? `${topCat[0]} engoliu ${formatCurrency(topCat[1])} — ${Math.round((topCat[1] / totalGasto) * 100)}% de tudo que saiu` : null;
-  const bullet2 = expenseChange !== null
+  // topCat do servidor (mesmo snapshot); percentual já vem guardado contra /0.
+  const sTop = hasData ? (srvDiag?.summary.topCat ?? null) : null;
+  const bullet1 = sTop ? `${sTop.nome} engoliu ${formatCurrency(sTop.valor)} — ${sTop.percentual}% de tudo que saiu` : null;
+  const bullet2 = hasData && expenseChange !== null
     ? expenseChange > 100
       ? `Gastos explodiram ${Math.abs(expenseChange)}% vs mês passado — o que mudou?`
       : expenseChange > 0
@@ -3347,9 +3379,9 @@ function InsightsView({
       <div className="ins-metrics">
         {([
           { label: "Gastos no mês anterior", value: prevTotalGasto > 0 ? formatCurrency(prevTotalGasto) : "—", accent: false },
-          { label: "Transações", value: String(expenses.length), accent: false },
-          { label: "Média de gastos/dia", value: formatCurrency(mediaGastoPorDia), accent: false },
-          { label: "% do que entrou, gasto", value: `${comprometimento}%`, accent: comprometimento > 75 }
+          { label: "Transações", value: hasData ? String(expenses.length) : "—", accent: false },
+          { label: "Média de gastos/dia", value: hasData ? formatCurrency(mediaGastoPorDia) : "—", accent: false },
+          { label: "% do que entrou, gasto", value: hasData ? `${comprometimento}%` : "—", accent: hasData && comprometimento > 75 }
         ] as { label: string; value: string; accent: boolean }[]).map(({ label, value, accent }) => (
           <div key={label} className={`ins-card${accent ? " ins-card-accent" : ""}`}>
             <p style={INS_LABEL}>{label}</p>
