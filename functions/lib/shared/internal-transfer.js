@@ -22,6 +22,10 @@ exports.INTERNAL_TRANSFER_PATTERNS = [
     /(aplicac\w*|resgate)\s*(de\s+)?(cofrinho|caixinha|cdb|rdb|poupan|tesouro|investiment|fundo|reserva)/,
     /(aplicac\w*|resgate)\s+(automat\w*|program\w*)/,
     /poupan\w*\s+(aplicac|resgate)/,
+    // Noh: guardar/tirar do "pote" dentro da própria conta (movimento interno, igual
+    // aplicação/resgate do Nubank). Conservador: exige "saldo" + o verbo de movimento
+    // (adicionado/movido/retirado). NÃO casa "saldo devedor/disponivel/anterior/final".
+    /\bsaldo\s+(adicionad|movid|retirad)\w*/,
 ];
 function isInternalTransfer(description) {
     const n = (description ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
